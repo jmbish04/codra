@@ -33,7 +33,7 @@ export async function getStats(env: Pick<AppBindings, 'NEON_DATABASE_URL'>) {
         ORDER BY day ASC
       `,
     ),
-    queryRows<{ verdict: 'approve' | 'comment' | 'request_changes' | null; count: number }>(
+    queryRows<{ verdict: 'approve' | 'comment' | null; count: number }>(
       env,
       `
         SELECT verdict, COUNT(*)::int AS count

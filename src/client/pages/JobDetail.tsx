@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api } from '@client/lib/api';
 import { StatusBadge } from '@client/components/StatusBadge';
@@ -358,7 +359,9 @@ export function JobDetailPage() {
         <Card>
           <CardHeader><CardTitle>Summary</CardTitle></CardHeader>
           <CardContent className="pt-0">
-            <pre className="code-block whitespace-pre-wrap font-sans text-sm leading-relaxed">{job.summaryMarkdown}</pre>
+            <div className="prose max-w-none">
+              <ReactMarkdown>{job.summaryMarkdown}</ReactMarkdown>
+            </div>
           </CardContent>
         </Card>
       )}

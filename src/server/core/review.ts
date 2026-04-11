@@ -29,33 +29,18 @@ function formatInlineComment(comment: ParsedReviewComment) {
   return `${severityIcon(comment.severity)} [${comment.category.toUpperCase()}] ${comment.title}\n\n${comment.body}`;
 }
 
-function toReviewEvent(verdict: 'approve' | 'comment' | 'request_changes') {
-  switch (verdict) {
-    case 'approve':
-      return 'APPROVE' as const;
-    case 'request_changes':
-      return 'REQUEST_CHANGES' as const;
-    default:
-      return 'COMMENT' as const;
-  }
+function toReviewEvent(verdict: 'approve' | 'comment') {
+  return verdict === 'approve' ? 'APPROVE' as const : 'COMMENT' as const;
 }
 
 function summarizeVerdict(comments: ParsedReviewComment[], hasFailures: boolean) {
   const errors = comments.filter((comment) => comment.severity === 'error').length;
   const warnings = comments.filter((comment) => comment.severity === 'warning').length;
 
-  if (errors > 0) {
-    return { verdict: 'request_changes' as const, errors, warnings };
-  }
-  
-  if (hasFailures) {
+  if (errors > 0 || hasFailures || warnings > 0) {
     return { verdict: 'comment' as const, errors, warnings };
   }
 
-  if (warnings > 0) {
-    return { verdict: 'comment' as const, errors, warnings };
-  }
-  
   return { verdict: 'approve' as const, errors, warnings };
 }
 
@@ -334,9 +319,6 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
       userPrompt: buildSummaryPrompt({
         prTitle: pr.title,
         verdict: verdictSummary.verdict,
-        errorCount: verdictSummary.errors,
-        warningCount: verdictSummary.warnings,
-        totalComments: reviewedComments.length,
         fileSummaries,
       }),
     });
@@ -358,9 +340,8 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
     if (config.review.labels !== false) {
       const labels = config.review.labels;
       const labelMap = {
-        request_changes: { name: labels.p1, color: 'b42318' },
-        comment: { name: labels.p2, color: 'f79009' },
-        approve: { name: labels.p3, color: '027a48' },
+        comment: { name: labels.p1, color: 'f79009' },
+        approve: { name: labels.p2, color: '027a48' },
       } as const;
       const label = labelMap[verdictSummary.verdict];
 
@@ -378,18 +359,8 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
 
     await github.updateCheckRun(job.owner, job.repo, checkRunId, {
       status: 'completed',
-      conclusion:
-        verdictSummary.verdict === 'request_changes'
-          ? 'failure'
-          : verdictSummary.verdict === 'comment'
-            ? 'neutral'
-            : 'success',
-      title:
-        verdictSummary.verdict === 'request_changes'
-          ? 'Changes requested'
-          : verdictSummary.verdict === 'comment'
-            ? 'Comments posted'
-            : 'LGTM',
+      conclusion: verdictSummary.verdict === 'approve' ? 'success' : 'neutral',
+      title: verdictSummary.verdict === 'approve' ? 'LGTM' : 'Comments posted',
       summary: `${reviewedComments.length} inline comments across ${files.length} files.`,
     });
 

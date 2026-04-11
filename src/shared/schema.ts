@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const reviewTriggers = ['auto', 'mention', 'retry'] as const;
 export const jobStatuses = ['queued', 'running', 'done', 'failed', 'superseded'] as const;
 export const fileStatuses = ['pending', 'done', 'skipped', 'failed'] as const;
-export const reviewVerdicts = ['approve', 'comment', 'request_changes'] as const;
+export const reviewVerdicts = ['approve', 'comment'] as const;
 export const reviewSeverities = ['error', 'warning', 'suggestion', 'nitpick'] as const;
 export const reviewCategories = ['security', 'bugs', 'performance', 'correctness', 'quality'] as const;
 
@@ -42,7 +42,7 @@ export const fileReviewModelOutputSchema = z.object({
       code_suggestion: z.string().min(1).optional(),
     }),
   ),
-  file_verdict: z.enum(reviewVerdicts).default('approve'),
+  file_verdict: z.enum(reviewVerdicts).catch('comment').default('approve'),
   file_summary: z.string().default('No summary provided.'),
 });
 
@@ -75,8 +75,8 @@ export const reviewConfigSchema = z.object({
   focus: z.array(z.enum(reviewCategories)).default([...reviewCategories]),
   custom_rules: z.array(z.string().min(1)).default([]),
   labels: labelsSchema.default({
-    p1: 'review: changes-requested',
-    p2: 'review: needs-attention',
+    p1: 'review: needs-attention',
+    p2: 'review: approved',
     p3: 'review: approved',
   }),
   exec: z
@@ -105,8 +105,8 @@ export const repoConfigSchema = z.object({
     focus: [...reviewCategories],
     custom_rules: [],
     labels: {
-      p1: 'review: changes-requested',
-      p2: 'review: needs-attention',
+      p1: 'review: needs-attention',
+      p2: 'review: approved',
       p3: 'review: approved',
     },
     exec: {

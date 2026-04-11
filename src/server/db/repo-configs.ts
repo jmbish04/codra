@@ -10,7 +10,7 @@ type RepoConfigRow = {
   config_missing: boolean;
   updated_at: string;
   last_job_created_at: string | null;
-  last_job_verdict: 'approve' | 'comment' | 'request_changes' | null;
+  last_job_verdict: 'approve' | 'comment' | null;
 };
 
 function mapRepo(row: RepoConfigRow) {

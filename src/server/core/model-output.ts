@@ -9,7 +9,23 @@ function extractJson(raw: string) {
     return fenced[1].trim();
   }
 
+  // Support both array ([...]) and object ({...}) roots
+  const firstBracket = raw.indexOf('[');
   const firstBrace = raw.indexOf('{');
+
+  // Pick whichever root token appears first (ignoring absent ones)
+  const useArray =
+    firstBracket !== -1 &&
+    (firstBrace === -1 || firstBracket < firstBrace);
+
+  if (useArray) {
+    const lastBracket = raw.lastIndexOf(']');
+    if (lastBracket > firstBracket) {
+      return raw.slice(firstBracket, lastBracket + 1);
+    }
+    return raw.slice(firstBracket).trim();
+  }
+
   if (firstBrace === -1) {
     return raw.trim();
   }
@@ -43,7 +59,7 @@ function withSuggestion(body: string, codeSuggestion?: string) {
 
 export function parseFileReviewResponse(raw: string, file: FileDiff): {
   comments: ParsedReviewComment[];
-  verdict: 'approve' | 'comment' | 'request_changes';
+  verdict: 'approve' | 'comment';
   fileSummary: string;
 } {
   const extracted = extractJson(raw);

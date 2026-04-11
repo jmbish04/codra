@@ -16,7 +16,7 @@ export async function insertFileReview(
     inputTokens: number | null;
     outputTokens: number | null;
     durationMs: number | null;
-    verdict: 'approve' | 'comment' | 'request_changes' | null;
+    verdict: 'approve' | 'comment' | null;
     fileSummary: string | null;
     errorMessage: string | null;
   },
@@ -96,7 +96,7 @@ export async function getFileReviewsForJob(env: Pick<AppBindings, 'NEON_DATABASE
     input_tokens: number | null;
     output_tokens: number | null;
     duration_ms: number | null;
-    verdict: 'approve' | 'comment' | 'request_changes' | null;
+    verdict: 'approve' | 'comment' | null;
     file_summary: string | null;
     error_msg: string | null;
   }>(

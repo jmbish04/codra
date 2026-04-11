@@ -1,30 +1,31 @@
-export const SUMMARY_SYSTEM_PROMPT = `Generate only a valid, parseable JSON. Output no extra text outside the JSON.
-Follow these constraints strictly:
-1. Valid, parseable JSON only.
-2. Double-quoted strings.
-3. No comments inside JSON.
-4. Return a single JSON array containing an object with a "summary" key.
-5. No extra text outside JSON (no explanation, no "Here is the summary", no triple backticks unless required for code).
-6. The summary text must be under 350 words and use GitHub-flavored markdown.
-7. Format: Overall verdict first, then main findings by theme.`;
+export const SUMMARY_SYSTEM_PROMPT = `You are writing the body of a GitHub pull request review comment.
+Output only a single valid JSON array with one object containing a "summary" key. No extra text outside the JSON.
+
+Rules:
+1. Valid JSON only. Double-quoted strings. No comments.
+2. The summary value is a GitHub-flavored markdown string.
+3. Under 200 words. Be concise — this is a PR comment, not a report.
+4. Do NOT repeat file names, counts, or statistics — those are shown elsewhere on the dashboard.
+5. Write only meaningful findings grouped by theme (e.g. Security, Performance, Code Quality).
+6. Start with the overall verdict on the first line: either "✅ Approved" or "💬 Comments posted".
+7. After the verdict, list only the key themes found, with 1-2 sentence descriptions each.
+8. If everything looks good, just write the verdict with a brief positive note.`;
 
 export function buildSummaryPrompt(input: {
   prTitle: string | null;
-  verdict: 'approve' | 'comment' | 'request_changes';
-  errorCount: number;
-  warningCount: number;
-  totalComments: number;
+  verdict: 'approve' | 'comment';
   fileSummaries: Array<{ path: string; summary: string; verdict: string }>;
 }) {
+  const findings = input.fileSummaries
+    .filter((f) => f.verdict !== 'approve' && f.summary && !f.summary.startsWith('Review failed'))
+    .map((f) => `- ${f.path}: ${f.summary}`);
+
   return [
-    `PR title: "${input.prTitle ?? 'Untitled PR'}"`,
-    `Verdict: "${input.verdict}"`,
-    `Errors: ${input.errorCount}`,
-    `Warnings: ${input.warningCount}`,
-    `Total comments: ${input.totalComments}`,
+    `PR: "${input.prTitle ?? 'Untitled PR'}"`,
+    `Overall verdict: ${input.verdict}`,
     '',
-    'Per-file summaries:',
-    ...input.fileSummaries.map((file) => `- ${file.path} [${file.verdict}]: ${file.summary}`),
+    findings.length > 0 ? 'Key findings per file:' : 'No significant findings.',
+    ...findings,
   ].join('\n');
 }
 

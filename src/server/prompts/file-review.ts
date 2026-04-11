@@ -11,6 +11,7 @@ Only comment on lines present in the diff.
 Prefer actionable feedback.
 Use severity values: error, warning, suggestion, nitpick.
 Use category values: security, bugs, performance, correctness, quality.
+Use file_verdict values: "approve" (no issues) or "comment" (has findings). Never use "request_changes".
 When a fix is straightforward, provide code_suggestion without markdown fences.`;
 }
 

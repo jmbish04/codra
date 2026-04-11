@@ -21,7 +21,7 @@ type JobRow = {
   finished_at: string | null;
   total_input_tokens: number | null;
   total_output_tokens: number | null;
-  verdict: 'approve' | 'comment' | 'request_changes' | null;
+  verdict: 'approve' | 'comment' | null;
   file_count: number | null;
   comment_count: number | null;
   error_msg: string | null;
@@ -299,7 +299,7 @@ export async function completeJob(
   env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
   jobId: string,
   input: {
-    verdict: 'approve' | 'comment' | 'request_changes';
+    verdict: 'approve' | 'comment';
     fileCount: number;
     commentCount: number;
     totalInputTokens: number;
