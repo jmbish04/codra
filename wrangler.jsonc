@@ -21,6 +21,7 @@
   "ai": {
     "binding": "AI"
   },
+  // Non-secret runtime bindings. Keep resource IDs here, not in .dev.vars.
   "kv_namespaces": [
     {
       "binding": "APP_KV",
@@ -38,7 +39,7 @@
     "consumers": [
       {
         "queue": "codra-review-jobs",
-        "dead_letter_queue": "codra-review-diq",
+        "dead_letter_queue": "codra-review-dlq",
         "max_batch_size": 1,
         "max_batch_timeout": 5,
         "max_retries": 3
@@ -60,6 +61,18 @@
       "/webhook*"
     ]
   },
+  // Declare the secret names Wrangler should expect in .dev.vars for local dev.
+  "secrets": {
+    "required": [
+      "APP_PRIVATE_KEY",
+      "GITHUB_APP_ID",
+      "GITHUB_APP_WEBHOOK_SECRET",
+      "GEMINI_API_KEY",
+      "NEON_DATABASE_URL",
+      "DASHBOARD_PASSWORD"
+    ]
+  },
+  // Non-sensitive config only. Put credentials in Worker secrets, not here.
   "vars": {
     "BOT_USERNAME": "codra-app",
     "ENVIRONMENT": "production",

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '@client/lib/api';
+import { REPO_CONFIG_FILENAME } from '@shared/config';
 import type { RepoConfigRecord } from '@shared/schema';
 
 export function ReposPage() {
@@ -34,7 +35,7 @@ export function ReposPage() {
             {repos.map((repo) => (
               <button key={`${repo.owner}/${repo.repo}`} className="repo-row" type="button" onClick={() => setSelected(repo)}>
                 <strong>{repo.owner}/{repo.repo}</strong>
-                <span className="muted">{repo.configMissing ? 'Defaults only' : 'Custom .codra.yml'}</span>
+                <span className="muted">{repo.configMissing ? 'Defaults only' : `Custom ${REPO_CONFIG_FILENAME}`}</span>
               </button>
             ))}
           </div>
@@ -44,7 +45,7 @@ export function ReposPage() {
           {selected ? (
             <>
               <h2>{selected.owner}/{selected.repo}</h2>
-              <pre className="code-block">{selected.rawYaml ?? '# .codra.yml not found\n' + JSON.stringify(selected.parsedJson, null, 2)}</pre>
+              <pre className="code-block">{selected.rawYaml ?? `# ${REPO_CONFIG_FILENAME} not found\n${JSON.stringify(selected.parsedJson, null, 2)}`}</pre>
               <h3>Merged config</h3>
               <pre className="code-block">{JSON.stringify(selected.parsedJson, null, 2)}</pre>
             </>

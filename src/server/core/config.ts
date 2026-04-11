@@ -1,5 +1,6 @@
 import { parse as parseYaml } from 'yaml';
 import { defaultRepoConfig, repoConfigSchema, type RepoConfig } from '@shared/schema';
+import { REPO_CONFIG_CACHE_VERSION, REPO_CONFIG_FILENAME } from '@shared/config';
 import type { AppBindings } from '@server/env';
 import { upsertRepoConfig } from '@server/db/repo-configs';
 import { GitHubClient } from './github';
@@ -11,7 +12,7 @@ type CachedConfig = {
 };
 
 function cacheKey(owner: string, repo: string) {
-  return `config:${owner}/${repo}`;
+  return `config:${REPO_CONFIG_CACHE_VERSION}:${REPO_CONFIG_FILENAME}:${owner}/${repo}`;
 }
 
 export function parseRepoConfig(rawYaml: string | null) {
@@ -42,7 +43,7 @@ export async function loadRepoConfig(
     return cached as CachedConfig;
   }
 
-  const repoFile = await github.getRepoFileOrNull(input.owner, input.repo, '.codra.yml');
+  const repoFile = await github.getRepoFileOrNull(input.owner, input.repo, REPO_CONFIG_FILENAME);
   const parsed = parseRepoConfig(repoFile);
 
   await env.APP_KV.put(key, JSON.stringify(parsed), { expirationTtl: 60 * 10 });
