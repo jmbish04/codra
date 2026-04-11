@@ -49,8 +49,15 @@ export const api = {
       method: 'POST',
     });
   },
-  getJobs() {
-    return request<JobsResponse>('/api/jobs');
+  getJobs(params: Record<string, any> = {}) {
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '') {
+        searchParams.set(key, String(value));
+      }
+    }
+    const query = searchParams.toString();
+    return request<JobsResponse>(`/api/jobs${query ? `?${query}` : ''}`);
   },
   getJob(id: string) {
     return request<JobDetailResponse>(`/api/jobs/${id}`);

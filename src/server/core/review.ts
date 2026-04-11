@@ -1,8 +1,8 @@
 import type { GitHubWebhookEventName, GitHubWebhookPayload, IssueCommentWebhookPayload, PullRequestWebhookPayload } from '@shared/github';
 import { defaultRepoConfig, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import type { AppBindings } from '@server/env';
-import { insertFileReview } from '@server/db/file-reviews';
-import { completeJob, failJob, getJobForProcessing, markJobRunning, updateJobCheckRun } from '@server/db/jobs';
+import { insertFileReview, getFileReviewsForJob } from '@server/db/file-reviews';
+import { completeJob, failJob, getJobForProcessing, markJobRunning, updateJobCheckRun, updateJobFileCount, updateJobStep } from '@server/db/jobs';
 import { filterReviewableFiles, parseUnifiedDiff } from './diff';
 import { GitHubClient } from './github';
 import { parseFileReviewResponse } from './model-output';
@@ -147,6 +147,7 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
 
   try {
     await markJobRunning(env, job.id);
+    await updateJobStep(env, job.id, 'Initializing', { status: 'running' });
 
     const pr = await github.getPullRequest(job.owner, job.repo, job.pr_number);
     const config = (job.config_snapshot ?? defaultRepoConfig) as RepoConfig;
@@ -160,16 +161,67 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
       checkRunId = checkRun.id;
       await updateJobCheckRun(env, job.id, checkRun.id);
     }
+    await updateJobStep(env, job.id, 'Initializing', { status: 'done' });
 
+    await updateJobStep(env, job.id, 'Fetching Diff', { status: 'running' });
     const rawDiff = await github.getPullRequestDiff(job.owner, job.repo, job.pr_number);
     const files = filterReviewableFiles(parseUnifiedDiff(rawDiff), config.review);
+    await updateJobFileCount(env, job.id, files.length);
+    await updateJobStep(env, job.id, 'Fetching Diff', { status: 'done' });
 
+    await updateJobStep(env, job.id, 'Reviewing Files', { status: 'running' });
     const reviewedComments: ParsedReviewComment[] = [];
     const fileSummaries: Array<{ path: string; summary: string; verdict: string }> = [];
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
 
+    // Get existing reviews for this job OR the job it's a retry of
+    const currentJobReviews = await getFileReviewsForJob(env, job.id);
+    const parentJobReviews = job.retry_of_job_id ? await getFileReviewsForJob(env, job.retry_of_job_id) : [];
+    
+    // Merge reviews, preferring current job's reviews
+    const existingReviews = [...currentJobReviews];
+    for (const parentReview of parentJobReviews) {
+      if (!existingReviews.some(r => r.file_path === parentReview.file_path)) {
+        existingReviews.push(parentReview);
+      }
+    }
+
     for (const [index, file] of files.entries()) {
+      const existing = existingReviews.find((r) => r.file_path === file.path && r.file_status === 'done');
+
+      if (existing) {
+        reviewedComments.push(...(existing.parsed_comments as ParsedReviewComment[]));
+        fileSummaries.push({
+          path: file.path,
+          summary: existing.file_summary ?? '',
+          verdict: existing.verdict ?? 'comment',
+        });
+        totalInputTokens += existing.input_tokens ?? 0;
+        totalOutputTokens += existing.output_tokens ?? 0;
+
+        // If this review was from a parent job, insert it into the current job for record keeping
+        if (!currentJobReviews.some((r) => r.file_path === file.path)) {
+          await insertFileReview(env, {
+            jobId: job.id,
+            filePath: file.path,
+            fileStatus: 'done',
+            modelUsed: existing.model_used,
+            diffLineCount: existing.diff_line_count,
+            diffInput: existing.diff_input,
+            rawAiOutput: existing.raw_ai_output,
+            parsedComments: existing.parsed_comments as ParsedReviewComment[],
+            inputTokens: existing.input_tokens,
+            outputTokens: existing.output_tokens,
+            durationMs: existing.duration_ms,
+            verdict: existing.verdict,
+            fileSummary: existing.file_summary,
+            errorMessage: null,
+          });
+        }
+        continue;
+      }
+
       await github.updateCheckRun(job.owner, job.repo, checkRunId, {
         title: `Reviewing (${index + 1}/${files.length})`,
         summary: `Analyzing ${file.path}`,
@@ -247,7 +299,9 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
         });
       }
     }
+    await updateJobStep(env, job.id, 'Reviewing Files', { status: 'done' });
 
+    await updateJobStep(env, job.id, 'Generating Summary', { status: 'running' });
     const hasFailures = fileSummaries.some((f) => f.verdict === 'failed');
     const verdictSummary = summarizeVerdict(reviewedComments, hasFailures);
     const summaryResponse = await reviewWithGemma(env, {
@@ -264,7 +318,9 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
 
     totalInputTokens += summaryResponse.inputTokens;
     totalOutputTokens += summaryResponse.outputTokens;
+    await updateJobStep(env, job.id, 'Generating Summary', { status: 'done' });
 
+    await updateJobStep(env, job.id, 'Completing', { status: 'running' });
     const review = await github.createReview(job.owner, job.repo, job.pr_number, {
       commitSha: pr.head.sha,
       event: toReviewEvent(verdictSummary.verdict),
@@ -310,9 +366,19 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
       reviewId: review.id,
       summaryModel: summaryResponse.modelUsed,
     });
+    await updateJobStep(env, job.id, 'Completing', { status: 'done' });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown review failure';
     await failJob(env, job.id, message);
+    
+    // Update any running step to failed
+    const jobDetail = await getJobForProcessing(env, job.id);
+    if (jobDetail && (jobDetail as any).steps) {
+      const runningStep = (jobDetail as any).steps.find((s: any) => s.status === 'running');
+      if (runningStep) {
+        await updateJobStep(env, job.id, runningStep.name, { status: 'failed', error: message });
+      }
+    }
 
     if (checkRunId) {
       await github.updateCheckRun(job.owner, job.repo, checkRunId, {

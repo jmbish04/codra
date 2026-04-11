@@ -31,6 +31,15 @@ type JobRow = {
   review_id: number | null;
   retry_of_job_id: string | null;
   summary_model: string | null;
+  steps: JobStep[] | null;
+};
+
+type JobStep = {
+  name: string;
+  status: 'pending' | 'running' | 'done' | 'failed';
+  startedAt: string | null;
+  finishedAt: string | null;
+  error?: string | null;
 };
 
 type JobDetailRow = JobRow & {
@@ -57,6 +66,7 @@ function mapJob(row: JobRow) {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     errorMessage: row.error_msg,
+    steps: row.steps ?? [],
   });
 }
 
@@ -120,19 +130,75 @@ export async function insertJob(
   return mapJob(row);
 }
 
-export async function listJobs(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, limit = 100) {
+export async function listJobs(
+  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  query: {
+    owner?: string;
+    repo?: string;
+    status?: string;
+    verdict?: string;
+    search?: string;
+    limit: number;
+    offset: number;
+  },
+) {
+  const conditions: string[] = [];
+  const params: any[] = [];
+
+  if (query.owner) {
+    params.push(query.owner);
+    conditions.push(`owner = $${params.length}`);
+  }
+  if (query.repo) {
+    params.push(query.repo);
+    conditions.push(`repo = $${params.length}`);
+  }
+  if (query.status) {
+    params.push(query.status);
+    conditions.push(`status = $${params.length}`);
+  }
+  if (query.verdict) {
+    params.push(query.verdict);
+    conditions.push(`verdict = $${params.length}`);
+  }
+  if (query.search) {
+    params.push(`%${query.search}%`);
+    conditions.push(`(pr_title ILIKE $${params.length} OR CAST(pr_number AS TEXT) LIKE $${params.length})`);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  params.push(query.limit);
+  const limitIdx = params.length;
+  params.push(query.offset);
+  const offsetIdx = params.length;
+
   const rows = await queryRows<JobRow>(
     env,
     `
       SELECT *
       FROM jobs
+      ${whereClause}
       ORDER BY created_at DESC
-      LIMIT $1
+      LIMIT $${limitIdx} OFFSET $${offsetIdx}
     `,
-    [limit],
+    params,
   );
 
-  return rows.map(mapJob);
+  const [totalResult] = await queryRows<{ count: string }>(
+    env,
+    `
+      SELECT COUNT(*) as count
+      FROM jobs
+      ${whereClause}
+    `,
+    params.slice(0, -2),
+  );
+
+  return {
+    jobs: rows.map(mapJob),
+    total: parseInt(totalResult.count, 10),
+  };
 }
 
 export async function getJobForProcessing(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobId: string) {
@@ -278,6 +344,18 @@ export async function failJob(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobId
   );
 }
 
+export async function updateJobFileCount(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobId: string, fileCount: number) {
+  await queryRows(
+    env,
+    `
+      UPDATE jobs
+      SET file_count = $2
+      WHERE id = $1
+    `,
+    [jobId, fileCount],
+  );
+}
+
 export async function findExistingJobForHead(
   env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
   input: { owner: string; repo: string; prNumber: number; commitSha: string; trigger: 'auto' | 'mention' },
@@ -299,4 +377,44 @@ export async function findExistingJobForHead(
   );
 
   return row ? mapJob(row) : null;
+}
+
+export async function updateJobStep(
+  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  jobId: string,
+  stepName: string,
+  update: {
+    status: 'pending' | 'running' | 'done' | 'failed';
+    startedAt?: string | null;
+    finishedAt?: string | null;
+    error?: string | null;
+  },
+) {
+  const [job] = await queryRows<JobRow>(env, 'SELECT steps FROM jobs WHERE id = $1', [jobId]);
+  if (!job) return;
+
+  let steps = (job.steps ?? []) as JobStep[];
+  const stepIndex = steps.findIndex((s) => s.name === stepName);
+
+  const now = new Date().toISOString();
+
+  if (stepIndex === -1) {
+    steps.push({
+      name: stepName,
+      status: update.status,
+      startedAt: update.status === 'running' ? now : (update.startedAt ?? null),
+      finishedAt: update.status === 'done' || update.status === 'failed' ? now : (update.finishedAt ?? null),
+      error: update.error,
+    });
+  } else {
+    steps[stepIndex] = {
+      ...steps[stepIndex],
+      status: update.status,
+      startedAt: update.status === 'running' && !steps[stepIndex].startedAt ? now : (update.startedAt ?? steps[stepIndex].startedAt),
+      finishedAt: update.status === 'done' || update.status === 'failed' ? now : (update.finishedAt ?? steps[stepIndex].finishedAt),
+      error: update.error ?? steps[stepIndex].error,
+    };
+  }
+
+  await queryRows(env, 'UPDATE jobs SET steps = $2 WHERE id = $1', [jobId, JSON.stringify(steps)]);
 }

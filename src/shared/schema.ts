@@ -10,6 +10,14 @@ export const reviewCategories = ['security', 'bugs', 'performance', 'correctness
 export const dateStringSchema = z.union([z.string(), z.date()]).transform((d) => (d instanceof Date ? d.toISOString() : d));
 export const coerceNumberSchema = z.union([z.number(), z.string()]).transform((v) => Number(v));
 
+export const jobStepSchema = z.object({
+  name: z.string(),
+  status: z.enum(['pending', 'running', 'done', 'failed']),
+  startedAt: dateStringSchema.nullable(),
+  finishedAt: dateStringSchema.nullable(),
+  error: z.string().nullable().optional(),
+});
+
 export const parsedReviewCommentSchema = z.object({
   path: z.string().min(1),
   line: z.number().int().positive().optional(),
@@ -129,7 +137,21 @@ export const jobSummarySchema = z.object({
   startedAt: dateStringSchema.nullable(),
   finishedAt: dateStringSchema.nullable(),
   errorMessage: z.string().nullable(),
+  steps: z.array(jobStepSchema).default([]),
 });
+
+export const jobsQuerySchema = z.object({
+  owner: z.string().optional(),
+  repo: z.string().optional(),
+  status: z.enum(jobStatuses).optional(),
+  verdict: z.enum(reviewVerdicts).optional(),
+  search: z.string().optional(),
+  limit: z.preprocess((v) => Number(v), z.number().int().min(1).max(100)).default(20),
+  offset: z.preprocess((v) => Number(v), z.number().int().min(0)).default(0),
+});
+
+export type JobsQuery = z.infer<typeof jobsQuerySchema>;
+export type JobStep = z.infer<typeof jobStepSchema>;
 
 export const fileReviewRecordSchema = z.object({
   id: z.string().uuid(),

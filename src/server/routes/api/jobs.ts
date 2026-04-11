@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import { defaultRepoConfig, repoConfigSchema } from '@shared/schema';
 import type { AppEnv } from '@server/env';
 import { getJobDetail, getJobForProcessing, insertJob, listJobs } from '@server/db/jobs';
@@ -8,8 +9,19 @@ export function createJobsRouter() {
   const app = new Hono<AppEnv>();
 
   app.get('/', async (c) => {
-    const jobs = await listJobs(c.env);
-    return c.json({ jobs });
+    const rawQuery = c.req.query();
+    const query = repoConfigSchema.pick({}).extend({
+      owner: z.string().optional(),
+      repo: z.string().optional(),
+      status: z.string().optional(),
+      verdict: z.string().optional(),
+      search: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+      offset: z.coerce.number().int().min(0).default(0),
+    }).parse(rawQuery);
+
+    const result = await listJobs(c.env, query as any);
+    return c.json(result);
   });
 
   app.get('/:id', async (c) => {

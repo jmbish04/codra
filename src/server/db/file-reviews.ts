@@ -81,3 +81,32 @@ export async function getModelUsageStats(env: Pick<AppBindings, 'NEON_DATABASE_U
     `,
   );
 }
+
+export async function getFileReviewsForJob(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobId: string) {
+  return queryRows<{
+    id: string;
+    job_id: string;
+    file_path: string;
+    file_status: 'pending' | 'done' | 'skipped' | 'failed';
+    model_used: string;
+    diff_line_count: number;
+    diff_input: string | null;
+    raw_ai_output: string | null;
+    parsed_comments: any;
+    input_tokens: number | null;
+    output_tokens: number | null;
+    duration_ms: number | null;
+    verdict: 'approve' | 'comment' | 'request_changes' | null;
+    file_summary: string | null;
+    error_msg: string | null;
+  }>(
+    env,
+    `
+      SELECT *
+      FROM file_reviews
+      WHERE job_id = $1::uuid
+      ORDER BY created_at ASC
+    `,
+    [jobId],
+  );
+}

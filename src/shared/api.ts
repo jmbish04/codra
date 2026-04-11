@@ -10,6 +10,7 @@ export type LoginPayload = {
 
 export type JobsResponse = {
   jobs: JobSummary[];
+  total: number;
 };
 
 export type JobDetailResponse = {
