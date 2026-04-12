@@ -25,7 +25,7 @@ export async function reviewWithKimi(
           { role: 'system', content: input.systemPrompt },
           { role: 'user', content: input.userPrompt },
         ],
-        max_completion_tokens: 2048,
+        max_completion_tokens: 4096,
       }),
       timeoutPromise,
     ]);

@@ -4,8 +4,8 @@ export const reviewTriggers = ['auto', 'mention', 'retry'] as const;
 export const jobStatuses = ['queued', 'running', 'done', 'failed', 'superseded'] as const;
 export const fileStatuses = ['pending', 'done', 'skipped', 'failed'] as const;
 export const reviewVerdicts = ['approve', 'comment'] as const;
-export const reviewSeverities = ['error', 'warning', 'suggestion', 'nitpick'] as const;
-export const reviewCategories = ['security', 'bugs', 'performance', 'correctness', 'quality'] as const;
+export const reviewSeverities = ['P0', 'P1', 'P2', 'P3', 'nit'] as const;
+export const reviewCategories = ['security', 'bugs', 'performance', 'correctness', 'quality'] as const; // Keeping for DB compatibility but will deprecate usage in prompts
 
 export const dateStringSchema = z.union([z.string(), z.date()]).transform((d) => (d instanceof Date ? d.toISOString() : d));
 export const coerceNumberSchema = z.coerce.number();
@@ -23,34 +23,39 @@ export const parsedReviewCommentSchema = z.object({
   line: z.number().int().positive().optional(),
   position: z.number().int().positive().optional(),
   severity: z.enum(reviewSeverities),
-  category: z.enum(reviewCategories),
+  category: z.enum(reviewCategories).default('quality'),
   title: z.string().min(1),
   body: z.string().min(1),
   codeSuggestion: z.string().min(1).optional(),
 });
 
 export const fileReviewModelOutputSchema = z.object({
-  comments: z.array(
+  findings: z.array(
     z.object({
-      line: z.number().int().positive().optional(),
-      position: z.number().int().positive().optional(),
-      side: z.literal('RIGHT').default('RIGHT'),
-      severity: z.enum(reviewSeverities),
-      category: z.enum(reviewCategories),
-      title: z.string().min(1),
+      title: z.string().max(100),
       body: z.string().min(1),
-      code_suggestion: z.string().min(1).optional(),
+      confidence_score: z.number().min(0).max(1).optional(),
+      priority: z.number().int().min(0).max(3).optional(),
+      code_location: z.object({
+        absolute_file_path: z.string(),
+        line_range: z.object({
+          start: z.number().int().positive(),
+          end: z.number().int().positive(),
+        }).optional(),
+        line: z.number().int().positive().optional(),
+      }),
+      code_suggestion: z.string().optional(),
     }),
   ),
-  file_verdict: z.enum(reviewVerdicts).catch('comment').default('approve'),
-  file_summary: z.string().default('No summary provided.'),
+  overall_correctness: z.string(),
+  overall_explanation: z.string(),
+  overall_confidence_score: z.number().min(0).max(1).optional(),
 });
 
-export const summaryModelOutputSchema = z.array(
-  z.object({
-    summary: z.string().min(1),
-  }),
-);
+export const summaryModelOutputSchema = z.union([
+  z.array(z.object({ summary: z.string().min(1) })),
+  z.object({ summary: z.string().min(1) }),
+]);
 
 export const labelsSchema = z.union([
   z.literal(false),
@@ -148,6 +153,7 @@ export const jobSummarySchema = z.object({
   startedAt: dateStringSchema.nullable(),
   finishedAt: dateStringSchema.nullable(),
   errorMessage: z.string().nullable(),
+  overallConfidenceScore: z.number().nullable().optional(),
   steps: z.array(jobStepSchema).default([]),
 });
 
@@ -179,6 +185,8 @@ export const fileReviewRecordSchema = z.object({
   durationMs: z.number().int().nullable(),
   verdict: z.enum(reviewVerdicts).nullable(),
   fileSummary: z.string().nullable(),
+  overallCorrectness: z.string().nullable().optional(),
+  confidenceScore: z.number().nullable().optional(),
   errorMessage: z.string().nullable(),
   createdAt: dateStringSchema,
 });

@@ -1,15 +1,14 @@
-export const SUMMARY_SYSTEM_PROMPT = `You are writing the body of a GitHub pull request review comment left by an automated code review bot.
-Output only a single valid JSON array containing one object with a "summary" key. No text outside the JSON.
+export const SUMMARY_SYSTEM_PROMPT = `You are an automated code review bot. Summarize the findings of a PR review.
+CRITICAL: Return ONLY a JSON object with a single "summary" key.
 
-Rules:
-1. Valid JSON only. Double-quoted strings. No comments inside JSON.
-2. The summary value is a GitHub-flavored markdown string.
-3. Under 250 words. Be specific and technical — cite actual file names and issues.
-4. Do NOT include generic filler like "overall the code looks good" unless ALL files passed with no issues.
-5. Start with ONE line: "✅ **Approved**" or "💬 **Comments posted**" — nothing else on that line.
-6. Then a blank line, then list concrete findings per file using bold file names.
-7. For files that could not be reviewed due to errors, note them briefly (e.g. "⚠️ \`file.js\` — automated review could not complete (parse error).").
-8. If no meaningful findings exist but the verdict is "approve", write a short positive sentence.`;
+Constraints:
+1. NO intro text, NO reasoning, NO meta-commentary like "Task: Summarize...".
+2. NO markdown code fences for the JSON itself.
+3. Verdict Header: Start the summary ONLY with "✅ **Approved**" or "💬 **Comments posted**".
+4. Format: [Verdict Header] \\n\\n [File name]: [Concise overview of P0/P1 issues] (lines X-Y).
+5. If failures occurred, mention: "⚠️ **[filename]** — automated review could not complete (parse error)."
+6. Tone: Technical, impact-focused, brief. Mention P0/P1/P2 levels where appropriate.
+7. Max 200 words. JSON only.`;
 
 export function buildSummaryPrompt(input: {
   prTitle: string | null;

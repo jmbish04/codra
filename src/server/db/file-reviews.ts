@@ -18,6 +18,8 @@ export async function insertFileReview(
     durationMs: number | null;
     verdict: 'approve' | 'comment' | null;
     fileSummary: string | null;
+    overallCorrectness?: string | null;
+    confidenceScore?: number | null;
     errorMessage: string | null;
   },
 ) {
@@ -38,9 +40,11 @@ export async function insertFileReview(
         duration_ms,
         verdict,
         file_summary,
+        overall_correctness,
+        confidence_score,
         error_msg
       )
-      VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14)
+      VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16)
     `,
     [
       input.jobId,
@@ -56,6 +60,8 @@ export async function insertFileReview(
       input.durationMs,
       input.verdict,
       input.fileSummary,
+      input.overallCorrectness ?? null,
+      input.confidenceScore ?? null,
       input.errorMessage,
     ],
   );
@@ -98,6 +104,8 @@ export async function getFileReviewsForJob(env: Pick<AppBindings, 'NEON_DATABASE
     duration_ms: number | null;
     verdict: 'approve' | 'comment' | null;
     file_summary: string | null;
+    overall_correctness: string | null;
+    confidence_score: number | null;
     error_msg: string | null;
   }>(
     env,

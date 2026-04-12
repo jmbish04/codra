@@ -4,15 +4,28 @@ import { getLanguageForFile } from './languages';
 
 export function buildFileReviewSystemPrompt(languagePersona?: string) {
   const persona = languagePersona ? ` as ${languagePersona}` : '';
-  return `You are a senior code reviewer for pull requests${persona}.
-Return only valid JSON.
-Do not use markdown fences.
-Only comment on lines present in the diff.
-Prefer actionable feedback.
-Use severity values: error, warning, suggestion, nitpick.
-Use category values: security, bugs, performance, correctness, quality.
-Use file_verdict values: "approve" (no issues) or "comment" (has findings). Never use "request_changes".
-When a fix is straightforward, provide code_suggestion without markdown fences.`;
+  return `You are a professional senior code reviewer${persona}. Your task is to find bugs and identify quality issues in a pull request.
+
+# Review guidelines:
+1. Flag issues that meaningfully impact accuracy, performance, security, or maintainability.
+2. Ensure findings are discrete and actionable.
+3. author would fix the issue if aware of it.
+4. ONLY flag issues introduced in the current commit.
+5. Tone: Matter-of-fact, helpful, not accusatory.
+
+# Severity Levels:
+- [P0] – Critical. Blocking release, operations, or major usage. Universal issues only. (priority: 0)
+- [P1] – Urgent. Should be addressed in the next cycle. (priority: 1)
+- [P2] – Normal. To be fixed eventually. (priority: 2)
+- [P3] – Low. Nice to have. (priority: 3)
+- [Nit] – Style or preference suggestions.
+
+# Output Formatting:
+- Use one finding per distinct issue.
+- Use \`\`\`suggestion blocks for concrete replacement code. Preserve leading whitespace exactly.
+- Keep body brief (1 paragraph max). Describe *why* it's a problem.
+
+CRITICAL: Return ONLY valid JSON matching the schema below. No conversational text.`;
 }
 
 export function buildFileReviewPrompts(input: {
@@ -32,14 +45,29 @@ export function buildFileReviewPrompts(input: {
 
   const userPrompt = [
     `PR title: ${input.prTitle ?? 'Untitled PR'}`,
-    `PR description: ${input.prDescription ?? 'No description provided.'}`,
     `File path: ${input.file.path}`,
-    `Review focus: ${focus}`,
     languageGuidelines,
     `Custom rules:\n${rules}`,
     '',
-    'Return JSON in this shape:',
-    `{"comments":[{"line":42,"position":12,"side":"RIGHT","severity":"warning","category":"quality","title":"Short title","body":"Markdown explanation","code_suggestion":"optional replacement"}],"file_verdict":"comment","file_summary":"2-3 sentence technical summary of findings. Be specific: mention what is wrong, where, and why it matters. If nothing is wrong, write a single short sentence."}`,
+    `## Output schema — MUST MATCH exactly`,
+    `{
+  "findings": [
+    {
+      "title": "<[PX] Tagged title, imperative, max 80 chars>",
+      "body": "<Technical explanation citing lines/logic>",
+      "confidence_score": <float 0.0-1.0>,
+      "priority": <int 0-3>,
+      "code_location": {
+        "absolute_file_path": "${input.file.path}",
+        "line_range": {"start": <int>, "end": <int>}
+      },
+      "code_suggestion": "optional replacement code"
+    }
+  ],
+  "overall_correctness": "patch is correct" | "patch is incorrect",
+  "overall_explanation": "<1-3 sentence summary justifying verdict>",
+  "overall_confidence_score": <float 0.0-1.0>
+}`,
     '',
     'Unified diff:',
     renderFileDiff(input.file),

@@ -108,7 +108,6 @@ export function JobsPage() {
             <option value="">All Verdicts</option>
             <option value="approve">Approved</option>
             <option value="comment">Commented</option>
-            <option value="request_changes">Changes Requested</option>
           </select>
         </div>
       </div>

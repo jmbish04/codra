@@ -74,6 +74,12 @@ type PullRequestRecord = {
   user: { login: string };
 };
 
+export type GitHubReviewComment = {
+  path: string;
+  position?: number;
+  body: string;
+};
+
 function installationCacheKey(installationId: string) {
   return `install:${installationId}`;
 }
@@ -379,7 +385,7 @@ export class GitHubClient {
       commitSha: string;
       event: 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
       body: string;
-      comments: ParsedReviewComment[];
+      comments: GitHubReviewComment[];
     },
   ) {
     return withRetry(`createReview ${owner}/${repo}#${pullNumber}`, async () => {

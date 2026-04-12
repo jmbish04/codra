@@ -14,19 +14,23 @@ import { reviewWithKimi } from '@server/models/kimi';
 
 function severityIcon(severity: ParsedReviewComment['severity']) {
   switch (severity) {
-    case 'error':
+    case 'P0':
+      return '🔥';
+    case 'P1':
       return '🔴';
-    case 'warning':
+    case 'P2':
       return '🟡';
-    case 'suggestion':
+    case 'P3':
       return '🔵';
+    case 'nit':
+      return '⚪';
     default:
       return '⚪';
   }
 }
 
 function formatInlineComment(comment: ParsedReviewComment) {
-  return `${severityIcon(comment.severity)} [${comment.category.toUpperCase()}] ${comment.title}\n\n${comment.body}`;
+  return `${severityIcon(comment.severity)} ${comment.title}\n\n${comment.body}`;
 }
 
 function toReviewEvent(verdict: 'approve' | 'comment') {
@@ -34,14 +38,15 @@ function toReviewEvent(verdict: 'approve' | 'comment') {
 }
 
 function summarizeVerdict(comments: ParsedReviewComment[], hasFailures: boolean) {
-  const errors = comments.filter((comment) => comment.severity === 'error').length;
-  const warnings = comments.filter((comment) => comment.severity === 'warning').length;
+  const p0 = comments.filter((c) => c.severity === 'P0').length;
+  const p1 = comments.filter((c) => c.severity === 'P1').length;
+  const p2 = comments.filter((c) => c.severity === 'P2').length;
 
-  if (errors > 0 || hasFailures || warnings > 0) {
-    return { verdict: 'comment' as const, errors, warnings };
+  if (p0 > 0 || p1 > 0 || hasFailures || p2 > 0) {
+    return { verdict: 'comment' as const, errors: p0 + p1, warnings: p2 };
   }
 
-  return { verdict: 'approve' as const, errors, warnings };
+  return { verdict: 'approve' as const, errors: 0, warnings: 0 };
 }
 
 function shouldTriggerFromPullRequest(action: PullRequestWebhookPayload['action'], config: RepoConfig['review']) {
@@ -250,12 +255,7 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
         totalOutputTokens += response.outputTokens;
 
         const parsed = parseFileReviewResponse(response.rawText, file);
-        const formattedComments = parsed.comments.map((comment) => ({
-          ...comment,
-          body: formatInlineComment(comment),
-        }));
-
-        reviewedComments.push(...formattedComments);
+        reviewedComments.push(...parsed.comments);
         fileSummaries.push({
           path: file.path,
           summary: parsed.fileSummary,
@@ -270,16 +270,19 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
           diffLineCount: file.lineCount,
           diffInput: userPrompt,
           rawAiOutput: response.rawText,
-          parsedComments: formattedComments,
+          parsedComments: parsed.comments,
           inputTokens: response.inputTokens,
           outputTokens: response.outputTokens,
           durationMs: Date.now() - startedAt,
           verdict: parsed.verdict,
           fileSummary: parsed.fileSummary,
+          overallCorrectness: parsed.overallCorrectness,
+          confidenceScore: parsed.confidenceScore,
           errorMessage: null,
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown file review error';
+        logger.error(`File review failed for ${file.path}`, { error, rawOutput: rawModelOutput });
         fileSummaries.push({
           path: file.path,
           summary: `Review failed: ${errorMessage}`,
@@ -336,7 +339,11 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
       commitSha: pr.head.sha,
       event: toReviewEvent(verdictSummary.verdict),
       body: parsedSummary,
-      comments: reviewedComments,
+      comments: reviewedComments.map(c => ({
+        path: c.path,
+        position: c.position,
+        body: formatInlineComment(c)
+      })),
     });
 
     if (config.review.labels !== false) {
@@ -361,9 +368,9 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
 
     await github.updateCheckRun(job.owner, job.repo, checkRunId, {
       status: 'completed',
-      conclusion: verdictSummary.verdict === 'approve' ? 'success' : 'neutral',
-      title: verdictSummary.verdict === 'approve' ? 'LGTM' : 'Comments posted',
-      summary: `${reviewedComments.length} inline comments across ${files.length} files.`,
+      conclusion: hasFailures ? 'failure' : (verdictSummary.verdict === 'approve' ? 'success' : 'neutral'),
+      title: hasFailures ? 'Review partially failed' : (verdictSummary.verdict === 'approve' ? 'LGTM' : 'Comments posted'),
+      summary: `${reviewedComments.length} inline comments across ${files.length} files.${hasFailures ? ' Some files failed to parse.' : ''}`,
     });
 
     await completeJob(env, job.id, {

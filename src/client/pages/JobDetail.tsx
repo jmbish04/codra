@@ -18,26 +18,18 @@ import {
 
 // ── Severity icon mapping ───────────────────────────────────────────────
 const severityConfig: Record<string, { icon: React.ElementType; bg: string; border: string; text: string; iconColor: string }> = {
-  error:      { icon: AlertCircle, bg: 'bg-red-50',    border: 'border-red-200',   text: 'text-red-700',   iconColor: 'text-red-500' },
-  warning:    { icon: AlertTriangle, bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', iconColor: 'text-amber-500' },
-  suggestion: { icon: Lightbulb,  bg: 'bg-blue-50',   border: 'border-blue-200',  text: 'text-blue-700',  iconColor: 'text-blue-500' },
-  nitpick:    { icon: Sparkles,   bg: 'bg-muted/60',  border: 'border-border/60', text: 'text-muted-foreground', iconColor: 'text-muted-foreground' },
+  P0:   { icon: AlertCircle, bg: 'bg-red-50',    border: 'border-red-200',   text: 'text-red-700',   iconColor: 'text-red-500' },
+  P1:   { icon: AlertTriangle, bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', iconColor: 'text-orange-500' },
+  P2:   { icon: Lightbulb,  bg: 'bg-amber-50',   border: 'border-amber-200',  text: 'text-amber-700',  iconColor: 'text-amber-500' },
+  P3:   { icon: Code2,   bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', iconColor: 'text-blue-500' },
+  nit:  { icon: Sparkles,   bg: 'bg-muted/60',  border: 'border-border/60', text: 'text-muted-foreground', iconColor: 'text-muted-foreground' },
 };
 
-const categoryConfig: Record<string, { icon: React.ElementType; color: string }> = {
-  security:    { icon: Shield,    color: 'text-red-500' },
-  performance: { icon: Zap,       color: 'text-blue-500' },
-  bugs:        { icon: Bug,       color: 'text-amber-500' },
-  correctness: { icon: Code2,     color: 'text-emerald-600' },
-  quality:     { icon: Star,      color: 'text-purple-500' },
-};
 
 // ── Comment card ────────────────────────────────────────────────────────
 function CommentCard({ comment, filePath }: { comment: ParsedReviewComment; filePath: string }) {
-  const sev = severityConfig[comment.severity] ?? severityConfig.nitpick;
-  const cat = categoryConfig[comment.category ?? ''];
+  const sev = severityConfig[comment.severity] ?? severityConfig.nit;
   const SevIcon = sev.icon;
-  const CatIcon = cat?.icon ?? FileText;
 
   return (
     <article
@@ -57,32 +49,32 @@ function CommentCard({ comment, filePath }: { comment: ParsedReviewComment; file
         </div>
       </div>
 
-      {/* Meta: file · category · line */}
+      {/* Meta: file · line */}
       <div className="flex flex-wrap items-center gap-2 mb-3 text-xs text-muted-foreground">
         <span className="flex items-center gap-1 font-mono bg-card/60 px-1.5 py-0.5 rounded text-foreground/70">
           <FileText size={10} /> {filePath}
         </span>
-        {comment.category && (
-          <span className={cn('flex items-center gap-1', cat?.color ?? 'text-muted-foreground')}>
-            <CatIcon size={11} />
-            {comment.category}
-          </span>
-        )}
         {comment.line != null && (
-          <span className="text-muted-foreground">line {comment.line}</span>
+          <span className="text-muted-foreground font-medium">line {comment.line}</span>
         )}
       </div>
 
       {/* Body */}
-      <p className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">{comment.body}</p>
+      <div className="prose prose-sm max-w-none text-foreground/90 leading-relaxed">
+        <ReactMarkdown>{comment.body}</ReactMarkdown>
+      </div>
 
-      {/* Code suggestion */}
+      {/* Code suggestion (UI view) */}
       {comment.codeSuggestion && (
-        <div className="mt-3">
-          <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+        <div className="mt-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/80">
             Suggested fix
           </p>
-          <pre className="code-block text-xs">{comment.codeSuggestion}</pre>
+          <div className="rounded-lg overflow-hidden border border-border/40 bg-card/40 prose prose-sm max-w-none prose-pre:m-0 prose-pre:rounded-none">
+            <ReactMarkdown>
+              {`\`\`\`javascript\n${comment.codeSuggestion.replace(/```suggestion\n?|```/g, '')}\n\`\`\``}
+            </ReactMarkdown>
+          </div>
         </div>
       )}
     </article>
@@ -97,7 +89,7 @@ export function JobDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
   const pollInterval = useRef<number | null>(null);
-  const [viewBy, setViewBy] = useState<'files' | 'severity' | 'category'>('files');
+  const [viewBy, setViewBy] = useState<'files' | 'severity'>('files');
 
   const fetchJob = async (silent = false) => {
     try {
@@ -391,22 +383,6 @@ export function JobDetailPage() {
                   </div>
                 );
               })}
-              {reviewCategories.map((cat) => {
-                const count = allComments.filter((c) => c.category === cat).length;
-                if (!count) return null;
-                const cfg = categoryConfig[cat];
-                const CatIcon = cfg?.icon ?? FileText;
-                return (
-                  <div
-                    key={cat}
-                    className="flex items-center gap-2 rounded-full border border-border/50 bg-muted/40 px-3 py-1.5 text-sm"
-                  >
-                    <CatIcon size={13} className={cfg?.color} />
-                    <span className="font-medium text-foreground capitalize">{cat}</span>
-                    <span className="font-bold text-foreground">{count}</span>
-                  </div>
-                );
-              })}
             </div>
           </CardContent>
         </Card>
@@ -422,7 +398,7 @@ export function JobDetailPage() {
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">View by</span>
             <div className="flex rounded-xl bg-secondary p-1 gap-0.5">
-              {(['files', 'severity', 'category'] as const).map((view) => (
+              {(['files', 'severity'] as const).map((view) => (
                 <button
                   key={view}
                   onClick={() => setViewBy(view)}
@@ -478,7 +454,9 @@ export function JobDetailPage() {
                     {file.fileStatus === 'done' && file.fileSummary && (
                       <div className="mb-4 rounded-xl border border-border/50 bg-muted/30 px-4 py-3">
                         <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Model summary</p>
-                        <p className="text-sm text-foreground/90 leading-relaxed">{file.fileSummary}</p>
+                        <div className="prose prose-sm max-w-none text-foreground/90 leading-relaxed">
+                          <ReactMarkdown>{file.fileSummary}</ReactMarkdown>
+                        </div>
                       </div>
                     )}
 
@@ -516,17 +494,16 @@ export function JobDetailPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            {(viewBy === 'severity' ? reviewSeverities : reviewCategories).map((groupName) => {
+            {reviewSeverities.map((groupName) => {
               const comments = job.files.flatMap((f) =>
                 f.parsedComments
-                  .filter((c) => (viewBy === 'severity' ? c.severity === groupName : c.category === groupName))
+                  .filter((c) => c.severity === groupName)
                   .map((c) => ({ ...c, filePath: f.filePath })),
               );
               if (comments.length === 0) return null;
 
-              const sev = viewBy === 'severity' ? severityConfig[groupName] : null;
-              const cat = viewBy === 'category' ? categoryConfig[groupName] : null;
-              const GroupIcon = sev?.icon ?? cat?.icon ?? FileText;
+              const sev = severityConfig[groupName];
+              const GroupIcon = sev?.icon ?? FileText;
 
               return (
                 <Card key={groupName}>
@@ -534,9 +511,9 @@ export function JobDetailPage() {
                     <div className="flex items-center gap-2">
                       <GroupIcon
                         size={15}
-                        className={sev?.iconColor ?? cat?.color ?? 'text-muted-foreground'}
+                        className={sev?.iconColor ?? 'text-muted-foreground'}
                       />
-                      <CardTitle className="capitalize">{groupName}</CardTitle>
+                      <CardTitle className="uppercase font-mono text-sm">{groupName}</CardTitle>
                       <span className="ml-1 rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-primary-foreground">
                         {comments.length}
                       </span>

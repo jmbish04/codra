@@ -31,6 +31,7 @@ type JobRow = {
   review_id: number | null;
   retry_of_job_id: string | null;
   summary_model: string | null;
+  overall_confidence_score: number | null;
   steps: JobStep[] | null;
 };
 
@@ -66,6 +67,7 @@ function mapJob(row: JobRow) {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     errorMessage: row.error_msg,
+    overallConfidenceScore: row.overall_confidence_score,
     steps: row.steps ?? [],
   });
 }
@@ -307,6 +309,7 @@ export async function completeJob(
     summaryMarkdown: string;
     reviewId: number | null;
     summaryModel: string | null;
+    overallConfidenceScore?: number | null;
   },
 ) {
   await queryRows(
@@ -323,10 +326,22 @@ export async function completeJob(
           summary_markdown = $7,
           review_id = $8,
           summary_model = $9,
+          overall_confidence_score = $10,
           error_msg = NULL
       WHERE id = $1
     `,
-    [jobId, input.verdict, input.fileCount, input.commentCount, input.totalInputTokens, input.totalOutputTokens, input.summaryMarkdown, input.reviewId, input.summaryModel],
+    [
+      jobId, 
+      input.verdict, 
+      input.fileCount, 
+      input.commentCount, 
+      input.totalInputTokens, 
+      input.totalOutputTokens, 
+      input.summaryMarkdown, 
+      input.reviewId, 
+      input.summaryModel,
+      input.overallConfidenceScore ?? null
+    ],
   );
 }
 
