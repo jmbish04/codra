@@ -14,24 +14,45 @@ import { reviewWithKimi } from '@server/models/kimi';
 
 function severityIcon(severity: ParsedReviewComment['severity']) {
   const baseUrl = 'https://codra.devarshi.dev/icons';
+  const img = (name: string, alt: string) =>
+    `<img src="${baseUrl}/${name}-icon.svg" width="20" height="20" alt="${alt}" style="vertical-align:middle" />`;
   switch (severity) {
-    case 'P0':
-      return `<img src="${baseUrl}/p0-icon.svg" width="23" height="20" alt="P0" />`;
-    case 'P1':
-      return `<img src="${baseUrl}/p1-icon.svg" width="23" height="20" alt="P1" />`;
-    case 'P2':
-      return `<img src="${baseUrl}/p2-icon.svg" width="23" height="20" alt="P2" />`;
-    case 'P3':
-      return `<img src="${baseUrl}/p3-icon.svg" width="23" height="20" alt="P3" />`;
-    case 'nit':
-      return `<img src="${baseUrl}/nit-icon.svg" width="23" height="20" alt="nit" />`;
-    default:
-      return '⚪';
+    case 'P0':  return img('p0',  'P0');
+    case 'P1':  return img('p1',  'P1');
+    case 'P2':  return img('p2',  'P2');
+    case 'P3':  return img('p3',  'P3');
+    case 'nit': return img('nit', 'nit');
+    default:    return '⚪';
   }
 }
 
+/** Strip leading emoji / legacy tag prefixes from a string (same logic as model-output cleanText). */
+function stripLeadingTags(text: string): string {
+  let current = text.trim();
+  let prev = '';
+  while (current !== prev) {
+    prev = current;
+    current = current
+      .replace(/^([\u{1F300}-\u{1F9FF}\u{2600}-\u{27BF}\u{FE00}-\u{FEFF}]|\[QUALITY\]|\[SECURITY\]|\[BUG\]|\[P[0-3]\]|\[NIT\]|QUALITY|SECURITY|BUG|P[0-3]|NIT|[:\-\s\uFE0F]|[^\w\s])+/giu, '')
+      .trim();
+  }
+  return current;
+}
+
 function formatInlineComment(comment: ParsedReviewComment) {
-  return `${severityIcon(comment.severity)} **${comment.title}**\n\n${comment.body}`;
+  // Clean the body: strip any residual prefix tags, then remove a leading line
+  // that duplicates the title (can happen with stale DB records).
+  let body = stripLeadingTags(comment.body);
+  const firstLine = body.split('\n')[0].trim();
+  const cleanFirstLine = stripLeadingTags(firstLine);
+  if (
+    cleanFirstLine.toLowerCase().startsWith(comment.title.toLowerCase()) ||
+    comment.title.toLowerCase().startsWith(cleanFirstLine.toLowerCase())
+  ) {
+    body = body.slice(firstLine.length).replace(/^[\n\r]+/, '');
+  }
+
+  return `${severityIcon(comment.severity)} <strong>${comment.title}</strong>\n\n${body}`;
 }
 
 function toReviewEvent(verdict: 'approve' | 'comment') {
@@ -50,14 +71,7 @@ function summarizeVerdict(comments: ParsedReviewComment[], hasFailures: boolean)
   return { verdict: 'approve' as const, errors: 0, warnings: 0 };
 }
 
-function formatReviewOverview(rawSummary: string, commitSha: string, botUsername: string) {
-  // Strip legacy headers if present
-  let content = rawSummary.replace(/^(✅ \*\*Approved\*\*|💬 \*\*Comments posted\*\*)\n\n/, '').trim();
-  
-  if (!content) {
-    content = 'All reviewed files passed technical checks.';
-  }
-
+function formatReviewOverview(commitSha: string, botUsername: string) {
   const shortSha = commitSha.slice(0, 10);
   
   return `### 💡 Codra Review
@@ -81,11 +95,7 @@ If Codra has suggestions, it will comment; otherwise it will react with 👍.
 
 Codra can also answer questions or update the PR. Try commenting "@${botUsername} address that feedback".
 
-</details>
-
----
-
-${content}`;
+</details>`;
 }
 
 function shouldTriggerFromPullRequest(action: PullRequestWebhookPayload['action'], config: RepoConfig['review']) {
@@ -371,8 +381,7 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
     totalOutputTokens += summaryResponse.outputTokens;
     await updateJobStep(env, job.id, 'Generating Summary', { status: 'done' });
 
-    const parsedSummary = parseSummaryResponse(summaryResponse.rawText);
-    const formattedSummary = formatReviewOverview(parsedSummary, pr.head.sha, env.BOT_USERNAME);
+    const formattedSummary = formatReviewOverview(pr.head.sha, env.BOT_USERNAME);
 
     await updateJobStep(env, job.id, 'Completing', { status: 'running' });
     const review = await github.createReview(job.owner, job.repo, job.pr_number, {

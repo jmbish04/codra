@@ -23,6 +23,8 @@ export function buildFileReviewSystemPrompt(languagePersona?: string) {
 - Use one finding per distinct issue.
 - Use \`\`\`suggestion blocks for concrete replacement code. Preserve leading whitespace exactly.
 - Keep body brief (1 paragraph max). Describe *why* it's a problem.
+- Do NOT prefix titles or bodies with priority tags (e.g. [P0], [P1]), severity labels (e.g. [QUALITY], [SECURITY], [BUG]), or emoji (🔥, 🔴, etc.). The priority field conveys severity.
+- Titles must be plain, imperative sentences — no brackets, no emoji, no category tags.
 
 CRITICAL: Return ONLY valid JSON matching the schema below. No conversational text.`;
 }
@@ -52,7 +54,7 @@ export function buildFileReviewPrompts(input: {
     `{
   "findings": [
     {
-      "title": "<Imperative title, max 80 chars>",
+      "title": "<Plain imperative title, max 80 chars — NO priority tags, emoji, or brackets>",
       "body": "<Technical explanation citing lines/logic>",
       "confidence_score": <float 0.0-1.0>,
       "priority": <int 0-3>,
