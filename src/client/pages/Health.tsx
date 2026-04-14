@@ -3,18 +3,42 @@ import { Link } from 'react-router-dom';
 import { api } from '@client/lib/api';
 import { StatusBadge } from '@client/components/StatusBadge';
 import { Button } from '@client/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@client/components/ui/card';
-import { AlertTriangle, RefreshCw, RotateCcw, Trash2, CheckCircle } from 'lucide-react';
+import {
+  AlertTriangle, RefreshCw, RotateCcw, Trash2,
+  CheckCircle2, ShieldAlert, ServerCrash,
+} from 'lucide-react';
+import { cn } from '@client/lib/utils';
 import type { JobSummary } from '@shared/schema';
 import type { DlqMessage } from '@shared/api';
 
+/* Tiny health indicator pill */
+function HealthPill({ ok }: { ok: boolean }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide border',
+      )}
+      style={ok
+        ? { background: 'var(--success-bg)', color: 'var(--success)', borderColor: 'var(--success-border)' }
+        : { background: 'var(--danger-bg)',  color: 'var(--danger)',  borderColor: 'var(--danger-border)' }
+      }
+    >
+      <span
+        className="h-1.5 w-1.5 rounded-full"
+        style={{ background: 'currentColor' }}
+      />
+      {ok ? 'Healthy' : 'Issues'}
+    </span>
+  );
+}
+
 export function HealthPage() {
-  const [failedJobs, setFailedJobs] = useState<JobSummary[]>([]);
-  const [dlqMessages, setDlqMessages] = useState<DlqMessage[]>([]);
-  const [loadingJobs, setLoadingJobs] = useState(true);
-  const [loadingDlq, setLoadingDlq] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [processing, setProcessing] = useState(false);
+  const [failedJobs,   setFailedJobs]   = useState<JobSummary[]>([]);
+  const [dlqMessages,  setDlqMessages]  = useState<DlqMessage[]>([]);
+  const [loadingJobs,  setLoadingJobs]  = useState(true);
+  const [loadingDlq,   setLoadingDlq]   = useState(true);
+  const [error,        setError]        = useState<string | null>(null);
+  const [processing,   setProcessing]   = useState(false);
 
   const loadData = async () => {
     setError(null);
@@ -25,8 +49,8 @@ export function HealthPage() {
       ]);
       setFailedJobs(jobsRes.jobs);
       setDlqMessages(dlqRes.messages);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load health data.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load health data.');
     } finally {
       setLoadingJobs(false);
       setLoadingDlq(false);
@@ -44,222 +68,305 @@ export function HealthPage() {
     setProcessing(true);
     try {
       const res = await api.replayDlqMessages(leaseIds);
-      alert(`Successfully replayed ${res.replayedCount} messages.`);
+      alert(`Replayed ${res.replayedCount} message(s).`);
       await loadData();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to replay messages.');
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Replay failed.');
     } finally {
       setProcessing(false);
     }
   };
 
   const handlePurgeDlq = async (leaseIds: string[]) => {
-    if (processing || !confirm('Are you sure you want to permanently discard these messages?')) return;
+    if (processing || !confirm('Permanently discard these messages?')) return;
     setProcessing(true);
     try {
       const res = await api.purgeDlqMessages(leaseIds);
-      alert(`Successfully purged ${res.purged} messages.`);
+      alert(`Purged ${res.purged} message(s).`);
       await loadData();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to purge messages.');
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Purge failed.');
     } finally {
       setProcessing(false);
     }
   };
 
-  const thClass = 'px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground';
-  const tdClass = 'px-4 py-3 text-sm';
+  const dlqOk     = dlqMessages.length === 0  && !loadingDlq;
+  const failedOk  = failedJobs.length  === 0  && !loadingJobs;
+  const allOk     = dlqOk && failedOk;
+
+  const thCls = 'px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-muted-foreground';
+  const tdCls = 'px-4 py-3.5 text-sm';
 
   return (
-    <section className="flex flex-col gap-6">
+    <section className="page-enter flex flex-col gap-6">
+
       {/* Header */}
       <header className="flex items-end justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-accent">System Monitoring</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground">
-            System Health &amp; Observability
+          <p className="text-xs font-semibold uppercase tracking-widest text-primary/70 mb-1">
+            Monitoring
+          </p>
+          <h1
+            className="text-2xl font-bold text-foreground"
+            style={{ letterSpacing: '-0.025em' }}
+          >
+            System health
           </h1>
+          <div className="mt-2">
+            <HealthPill ok={allOk} />
+          </div>
         </div>
         <Button
+          id="health-refresh-btn"
           variant="outline"
+          size="sm"
           onClick={loadData}
           disabled={loadingJobs || loadingDlq}
           className="gap-2"
         >
-          <RefreshCw size={14} className={(loadingJobs || loadingDlq) ? 'animate-spin' : ''} />
+          <RefreshCw
+            size={13}
+            className={(loadingJobs || loadingDlq) ? 'animate-spin' : ''}
+          />
           Refresh
         </Button>
       </header>
 
+      {/* Summary strip */}
+      <div className="surface grid grid-cols-2 divide-x divide-border">
+        {[
+          {
+            icon: ShieldAlert,
+            label: 'Dead Letter Queue',
+            count: dlqMessages.length,
+            ok: dlqOk,
+            loading: loadingDlq,
+          },
+          {
+            icon: ServerCrash,
+            label: 'Failed jobs',
+            count: failedJobs.length,
+            ok: failedOk,
+            loading: loadingJobs,
+          },
+        ].map(({ icon: Icon, label, count, ok, loading }) => (
+          <div key={label} className="flex items-center gap-4 px-6 py-4">
+            <div
+              className="flex h-10 w-10 items-center justify-center rounded-lg shrink-0"
+              style={ok
+                ? { background: 'var(--success-bg)', color: 'var(--success)' }
+                : { background: 'var(--danger-bg)',  color: 'var(--danger)' }
+              }
+            >
+              {ok
+                ? <CheckCircle2 size={18} strokeWidth={2} />
+                : <Icon size={18} strokeWidth={2} />
+              }
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground font-medium">{label}</p>
+              <p className="text-xl font-bold text-foreground mt-0.5" style={{ letterSpacing: '-0.03em' }}>
+                {loading ? '—' : count}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        <div
+          className="rounded-md border px-4 py-3 text-sm"
+          style={{ background: 'var(--danger-bg)', borderColor: 'var(--danger-border)', color: 'var(--danger)' }}
+        >
+          {error}
+        </div>
       )}
 
-      {/* DLQ */}
-      <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={15} className="text-amber-500" />
-            <CardTitle>Dead Letter Queue (DLQ)</CardTitle>
-            {dlqMessages.length === 0 && !loadingDlq && (
-              <span className="ml-1 flex items-center gap-1 text-xs text-emerald-600 font-medium">
-                <CheckCircle size={12} /> All clear
+      {/* ── DLQ section ── */}
+      <div className="surface overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-2.5">
+            <ShieldAlert
+              size={14}
+              strokeWidth={1.75}
+              style={{ color: dlqMessages.length > 0 ? 'var(--warning)' : 'var(--muted-foreground)' }}
+            />
+            <span className="text-sm font-semibold text-foreground">Dead Letter Queue</span>
+            {dlqMessages.length > 0 && (
+              <span
+                className="rounded px-1.5 py-0.5 text-[10px] font-bold"
+                style={{ background: 'var(--warning-bg)', color: 'var(--warning)' }}
+              >
+                {dlqMessages.length}
               </span>
             )}
           </div>
           <div className="flex gap-2">
             <Button
-              variant="outline"
-              size="sm"
+              variant="outline" size="sm"
               onClick={() => handleReplayDlq(dlqMessages.map((m) => m.lease_id))}
               disabled={processing || dlqMessages.length === 0}
-              className="gap-1.5"
+              className="h-7 px-2.5 text-xs gap-1.5"
             >
-              <RotateCcw size={12} /> Replay All
+              <RotateCcw size={11} /> Replay all
             </Button>
             <Button
-              variant="destructive"
-              size="sm"
+              variant="destructive" size="sm"
               onClick={() => handlePurgeDlq(dlqMessages.map((m) => m.lease_id))}
               disabled={processing || dlqMessages.length === 0}
-              className="gap-1.5"
+              className="h-7 px-2.5 text-xs gap-1.5"
             >
-              <Trash2 size={12} /> Purge All
+              <Trash2 size={11} /> Purge all
             </Button>
           </div>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <p className="mb-4 text-sm text-muted-foreground">
-            Messages that failed all retry attempts and are parked for manual intervention.
-          </p>
-          <div className="overflow-auto rounded-xl border border-border/50">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border/50 bg-muted/30">
-                  <th className={thClass}>Timestamp</th>
-                  <th className={thClass}>Attempts</th>
-                  <th className={thClass}>Payload</th>
-                  <th className={thClass}>Actions</th>
+        </div>
+        <p className="px-5 py-2.5 text-xs text-muted-foreground border-b border-border/50">
+          Messages that exhausted all retry attempts and are parked for manual action.
+        </p>
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="border-b border-border/50 bg-muted/30">
+              <th className={thCls}>Timestamp</th>
+              <th className={thCls}>Attempts</th>
+              <th className={thCls}>Payload</th>
+              <th className={thCls}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loadingDlq ? (
+              <tr><td colSpan={4} className={`${tdCls} text-center text-muted-foreground`}>Loading…</td></tr>
+            ) : dlqMessages.length === 0 ? (
+              <tr>
+                <td colSpan={4} className={`${tdCls} py-8 text-center text-muted-foreground`}>
+                  <div className="flex flex-col items-center gap-2">
+                    <CheckCircle2 size={22} style={{ color: 'var(--success)' }} strokeWidth={1.5} />
+                    DLQ is empty — no failed messages.
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              dlqMessages.map((msg) => (
+                <tr key={msg.lease_id} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
+                  <td className={`${tdCls} whitespace-nowrap font-mono text-xs text-muted-foreground`}>
+                    {new Date(msg.metadata.timestamp).toLocaleString()}
+                  </td>
+                  <td className={tdCls}>
+                    <span
+                      className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-bold"
+                      style={{ background: 'var(--warning-bg)', color: 'var(--warning)' }}
+                    >
+                      {msg.metadata.attempts}×
+                    </span>
+                  </td>
+                  <td className={`${tdCls} max-w-xs`}>
+                    <pre className="rounded bg-muted/50 p-2 text-[11px] overflow-hidden text-muted-foreground font-mono leading-relaxed max-h-24">
+                      {JSON.stringify(msg.body, null, 2)}
+                    </pre>
+                  </td>
+                  <td className={tdCls}>
+                    <div className="flex gap-1.5">
+                      <Button
+                        variant="outline" size="sm"
+                        onClick={() => handleReplayDlq([msg.lease_id])}
+                        disabled={processing}
+                        className="h-7 px-2 text-xs gap-1"
+                      >
+                        <RotateCcw size={10} /> Replay
+                      </Button>
+                      <Button
+                        variant="destructive" size="sm"
+                        onClick={() => handlePurgeDlq([msg.lease_id])}
+                        disabled={processing}
+                        className="h-7 px-2 text-xs gap-1"
+                      >
+                        <Trash2 size={10} /> Purge
+                      </Button>
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {loadingDlq ? (
-                  <tr>
-                    <td colSpan={4} className={`${tdClass} text-center text-muted-foreground`}>Loading DLQ…</td>
-                  </tr>
-                ) : dlqMessages.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className={`${tdClass} text-center text-muted-foreground`}>
-                      DLQ is empty — all systems normal.
-                    </td>
-                  </tr>
-                ) : (
-                  dlqMessages.map((msg) => (
-                    <tr key={msg.lease_id} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
-                      <td className={`${tdClass} whitespace-nowrap text-muted-foreground font-mono text-xs`}>
-                        {new Date(msg.metadata.timestamp).toLocaleString()}
-                      </td>
-                      <td className={tdClass}>
-                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                          {msg.metadata.attempts}
-                        </span>
-                      </td>
-                      <td className={`${tdClass} max-w-sm`}>
-                        <pre className="rounded-lg bg-muted/50 p-2 text-xs overflow-hidden text-muted-foreground">
-                          {JSON.stringify(msg.body, null, 2)}
-                        </pre>
-                      </td>
-                      <td className={tdClass}>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleReplayDlq([msg.lease_id])}
-                            disabled={processing}
-                            className="h-7 px-2.5 text-xs gap-1"
-                          >
-                            <RotateCcw size={10} /> Replay
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={() => handlePurgeDlq([msg.lease_id])}
-                            disabled={processing}
-                            className="h-7 px-2.5 text-xs gap-1"
-                          >
-                            <Trash2 size={10} /> Purge
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
 
-      {/* Failed Jobs */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={15} className="text-red-500" />
-            <CardTitle>Failed Jobs</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <p className="mb-4 text-sm text-muted-foreground">
-            Review jobs that encountered errors during execution.
-          </p>
-          <div className="overflow-auto rounded-xl border border-border/50">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border/50 bg-muted/30">
-                  <th className={thClass}>Repo</th>
-                  <th className={thClass}>PR</th>
-                  <th className={thClass}>Error</th>
-                  <th className={thClass}>Finished</th>
-                  <th className={thClass} />
+      {/* ── Failed jobs section ── */}
+      <div className="surface overflow-hidden">
+        <div className="flex items-center gap-2.5 px-5 py-4 border-b border-border">
+          <ServerCrash
+            size={14}
+            strokeWidth={1.75}
+            style={{ color: failedJobs.length > 0 ? 'var(--danger)' : 'var(--muted-foreground)' }}
+          />
+          <span className="text-sm font-semibold text-foreground">Failed jobs</span>
+          {failedJobs.length > 0 && (
+            <span
+              className="rounded px-1.5 py-0.5 text-[10px] font-bold"
+              style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}
+            >
+              {failedJobs.length}
+            </span>
+          )}
+        </div>
+        <p className="px-5 py-2.5 text-xs text-muted-foreground border-b border-border/50">
+          Review jobs that encountered errors during execution.
+        </p>
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="border-b border-border/50 bg-muted/30">
+              <th className={thCls}>Repository</th>
+              <th className={thCls}>PR</th>
+              <th className={thCls}>Status</th>
+              <th className={thCls}>Error</th>
+              <th className={thCls}>Finished</th>
+              <th className={thCls} />
+            </tr>
+          </thead>
+          <tbody>
+            {loadingJobs ? (
+              <tr><td colSpan={6} className={`${tdCls} text-center text-muted-foreground`}>Loading…</td></tr>
+            ) : failedJobs.length === 0 ? (
+              <tr>
+                <td colSpan={6} className={`${tdCls} py-8 text-center text-muted-foreground`}>
+                  <div className="flex flex-col items-center gap-2">
+                    <CheckCircle2 size={22} style={{ color: 'var(--success)' }} strokeWidth={1.5} />
+                    No failed jobs found.
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              failedJobs.map((job) => (
+                <tr key={job.id} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
+                  <td className={tdCls}>
+                    <Link to={`/jobs/${job.id}`} className="font-semibold text-primary hover:underline underline-offset-2">
+                      {job.owner}/{job.repo}
+                    </Link>
+                  </td>
+                  <td className={`${tdCls} font-mono text-xs text-muted-foreground`}>#{job.prNumber}</td>
+                  <td className={tdCls}><StatusBadge label={job.status} /></td>
+                  <td className={`${tdCls} max-w-[220px]`}>
+                    <p
+                      className="text-xs break-words leading-relaxed line-clamp-2"
+                      style={{ color: 'var(--danger)' }}
+                    >
+                      {job.errorMessage || 'Unknown error'}
+                    </p>
+                  </td>
+                  <td className={`${tdCls} whitespace-nowrap text-xs text-muted-foreground`}>
+                    {job.finishedAt ? new Date(job.finishedAt).toLocaleString() : '—'}
+                  </td>
+                  <td className={tdCls}>
+                    <Button variant="outline" size="sm" asChild className="h-7 px-2.5 text-xs">
+                      <Link to={`/jobs/${job.id}`}>Details</Link>
+                    </Button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {loadingJobs ? (
-                  <tr>
-                    <td colSpan={5} className={`${tdClass} text-center text-muted-foreground`}>Loading failed jobs…</td>
-                  </tr>
-                ) : failedJobs.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className={`${tdClass} text-center text-muted-foreground`}>No failed jobs found.</td>
-                  </tr>
-                ) : (
-                  failedJobs.map((job) => (
-                    <tr key={job.id} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
-                      <td className={tdClass}>
-                        <Link to={`/jobs/${job.id}`} className="font-medium text-accent hover:underline">
-                          {job.owner}/{job.repo}
-                        </Link>
-                      </td>
-                      <td className={`${tdClass} font-semibold`}>#{job.prNumber}</td>
-                      <td className={`${tdClass} max-w-xs`}>
-                        <div className="text-red-600 text-xs break-words">{job.errorMessage || 'Unknown error'}</div>
-                      </td>
-                      <td className={`${tdClass} whitespace-nowrap text-muted-foreground`}>
-                        {job.finishedAt ? new Date(job.finishedAt).toLocaleString() : '—'}
-                      </td>
-                      <td className={tdClass}>
-                        <Button variant="outline" size="sm" asChild className="h-7 px-2.5 text-xs">
-                          <Link to={`/jobs/${job.id}`}>Details</Link>
-                        </Button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

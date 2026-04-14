@@ -6,94 +6,135 @@ import {
   BarChart2,
   HeartPulse,
   LogOut,
-  Bot,
+  Sun,
+  Moon,
+  Zap,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
-import { Button } from '@client/components/ui/button';
+import { useTheme } from '@client/lib/theme';
 
 const links = [
-  { to: '/', label: 'Jobs', end: true, icon: LayoutDashboard },
-  { to: '/repos', label: 'Repos', icon: GitBranch },
-  { to: '/stats', label: 'Stats', icon: BarChart2 },
-  { to: '/health', label: 'System', icon: HeartPulse },
+  { to: '/',       label: 'Jobs',   end: true, icon: LayoutDashboard },
+  { to: '/repos',  label: 'Repos',             icon: GitBranch },
+  { to: '/stats',  label: 'Stats',             icon: BarChart2 },
+  { to: '/health', label: 'System',            icon: HeartPulse },
 ];
 
 export function AppShell() {
+  const { theme, toggleTheme } = useTheme();
+
   return (
     <div className="flex min-h-svh bg-background">
-      {/* ── Sidebar ── */}
+
+      {/* ────────────────────────── Sidebar ────────────────────────── */}
       <aside
-        className={cn(
-          'fixed inset-y-0 left-0 z-30 flex w-[var(--sidebar-width)] flex-col gap-6 border-r border-border/50 px-4 py-6',
-          'bg-card/70 backdrop-blur-xl shadow-[1px_0_0_0_hsl(var(--border)/40%)]',
-        )}
+        style={{ width: 'var(--sidebar-width)' }}
+        className="fixed inset-y-0 left-0 z-30 flex flex-col border-r border-border bg-card transition-colors duration-300"
       >
+
         {/* Brand */}
-        <div className="flex items-center gap-2.5 px-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
-            <Bot size={16} />
+        <div className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
+          {/* Emerald icon mark */}
+          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary shadow-sm">
+            <Zap size={14} className="text-primary-foreground" strokeWidth={2.5} />
           </div>
-          <div>
-            <div className="font-mono text-lg font-bold leading-none tracking-tight text-foreground">
+          <div className="flex items-baseline gap-1">
+            <span
+              className="text-[15px] font-bold text-foreground tracking-tight"
+              style={{ letterSpacing: '-0.02em' }}
+            >
               Codra
-            </div>
-            <div className="text-[10px] text-muted-foreground">PR Review Bot</div>
+            </span>
+            <span className="text-[9px] font-semibold uppercase tracking-widest text-primary/60">
+              review
+            </span>
           </div>
         </div>
 
-        {/* Nav */}
-        <nav className="flex flex-col gap-1">
-          {links.map(({ to, label, end, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              className={({ isActive }) =>
-                cn(
-                  'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all',
-                  isActive
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
-                )
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <Icon
-                    size={16}
-                    className={cn(
-                      'shrink-0 transition-colors',
-                      isActive ? 'text-primary-foreground' : 'text-muted-foreground group-hover:text-foreground',
-                    )}
-                  />
-                  {label}
-                </>
-              )}
-            </NavLink>
-          ))}
+        {/* Navigation */}
+        <nav className="flex-1 p-2.5 pt-3">
+          <div className="mb-1 px-2 pb-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+              Navigation
+            </p>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            {links.map(({ to, label, end, icon: Icon }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                className={({ isActive }) =>
+                  cn('nav-item', isActive && 'active')
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    <Icon
+                      size={15}
+                      strokeWidth={isActive ? 2.25 : 1.75}
+                      className={cn(
+                        'shrink-0 transition-colors',
+                        isActive ? 'text-primary' : 'text-muted-foreground/70',
+                      )}
+                    />
+                    {label}
+                  </>
+                )}
+              </NavLink>
+            ))}
+          </div>
         </nav>
 
-        {/* Spacer */}
-        <div className="flex-1" />
+        {/* Footer */}
+        <div className="shrink-0 border-t border-border p-2.5">
+          <div className="flex flex-col gap-0.5">
+            <button
+              id="theme-toggle"
+              type="button"
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="nav-item"
+            >
+              {theme === 'dark'
+                ? <><Sun size={15} strokeWidth={1.75} className="shrink-0 text-muted-foreground/70" /> Light mode</>
+                : <><Moon size={15} strokeWidth={1.75} className="shrink-0 text-muted-foreground/70" /> Dark mode</>
+              }
+            </button>
+            <button
+              id="logout-btn"
+              type="button"
+              className="nav-item"
+              onClick={async () => {
+                await api.logout();
+                location.href = '/login';
+              }}
+            >
+              <LogOut size={15} strokeWidth={1.75} className="shrink-0 text-muted-foreground/70" />
+              Log out
+            </button>
+          </div>
 
-        {/* Logout */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="justify-start gap-3 text-muted-foreground hover:text-foreground"
-          onClick={async () => {
-            await api.logout();
-            location.href = '/login';
-          }}
-        >
-          <LogOut size={15} />
-          Log out
-        </Button>
+          {/* Version tag */}
+          <div className="mt-3 px-2">
+            <div className="flex items-center gap-1.5">
+              <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+              <span className="text-[10px] text-muted-foreground/50 font-mono">
+                codra · dev
+              </span>
+            </div>
+          </div>
+        </div>
       </aside>
 
-      {/* ── Main content ── */}
-      <main className="ml-[var(--sidebar-width)] flex-1 min-w-0 px-8 py-8">
-        <Outlet />
+      {/* ────────────────────────── Main ────────────────────────── */}
+      <main
+        style={{ marginLeft: 'var(--sidebar-width)' }}
+        className="flex-1 min-w-0 transition-colors duration-300"
+      >
+        <div className="mx-auto max-w-screen-xl px-8 py-8">
+          <Outlet />
+        </div>
       </main>
     </div>
   );
