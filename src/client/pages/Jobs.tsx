@@ -6,6 +6,7 @@ import { Skeleton } from '@client/components/skeleton';
 import { EmptyState } from '@client/components/empty-state';
 import { Button } from '@client/components/ui/button';
 import { Input } from '@client/components/ui/input';
+import { Select } from '@client/components/ui/select';
 import { Inbox, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import type { JobSummary } from '@shared/schema';
 
@@ -57,9 +58,6 @@ export function JobsPage() {
 
   const totalPages = Math.ceil(total / limit);
 
-  const selectCls =
-    'h-9 rounded-md border border-input bg-card px-3 py-1 text-sm text-foreground ' +
-    'focus:outline-none focus:ring-2 focus:ring-ring/50 transition-colors';
 
   const thCls = 'px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-muted-foreground select-none';
 
@@ -108,38 +106,30 @@ export function JobsPage() {
             className="h-9 bg-background shadow-none"
           />
         </div>
-        <div className="flex flex-col gap-1.5 min-w-[130px]">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-            Status
-          </label>
-          <select
-            id="filter-status"
-            className={selectCls}
-            value={filters.status}
-            onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value, page: 1 }))}
-          >
-            <option value="">All statuses</option>
-            <option value="queued">Queued</option>
-            <option value="running">Running</option>
-            <option value="done">Done</option>
-            <option value="failed">Failed</option>
-          </select>
-        </div>
-        <div className="flex flex-col gap-1.5 min-w-[140px]">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-            Verdict
-          </label>
-          <select
-            id="filter-verdict"
-            className={selectCls}
-            value={filters.verdict}
-            onChange={(e) => setFilters((f) => ({ ...f, verdict: e.target.value, page: 1 }))}
-          >
-            <option value="">All verdicts</option>
-            <option value="approve">Approved</option>
-            <option value="comment">Commented</option>
-          </select>
-        </div>
+        <Select
+          label="Status"
+          value={filters.status}
+          onValueChange={(v) => setFilters((f) => ({ ...f, status: v, page: 1 }))}
+          options={[
+            { label: 'All statuses', value: '' },
+            { label: 'Queued', value: 'queued' },
+            { label: 'Running', value: 'running' },
+            { label: 'Done', value: 'done' },
+            { label: 'Failed', value: 'failed' },
+          ]}
+          className="min-w-[140px] flex-1"
+        />
+        <Select
+          label="Verdict"
+          value={filters.verdict}
+          onValueChange={(v) => setFilters((f) => ({ ...f, verdict: v, page: 1 }))}
+          options={[
+            { label: 'All verdicts', value: '' },
+            { label: 'Approved', value: 'approve' },
+            { label: 'Commented', value: 'comment' },
+          ]}
+          className="min-w-[150px] flex-1"
+        />
       </div>
 
       {error && (
@@ -213,7 +203,7 @@ export function JobsPage() {
                       </td>
 
                       {/* Status / Verdict */}
-                      <td className="px-4 py-3.5"><StatusBadge label={job.status} /></td>
+                      <td className="px-4 py-3.5"><StatusBadge label={job.status} job={job} /></td>
                       <td className="px-4 py-3.5">
                         {job.verdict
                           ? <StatusBadge label={job.verdict} />

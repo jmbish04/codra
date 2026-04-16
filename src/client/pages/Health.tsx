@@ -344,7 +344,7 @@ export function HealthPage() {
                     </Link>
                   </td>
                   <td className={`${tdCls} font-mono text-xs text-muted-foreground`}>#{job.prNumber}</td>
-                  <td className={tdCls}><StatusBadge label={job.status} /></td>
+                  <td className={tdCls}><StatusBadge label={job.status} job={job} /></td>
                   <td className={`${tdCls} max-w-[220px]`}>
                     <p
                       className="text-xs break-words leading-relaxed line-clamp-2"

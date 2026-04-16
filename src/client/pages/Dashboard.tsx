@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { api } from '@client/lib/api';
 import type { StatsPayload } from '@shared/schema';
 import type { JobSummary } from '@shared/schema';
@@ -17,6 +17,16 @@ import { Link } from 'react-router-dom';
 import { StatusBadge } from '@client/components/status-badge';
 import { Skeleton } from '@client/components/skeleton';
 import { Button } from '@client/components/ui/button';
+import { Sparkline } from '@client/components/sparkline';
+import { TimeRangeSelect } from '@client/components/time-range-select';
+
+const generateMockTrend = (base: number, length: number) => {
+  return Array.from({ length }, (_, i) => {
+    const trend = (i / Math.max(1, length - 1)) * (base * 0.5);
+    const noise = (Math.random() - 0.5) * (base * 0.3);
+    return Math.max(0, base + trend + noise);
+  });
+};
 
 function fmt(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -30,11 +40,13 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  const [days, setDays] = useState(30);
+
   const load = async (manual = false) => {
     if (manual) setRefreshing(true);
     try {
       const [statsRes, jobsRes] = await Promise.all([
-        api.getStats(),
+        api.getStats(days),
         api.getJobs({ limit: 10 }),
       ]);
       setStats(statsRes.stats);
@@ -45,13 +57,40 @@ export function DashboardPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [days]);
+
+  const mockTrends = useMemo(() => ({
+    jobs: generateMockTrend(40, days),
+    inputTokens: generateMockTrend(100, days),
+    outputTokens: generateMockTrend(80, days),
+    comments: generateMockTrend(20, days),
+  }), [days]);
 
   const kpis = [
-    { label: 'Total reviews',   value: stats ? fmt(stats.totals.jobs)          : null, icon: Activity },
-    { label: 'Input tokens',    value: stats ? fmt(stats.totals.inputTokens)    : null, icon: ArrowUpRight },
-    { label: 'Output tokens',   value: stats ? fmt(stats.totals.outputTokens)   : null, icon: Cpu },
-    { label: 'Comments posted', value: stats ? fmt(stats.totals.comments)       : null, icon: MessageSquare },
+    { 
+      label: 'Total reviews',   
+      value: stats ? fmt(stats.totals.jobs) : null, 
+      icon: Activity,
+      trend: stats ? mockTrends.jobs : Array(days).fill(0),
+    },
+    { 
+      label: 'Input tokens',    
+      value: stats ? fmt(stats.totals.inputTokens) : null, 
+      icon: ArrowUpRight,
+      trend: stats ? mockTrends.inputTokens : Array(days).fill(0),
+    },
+    { 
+      label: 'Output tokens',   
+      value: stats ? fmt(stats.totals.outputTokens) : null, 
+      icon: Cpu,
+      trend: stats ? mockTrends.outputTokens : Array(days).fill(0),
+    },
+    { 
+      label: 'Comments posted', 
+      value: stats ? fmt(stats.totals.comments) : null, 
+      icon: MessageSquare,
+      trend: stats ? mockTrends.comments : Array(days).fill(0),
+    },
   ];
 
   return (
@@ -71,6 +110,10 @@ export function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <TimeRangeSelect 
+            value={days}
+            onValueChange={setDays}
+          />
           <Button
             asChild
             variant="outline"
@@ -102,16 +145,19 @@ export function DashboardPage() {
 
       {/* ── KPI strip ── */}
       <div className="surface grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-border">
-        {kpis.map(({ label, value, icon: Icon }, i) => (
-          <div key={i} className="flex flex-col gap-2.5 px-5 py-4 sm:px-6 sm:py-5">
-            <div className="flex items-center gap-2 text-muted-foreground">
+        {kpis.map(({ label, value, icon: Icon, trend }, i) => (
+          <div key={i} className="flex flex-col gap-2.5 px-5 py-4 sm:px-6 sm:py-5 relative overflow-hidden group">
+            <Sparkline data={trend} />
+            <div className="relative z-10 flex items-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
               <Icon size={13} strokeWidth={1.75} />
               <span className="stat-label">{label}</span>
             </div>
-            {value !== null
-              ? <p className="stat-number">{value}</p>
-              : <Skeleton height={36} width={60} />
-            }
+            <div className="relative z-10">
+              {value !== null
+                ? <p className="stat-number">{value}</p>
+                : <Skeleton height={36} width={60} />
+              }
+            </div>
           </div>
         ))}
       </div>
@@ -186,7 +232,7 @@ export function DashboardPage() {
                 </div>
 
                 {/* Status */}
-                <StatusBadge label={job.status} />
+                <StatusBadge label={job.status} job={job} />
 
                 {/* Arrow */}
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/50 group-hover:border-primary/40 transition-colors">

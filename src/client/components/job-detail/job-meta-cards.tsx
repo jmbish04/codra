@@ -18,7 +18,7 @@ export function JobMetaCards({ job }: JobMetaCardsProps) {
         <CardContent className="pt-0">
           <dl className="grid grid-cols-2 gap-x-4 gap-y-4">
             {[
-              { label: 'Status',  value: <StatusBadge label={job.status} /> },
+              { label: 'Status',  value: <StatusBadge label={job.status} job={job} /> },
               { label: 'Verdict', value: job.verdict ? <StatusBadge label={job.verdict} /> : <span className="text-muted-foreground">—</span> },
               { label: 'Trigger', value: <Badge variant="neutral" className="capitalize">{job.trigger}</Badge> },
               { label: 'Tokens',  value: <span className="font-mono text-sm">{(job.totalInputTokens + job.totalOutputTokens).toLocaleString()}</span> },

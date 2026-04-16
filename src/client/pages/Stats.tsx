@@ -7,6 +7,7 @@ import {
   PieChart, Pie, Cell,
 } from 'recharts';
 import { TrendingUp, CheckCircle2, Cpu, Terminal, Activity, ArrowUpRight, MessageSquare } from 'lucide-react';
+import { TimeRangeSelect } from '@client/components/time-range-select';
 
 /* ── Emerald palette (static — needed for SVG attributes) ── */
 const EM      = '#10b981'; // emerald-500
@@ -78,7 +79,7 @@ function KpiStrip({ stats }: { stats: StatsPayload }) {
 /* ══════════════════════════════════════════════════════════
    EVIL Chart: Full-width Area — 30-day review volume
 ══════════════════════════════════════════════════════════ */
-function EvilAreaChart({ data, isDark }: { data: { day: string; jobs: number }[]; isDark: boolean }) {
+function EvilAreaChart({ data, isDark, days }: { data: { day: string; jobs: number }[]; isDark: boolean; days: number }) {
   const color = isDark ? EM_DARK : EM;
   return (
     <div className="chart-card">
@@ -86,7 +87,7 @@ function EvilAreaChart({ data, isDark }: { data: { day: string; jobs: number }[]
       <div className="flex items-center justify-between px-5 pt-5 pb-3">
         <div className="flex items-center gap-2">
           <TrendingUp size={14} className="text-primary" strokeWidth={2} />
-          <span className="text-sm font-semibold text-foreground">Review volume · last 30 days</span>
+          <span className="text-sm font-semibold text-foreground">Review volume · last {days} days</span>
         </div>
         <span className="text-xs text-muted-foreground font-mono">
           {data.reduce((s, d) => s + d.jobs, 0)} total
@@ -349,6 +350,7 @@ export function StatsPage() {
   const [stats, setStats] = useState<StatsPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(false);
+  const [days, setDays] = useState(30);
 
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains('dark'));
@@ -360,10 +362,10 @@ export function StatsPage() {
   }, []);
 
   useEffect(() => {
-    api.getStats()
+    api.getStats(days)
       .then((r) => setStats(r.stats))
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load stats.'));
-  }, []);
+  }, [days]);
 
   if (!stats) {
     return (
@@ -393,18 +395,26 @@ export function StatsPage() {
     <section className="page-enter flex flex-col gap-5">
 
       {/* Header */}
-      <header>
-        <p className="text-xs font-semibold uppercase tracking-widest text-primary/70 mb-1">Analytics</p>
-        <h1 className="text-2xl font-bold tracking-tight text-foreground" style={{ letterSpacing: '-0.025em' }}>
-          System insights
-        </h1>
+      <header className="flex items-end justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-primary/70 mb-1">Analytics</p>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground" style={{ letterSpacing: '-0.025em' }}>
+            System insights
+          </h1>
+        </div>
+        <div className="flex items-center gap-3">
+          <TimeRangeSelect 
+            value={days}
+            onValueChange={setDays}
+          />
+        </div>
       </header>
-
+      
       {/* KPI strip */}
       <KpiStrip stats={stats} />
 
       {/* Full-width area chart */}
-      <EvilAreaChart data={stats.last30Days} isDark={isDark} />
+      <EvilAreaChart data={stats.trend} isDark={isDark} days={days} />
 
       {/* Row 2: bar + donut */}
       <div className="grid grid-cols-2 gap-5">

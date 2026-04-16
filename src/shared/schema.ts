@@ -222,10 +222,13 @@ export const statsSchema = z.object({
     outputTokens: z.number().int(),
     comments: z.number().int(),
   }),
-  last30Days: z.array(
+  trend: z.array(
     z.object({
       day: z.string(),
       jobs: z.number().int(),
+      inputTokens: z.number().int(),
+      outputTokens: z.number().int(),
+      comments: z.number().int(),
     }),
   ),
   verdicts: z.array(

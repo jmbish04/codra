@@ -75,8 +75,9 @@ export const api = {
   getRepo(owner: string, repo: string) {
     return request<RepoConfigResponse>(`/api/repos/${owner}/${repo}/config`);
   },
-  getStats() {
-    return request<StatsResponse>('/api/stats');
+  getStats(days?: number) {
+    const query = days ? `?days=${days}` : '';
+    return request<StatsResponse>(`/api/stats${query}`);
   },
   syncRepos() {
     return request<SyncReposResponse>('/api/repos/sync', {

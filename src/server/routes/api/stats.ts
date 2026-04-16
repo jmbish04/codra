@@ -6,7 +6,9 @@ export function createStatsRouter() {
   const app = new Hono<AppEnv>();
 
   app.get('/', async (c) => {
-    const stats = await getStats(c.env);
+    const daysParam = c.req.query('days');
+    const days = daysParam ? parseInt(daysParam, 10) : 30;
+    const stats = await getStats(c.env, days);
     return c.json({ stats });
   });
 

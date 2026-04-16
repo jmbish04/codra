@@ -46,7 +46,7 @@
   --ring:                oklch(58%   0.185 155);
 
   /* Radius */
-  --radius: 0.75rem;
+  --radius: 0.5rem;
   --sidebar-width: 240px;
 
   /* Semantic palette */
@@ -160,11 +160,11 @@
   --color-info-bg:        var(--info-bg);
   --color-info-border:    var(--info-border);
 
-  --radius-sm:  4px;
-  --radius-md:  8px;
-  --radius-lg:  12px;
-  --radius-xl:  24px;
-  --radius-2xl: 48px;
+  --radius-sm:  2px;
+  --radius-md:  4px;
+  --radius-lg:  8px;
+  --radius-xl:  16px;
+  --radius-2xl: 32px;
 
   /* Fluid Typography Scale (Ratio: 1.25) */
   --text-xs:   0.75rem;
@@ -265,6 +265,83 @@
   to { transform: rotate(360deg); }
 }
 
+/* Radix & UI Animations */
+@utility animate-in {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  fill-mode: forwards;
+}
+
+@utility animate-out {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  fill-mode: forwards;
+}
+
+@utility fade-in-0 {
+  --tw-enter-opacity: 0;
+  animation-name: enter;
+}
+
+@utility fade-out-0 {
+  --tw-exit-opacity: 0;
+  animation-name: exit;
+}
+
+@utility zoom-in-95 {
+  --tw-enter-scale: 0.95;
+  animation-name: enter;
+}
+
+@utility zoom-in-98 {
+  --tw-enter-scale: 0.98;
+  animation-name: enter;
+}
+
+@utility zoom-out-95 {
+  --tw-exit-scale: 0.95;
+  animation-name: exit;
+}
+
+@utility zoom-out-98 {
+  --tw-exit-scale: 0.98;
+  animation-name: exit;
+}
+
+@utility slide-in-from-top-1 {
+  --tw-enter-translate-y: -4px;
+  animation-name: enter;
+}
+
+@utility slide-in-from-top-2 {
+  --tw-enter-translate-y: -8px;
+  animation-name: enter;
+}
+
+@utility slide-in-from-bottom-1 {
+  --tw-enter-translate-y: 4px;
+  animation-name: enter;
+}
+
+@utility slide-in-from-bottom-2 {
+  --tw-enter-translate-y: 8px;
+  animation-name: enter;
+}
+
+@keyframes enter {
+  from {
+    opacity: var(--tw-enter-opacity, 1);
+    transform: translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0) scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), 1) rotate(var(--tw-enter-rotate, 0));
+  }
+}
+
+@keyframes exit {
+  to {
+    opacity: var(--tw-exit-opacity, 1);
+    transform: translate3d(var(--tw-exit-translate-x, 0), var(--tw-exit-translate-y, 0), 0) scale3d(var(--tw-exit-scale, 1), var(--tw-exit-scale, 1), 1) rotate(var(--tw-exit-rotate, 0));
+  }
+}
+
 @utility page-enter {
   animation: fade-up 0.5s var(--ease-out-expo) both;
   & > * {
@@ -287,7 +364,7 @@
    Surface & Utilities
 ───────────────────────────────────────────────────── */
 @utility surface {
-  @apply bg-card border border-border rounded-lg transition-all duration-300;
+  @apply bg-card border border-border rounded-md transition-all duration-300;
   box-shadow: var(--shadow-sm);
   &:hover { box-shadow: var(--shadow-md); }
 }
