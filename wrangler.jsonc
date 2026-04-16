@@ -54,7 +54,8 @@
     "run_worker_first": [
       "/",
       "/login",
-      "/jobs/*",
+      "/dashboard*",
+      "/jobs*",
       "/repos*",
       "/stats*",
       "/health*",

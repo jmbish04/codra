@@ -31,11 +31,13 @@ export function createApp() {
   app.route('/api/dlq', createDlqRouter());
 
   app.get('/login', serveIndex);
-  app.get('/', requireSession, serveIndex);
+  app.get('/', serveIndex); // Unauthenticated landing page
+  app.get('/dashboard', requireSession, serveIndex);
   app.get('/jobs', requireSession, serveIndex);
   app.get('/jobs/*', requireSession, serveIndex);
   app.get('/repos', requireSession, serveIndex);
   app.get('/stats', requireSession, serveIndex);
+  app.get('/health', requireSession, serveIndex);
 
   return app;
 }

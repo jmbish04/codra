@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, Link } from 'react-router-dom';
 import { api } from '@client/lib/api';
 import {
   LayoutDashboard,
@@ -9,15 +9,17 @@ import {
   Sun,
   Moon,
   Zap,
+  Activity,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
 import { useTheme } from '@client/lib/theme';
 
 const links = [
-  { to: '/',       label: 'Jobs',   end: true, icon: LayoutDashboard },
-  { to: '/repos',  label: 'Repos',             icon: GitBranch },
-  { to: '/stats',  label: 'Stats',             icon: BarChart2 },
-  { to: '/health', label: 'System',            icon: HeartPulse },
+  { to: '/dashboard', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/jobs',      label: 'Jobs',     icon: Activity,        end: false },
+  { to: '/repos',     label: 'Repos',    icon: GitBranch,       end: false },
+  { to: '/stats',     label: 'Stats',    icon: BarChart2,       end: false },
+  { to: '/health',    label: 'System',   icon: HeartPulse,      end: false },
 ];
 
 export function AppShell() {
@@ -29,11 +31,10 @@ export function AppShell() {
       {/* ────────────────────────── Sidebar ────────────────────────── */}
       <aside
         style={{ width: 'var(--sidebar-width)' }}
-        className="fixed inset-y-0 left-0 z-30 flex flex-col border-r border-border bg-card transition-colors duration-300"
+        className="fixed inset-y-0 left-0 z-30 flex flex-col glass border-r border-border transition-colors duration-300"
       >
 
-        {/* Brand */}
-        <div className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
+        <Link to="/dashboard" className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4 transition-colors hover:bg-secondary/50">
           {/* Emerald icon mark */}
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary shadow-sm">
             <Zap size={14} className="text-primary-foreground" strokeWidth={2.5} />
@@ -49,7 +50,7 @@ export function AppShell() {
               review
             </span>
           </div>
-        </div>
+        </Link>
 
         {/* Navigation */}
         <nav className="flex-1 p-2.5 pt-3">
@@ -115,15 +116,7 @@ export function AppShell() {
             </button>
           </div>
 
-          {/* Version tag */}
-          <div className="mt-3 px-2">
-            <div className="flex items-center gap-1.5">
-              <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-              <span className="text-[10px] text-muted-foreground/50 font-mono">
-                codra · dev
-              </span>
-            </div>
-          </div>
+
         </div>
       </aside>
 

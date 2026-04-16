@@ -74,9 +74,12 @@ export function JobMetaCards({ job }: JobMetaCardsProps) {
           </dl>
 
           {job.errorMessage && (
-            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3">
-              <p className="mb-1 text-xs font-semibold text-red-700 uppercase tracking-wider">Error</p>
-              <p className="text-sm text-red-600">{job.errorMessage}</p>
+            <div
+              className="mt-4 rounded-lg border p-3"
+              style={{ background: 'var(--danger-bg)', borderColor: 'var(--danger-border)', color: 'var(--danger)' }}
+            >
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--danger)' }}>Error</p>
+              <p className="text-sm" style={{ color: 'var(--danger)' }}>{job.errorMessage}</p>
             </div>
           )}
         </CardContent>

@@ -24,7 +24,10 @@ export function JobDetailPage() {
       />
 
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div
+          className="rounded-lg border px-4 py-3 text-sm"
+          style={{ background: 'var(--danger-bg)', borderColor: 'var(--danger-border)', color: 'var(--danger)' }}
+        >
           {error}
         </div>
       )}

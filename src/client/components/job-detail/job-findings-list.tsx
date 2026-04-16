@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { FileText } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@client/components/ui/card';
 import { cn } from '@client/lib/utils';
 import type { JobDetail } from '@shared/schema';
 import { reviewSeverities } from '@shared/schema';
@@ -17,20 +16,22 @@ export function JobFindingsList({ job }: JobFindingsListProps) {
 
   return (
     <div>
+      {/* Section header */}
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <h2 className="text-lg font-bold text-foreground">Findings</h2>
+          <FileText size={14} strokeWidth={1.75} className="text-primary" />
+          <h2 className="text-sm font-semibold text-foreground">Findings</h2>
           {job.status === 'running' && <span className="pulsing-dot" />}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">View by</span>
-          <div className="flex rounded-xl bg-secondary p-1 gap-0.5">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">View by</span>
+          <div className="flex rounded-lg bg-secondary p-0.5 gap-0.5">
             {(['files', 'severity'] as const).map((view) => (
               <button
                 key={view}
                 onClick={() => setViewBy(view)}
                 className={cn(
-                  'rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition-all',
+                  'rounded-md px-3 py-1.5 text-xs font-semibold capitalize transition-all',
                   viewBy === view
                     ? 'bg-card text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground',
@@ -46,8 +47,10 @@ export function JobFindingsList({ job }: JobFindingsListProps) {
       {viewBy === 'files' ? (
         <div className="flex flex-col gap-3">
           {job.files.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border/60 bg-card/30 p-12 text-center text-sm text-muted-foreground">
-              No files reviewed yet.
+            <div className="surface flex flex-col items-center justify-center py-16 text-center">
+              <FileText size={32} className="text-muted-foreground/20 mb-3" />
+              <p className="text-sm font-medium text-muted-foreground">No files reviewed yet.</p>
+              <p className="text-xs text-muted-foreground/60 mt-1">Results will appear here as the review progresses.</p>
             </div>
           ) : (
             job.files.map((file) => (
@@ -69,35 +72,35 @@ export function JobFindingsList({ job }: JobFindingsListProps) {
             const GroupIcon = sev?.icon ?? FileText;
 
             return (
-              <Card key={groupName}>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    {sev?.svg ? (
-                      <img src={sev.svg} alt={groupName} className="w-[16px] h-[16px]" />
-                    ) : (
-                      <GroupIcon
-                        size={15}
-                        className={sev?.iconColor ?? 'text-muted-foreground'}
-                      />
-                    )}
-                    <CardTitle className="uppercase font-mono text-sm">{groupName}</CardTitle>
-                    <span className="ml-1 rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-primary-foreground">
-                      {comments.length}
-                    </span>
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <div className="flex flex-col gap-3">
-                    {comments.map((comment, index) => (
-                      <CommentCard
-                        key={`${groupName}-${index}`}
-                        comment={comment}
-                        filePath={comment.filePath}
-                      />
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+              <div key={groupName} className="surface overflow-hidden">
+                {/* Group header */}
+                <div className="flex items-center gap-2.5 px-5 py-4 border-b border-border">
+                  {sev?.svg ? (
+                    <img src={sev.svg} alt={groupName} className="w-[15px] h-[15px]" />
+                  ) : (
+                    <GroupIcon size={14} strokeWidth={1.75} className={sev?.iconColor ?? 'text-muted-foreground'} />
+                  )}
+                  <span className="text-sm font-semibold text-foreground uppercase tracking-wide font-mono">
+                    {groupName}
+                  </span>
+                  <span
+                    className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                    style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+                  >
+                    {comments.length}
+                  </span>
+                </div>
+                {/* Comment list */}
+                <div className="flex flex-col gap-3 p-5">
+                  {comments.map((comment, index) => (
+                    <CommentCard
+                      key={`${groupName}-${index}`}
+                      comment={comment}
+                      filePath={comment.filePath}
+                    />
+                  ))}
+                </div>
+              </div>
             );
           })}
         </div>

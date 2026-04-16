@@ -15,7 +15,7 @@ export function LoginPage() {
     setError(null);
     try {
       await api.login({ password });
-      location.href = '/';
+      location.href = '/dashboard';
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed.');
     } finally {
@@ -27,23 +27,23 @@ export function LoginPage() {
     <div className="min-h-svh flex items-center justify-center bg-background p-6">
 
       {/* Ambient background */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden>
+      <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden="true">
         <div
-          className="absolute -top-60 -left-60 h-[700px] w-[700px] rounded-full opacity-30 blur-3xl"
+          className="absolute -top-60 -left-60 h-[700px] w-[700px] rounded-full opacity-20 blur-[120px]"
           style={{ background: 'var(--primary)' }}
         />
         <div
-          className="absolute -bottom-60 -right-60 h-[600px] w-[600px] rounded-full opacity-15 blur-3xl"
+          className="absolute -bottom-60 -right-60 h-[600px] w-[600px] rounded-full opacity-10 blur-[120px]"
           style={{ background: 'var(--primary)' }}
         />
       </div>
 
       {/* Form card */}
       <div
-        className="relative z-10 w-full max-w-[360px]"
-        style={{ animation: 'fade-up 0.5s cubic-bezier(0.16,1,0.3,1) both' }}
+        className="relative z-10 w-full max-w-[400px]"
+        style={{ animation: 'fade-up 0.6s var(--ease-out-expo) both' }}
       >
-        <div className="surface p-8 flex flex-col gap-6">
+        <div className="glass p-10 flex flex-col gap-8 rounded-2xl shadow-2xl">
 
           {/* Brand */}
           <div className="flex flex-col gap-4">
