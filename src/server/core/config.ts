@@ -2,13 +2,14 @@ import { parse as parseYaml } from 'yaml';
 import { defaultRepoConfig, repoConfigSchema, type RepoConfig } from '@shared/schema';
 import { REPO_CONFIG_CACHE_VERSION, REPO_CONFIG_FILENAME } from '@shared/config';
 import type { AppBindings } from '@server/env';
-import { upsertRepoConfig } from '@server/db/repo-configs';
+import { getRepoConfigRecord, upsertRepoConfig } from '@server/db/repo-configs';
 import { GitHubClient } from './github';
 
 type CachedConfig = {
   rawYaml: string | null;
   parsedJson: RepoConfig;
   configMissing: boolean;
+  enabled: boolean;
 };
 
 function cacheKey(owner: string, repo: string) {
@@ -21,6 +22,7 @@ export function parseRepoConfig(rawYaml: string | null) {
       rawYaml: null,
       parsedJson: defaultRepoConfig,
       configMissing: true,
+      enabled: true,
     } satisfies CachedConfig;
   }
 
@@ -29,6 +31,7 @@ export function parseRepoConfig(rawYaml: string | null) {
     rawYaml,
     parsedJson: repoConfigSchema.parse(parsed ?? {}),
     configMissing: false,
+    enabled: true,
   } satisfies CachedConfig;
 }
 
@@ -43,18 +46,28 @@ export async function loadRepoConfig(
     return cached as CachedConfig;
   }
 
+  // Check DB first for existing enabled status
+  const existing = await getRepoConfigRecord(env, input.owner, input.repo);
+
   const repoFile = await github.getRepoFileOrNull(input.owner, input.repo, REPO_CONFIG_FILENAME);
   const parsed = parseRepoConfig(repoFile);
+  
+  // Combine: use DB's enabled status if it exists
+  const finalConfig: CachedConfig = {
+    ...parsed,
+    enabled: existing ? existing.enabled : true,
+  };
 
-  await env.APP_KV.put(key, JSON.stringify(parsed), { expirationTtl: 60 * 10 });
+  await env.APP_KV.put(key, JSON.stringify(finalConfig), { expirationTtl: 60 * 10 });
   await upsertRepoConfig(env, {
     installationId: input.installationId,
     owner: input.owner,
     repo: input.repo,
-    rawYaml: parsed.rawYaml,
-    parsedJson: parsed.parsedJson,
-    configMissing: parsed.configMissing,
+    rawYaml: finalConfig.rawYaml,
+    parsedJson: finalConfig.parsedJson,
+    configMissing: finalConfig.configMissing,
+    enabled: finalConfig.enabled,
   });
 
-  return parsed;
+  return finalConfig;
 }

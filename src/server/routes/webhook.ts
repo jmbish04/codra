@@ -52,6 +52,10 @@ export function createWebhookRouter() {
       repo: payload.repository.name,
     });
 
+    if (repoConfig.enabled === false) {
+      return c.json({ ok: true, ignored: true, reason: 'repo_disabled' }, 202);
+    }
+
     const extracted = extractReviewRequest({
       eventName,
       payload,

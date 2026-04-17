@@ -80,7 +80,6 @@
   // Non-sensitive config only. Put credentials in Worker secrets, not here.
   "vars": {
     "BOT_USERNAME": "codra-app",
-    "ENVIRONMENT": "production",
-    "GEMINI_MODEL": "gemma-4-31b-it"
+    "ENVIRONMENT": "production"
   }
 }

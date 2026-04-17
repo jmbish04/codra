@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '@server/env';
-import { getRepoConfigRecord, listRepoConfigs } from '@server/db/repo-configs';
+import { getRepoConfigRecord, listRepoConfigs, upsertRepoConfig } from '@server/db/repo-configs';
 import { jsonError } from '@server/core/http';
 import { GitHubClient, type GitHubInstallation, type GitHubRepository } from '@server/core/github';
 import { loadRepoConfig } from '@server/core/config';
@@ -57,6 +57,36 @@ export function createReposRouter() {
     }
 
     return c.json({ repo });
+  });
+  
+  app.patch('/:owner/:repo/config', async (c) => {
+    const { owner, repo } = c.req.param();
+    const body = await c.req.json();
+    const existing = await getRepoConfigRecord(c.env, owner, repo);
+    
+    if (!existing) {
+      return jsonError('Repository config not found.', 404);
+    }
+    
+    // Separate enabled from model config
+    const { enabled, ...modelConfig } = body;
+    
+    const updatedParsedJson = {
+      ...existing.parsedJson,
+      ...modelConfig,
+    };
+    
+    await upsertRepoConfig(c.env, {
+      installationId: existing.installationId,
+      owner,
+      repo,
+      rawYaml: existing.rawYaml,
+      parsedJson: updatedParsedJson,
+      configMissing: false,
+      enabled: enabled !== undefined ? Boolean(enabled) : undefined,
+    });
+    
+    return c.json({ ok: true });
   });
 
   return app;

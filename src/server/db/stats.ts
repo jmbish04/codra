@@ -76,6 +76,7 @@ export async function getStats(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, days
     verdicts: verdictRows.map((row) => ({ verdict: row.verdict, count: row.count })),
     models: modelRows.map((row) => ({
       modelUsed: row.model_used,
+      provider: row.model_provider ?? undefined,
       calls: row.calls,
       inputTokens: row.input_tokens ?? 0,
       outputTokens: row.output_tokens ?? 0,

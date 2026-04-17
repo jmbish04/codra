@@ -181,6 +181,7 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
             filePath: file.path,
             fileStatus: 'done',
             modelUsed: existing.model_used,
+            modelProvider: (existing as any).model_provider,
             diffLineCount: existing.diff_line_count,
             diffInput: existing.diff_input,
             rawAiOutput: existing.raw_ai_output,
@@ -207,7 +208,7 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
           file,
           prTitle: pr.title ?? null,
           prDescription: pr.body ?? null,
-          config: config.review,
+          config: config,
         });
 
         reviewedComments.push(...response.parsed.comments);
@@ -222,6 +223,7 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
           filePath: file.path,
           fileStatus: 'done',
           modelUsed: response.modelUsed,
+          modelProvider: response.provider,
           diffLineCount: file.lineCount,
           diffInput: response.userPrompt,
           rawAiOutput: response.rawText,
@@ -248,7 +250,8 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
           jobId: job.id,
           filePath: file.path,
           fileStatus: 'failed',
-          modelUsed: file.lineCount >= config.review.large_file_threshold_lines ? '@cf/moonshotai/kimi-k2.5' : env.GEMINI_MODEL || 'gemma-4-31b-it',
+          modelUsed: config.model?.main || 'gemma-4-31b-it',
+          modelProvider: (config.model?.main || 'gemma-4-31b-it').startsWith('@cf/') ? 'cloudflare' : 'google',
           diffLineCount: file.lineCount,
           diffInput: '', // userPrompt was inside try
           rawAiOutput: null,
@@ -284,6 +287,7 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
       prTitle: pr.title ?? null,
       verdict: verdictSummary.verdict,
       fileSummaries,
+      config,
     });
 
     await updateJobStep(env, job.id, 'Generating Summary', { status: 'done' });

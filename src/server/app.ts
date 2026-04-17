@@ -9,6 +9,7 @@ import { createJobsRouter } from '@server/routes/api/jobs';
 import { createReposRouter } from '@server/routes/api/repos';
 import { createStatsRouter } from '@server/routes/api/stats';
 import { createDlqRouter } from '@server/routes/api/dlq';
+import { createModelsRouter } from '@server/routes/api/models';
 
 async function serveIndex(c: Context<AppEnv>) {
   return c.env.ASSETS.fetch(new URL('/index.html', c.req.url));
@@ -29,6 +30,7 @@ export function createApp() {
   app.route('/api/repos', createReposRouter());
   app.route('/api/stats', createStatsRouter());
   app.route('/api/dlq', createDlqRouter());
+  app.route('/api/models', createModelsRouter());
 
   app.get('/login', serveIndex);
   app.get('/', serveIndex); // Unauthenticated landing page
@@ -38,6 +40,7 @@ export function createApp() {
   app.get('/repos', requireSession, serveIndex);
   app.get('/stats', requireSession, serveIndex);
   app.get('/health', requireSession, serveIndex);
+  app.get('/settings', requireSession, serveIndex);
 
   return app;
 }

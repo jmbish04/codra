@@ -68,7 +68,6 @@ export function createTestEnv(overrides: Partial<AppBindings> = {}): AppBindings
     GITHUB_APP_ID: '123',
     GITHUB_APP_WEBHOOK_SECRET: 'topsecret',
     GEMINI_API_KEY: 'gemini-key',
-    GEMINI_MODEL: 'gemma-4-31b-it',
     NEON_DATABASE_URL: 'postgres://user:pass@localhost/db',
     DASHBOARD_PASSWORD: 'letmein',
     BOT_USERNAME: 'codra-app',

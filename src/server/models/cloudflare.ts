@@ -1,26 +1,27 @@
 import { logger } from '@server/core/logger';
 import type { AppBindings } from '@server/env';
-import type { ModelResponse } from './gemma';
 import { TimeoutError } from '@server/core/timeout';
+import type { ModelResponse } from './types';
 
-/** Max wall-clock time allowed for a single Kimi/Workers-AI call (600 s). */
-const KIMI_TIMEOUT_MS = 600_000;
+/** Max wall-clock time allowed for a single Workers-AI call (600 s). */
+const CLOUDFLARE_TIMEOUT_MS = 600_000;
 
-export async function reviewWithKimi(
+export async function reviewWithCloudflare(
   env: Pick<AppBindings, 'AI'>,
+  model: string,
   input: { systemPrompt: string; userPrompt: string },
-) {
+): Promise<ModelResponse> {
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new TimeoutError('Kimi (Workers AI)', KIMI_TIMEOUT_MS)), KIMI_TIMEOUT_MS);
+    timer = setTimeout(() => reject(new TimeoutError(`Cloudflare (${model})`, CLOUDFLARE_TIMEOUT_MS)), CLOUDFLARE_TIMEOUT_MS);
   });
 
   try {
-    logger.info('Calling AI model: @cf/moonshotai/kimi-k2.5');
+    logger.info(`Calling Cloudflare model: ${model}`);
     const startTime = Date.now();
     const result = await Promise.race([
-      env.AI.run('@cf/moonshotai/kimi-k2.5', {
+      env.AI.run(model as any, {
         messages: [
           { role: 'system', content: input.systemPrompt },
           { role: 'user', content: input.userPrompt },
@@ -30,7 +31,7 @@ export async function reviewWithKimi(
       timeoutPromise,
     ]);
     const durationMs = Date.now() - startTime;
-    logger.info(`AI model @cf/moonshotai/kimi-k2.5 responded in ${durationMs}ms`);
+    logger.info(`AI model ${model} responded in ${durationMs}ms`);
 
     const rawText =
       result?.response ??
@@ -42,8 +43,9 @@ export async function reviewWithKimi(
       rawText,
       inputTokens: result?.usage?.prompt_tokens ?? result?.result?.usage?.prompt_tokens ?? 0,
       outputTokens: result?.usage?.completion_tokens ?? result?.result?.usage?.completion_tokens ?? 0,
-      modelUsed: '@cf/moonshotai/kimi-k2.5',
-    } satisfies ModelResponse;
+      modelUsed: model,
+      provider: 'cloudflare',
+    };
   } finally {
     clearTimeout(timer);
   }

@@ -9,6 +9,7 @@ export async function insertFileReview(
     filePath: string;
     fileStatus: 'pending' | 'done' | 'skipped' | 'failed';
     modelUsed: string;
+    modelProvider?: string | null;
     diffLineCount: number;
     diffInput: string | null;
     rawAiOutput: string | null;
@@ -42,9 +43,10 @@ export async function insertFileReview(
         file_summary,
         overall_correctness,
         confidence_score,
-        error_msg
+        error_msg,
+        model_provider
       )
-      VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16)
+      VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, $17)
     `,
     [
       input.jobId,
@@ -63,6 +65,7 @@ export async function insertFileReview(
       input.overallCorrectness ?? null,
       input.confidenceScore ?? null,
       input.errorMessage,
+      input.modelProvider ?? null,
     ],
   );
 }
@@ -70,6 +73,7 @@ export async function insertFileReview(
 export async function getModelUsageStats(env: Pick<AppBindings, 'NEON_DATABASE_URL'>) {
   return queryRows<{
     model_used: string;
+    model_provider: string | null;
     calls: number;
     input_tokens: number | null;
     output_tokens: number | null;
@@ -78,6 +82,7 @@ export async function getModelUsageStats(env: Pick<AppBindings, 'NEON_DATABASE_U
     `
       SELECT
         model_used,
+        MIN(model_provider) AS model_provider,
         COUNT(*)::int AS calls,
         COALESCE(SUM(input_tokens), 0)::int AS input_tokens,
         COALESCE(SUM(output_tokens), 0)::int AS output_tokens
@@ -107,6 +112,7 @@ export async function getFileReviewsForJob(env: Pick<AppBindings, 'NEON_DATABASE
     overall_correctness: string | null;
     confidence_score: number | null;
     error_msg: string | null;
+    model_provider: string | null;
   }>(
     env,
     `

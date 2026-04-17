@@ -12,7 +12,6 @@ declare namespace Cloudflare {
 		ASSETS: Fetcher;
 		BOT_USERNAME: "codra-app";
 		ENVIRONMENT: "production";
-		GEMINI_MODEL: "gemma-4-31b-it";
 		APP_PRIVATE_KEY: string;
 		GITHUB_APP_ID: string;
 		GITHUB_APP_WEBHOOK_SECRET: string;
@@ -26,7 +25,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "BOT_USERNAME" | "ENVIRONMENT" | "GEMINI_MODEL" | "APP_PRIVATE_KEY" | "GITHUB_APP_ID" | "GITHUB_APP_WEBHOOK_SECRET" | "GEMINI_API_KEY" | "NEON_DATABASE_URL" | "DASHBOARD_PASSWORD">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "BOT_USERNAME" | "ENVIRONMENT" | "APP_PRIVATE_KEY" | "GITHUB_APP_ID" | "GITHUB_APP_WEBHOOK_SECRET" | "GEMINI_API_KEY" | "NEON_DATABASE_URL" | "DASHBOARD_PASSWORD">> {}
 }
 
 // Begin runtime types

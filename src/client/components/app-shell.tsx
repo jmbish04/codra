@@ -10,6 +10,7 @@ import {
   Moon,
   Zap,
   Activity,
+  Settings,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
 import { useTheme } from '@client/lib/theme';
@@ -20,6 +21,7 @@ const links = [
   { to: '/repos',     label: 'Repos',    icon: GitBranch,       end: false },
   { to: '/stats',     label: 'Stats',    icon: BarChart2,       end: false },
   { to: '/health',    label: 'System',   icon: HeartPulse,      end: false },
+  { to: '/settings',  label: 'Settings', icon: Settings,        end: false },
 ];
 
 export function AppShell() {

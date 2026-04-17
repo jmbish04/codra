@@ -51,3 +51,7 @@ export type DlqResponse = {
   messages: DlqMessage[];
   count: number;
 };
+
+export type ModelConfigsResponse = {
+  configs: import('./schema').ModelConfig[];
+};

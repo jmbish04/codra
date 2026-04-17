@@ -14,7 +14,7 @@ type JobRow = {
   base_sha: string;
   trigger: 'auto' | 'mention' | 'retry';
   status: 'queued' | 'running' | 'done' | 'failed' | 'superseded';
-  config_snapshot: { review?: RepoConfig['review'] } | null;
+  config_snapshot: { review?: RepoConfig['review']; model?: RepoConfig['model'] } | null;
   check_run_id: number | null;
   created_at: string;
   started_at: string | null;

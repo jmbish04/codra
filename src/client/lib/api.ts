@@ -3,6 +3,7 @@ import type {
   JobDetailResponse,
   JobsResponse,
   LoginPayload,
+  ModelConfigsResponse,
   RepoConfigResponse,
   RepoConfigsResponse,
   RetryJobResponse,
@@ -97,6 +98,21 @@ export const api = {
     return request<{ purged: number }>('/api/dlq/purge', {
       method: 'POST',
       body: JSON.stringify({ lease_ids: leaseIds }),
+    });
+  },
+  updateRepoConfig(owner: string, repo: string, config: any) {
+    return request<{ ok: boolean }>(`/api/repos/${owner}/${repo}/config`, {
+      method: 'PATCH',
+      body: JSON.stringify(config),
+    });
+  },
+  getModelConfigs() {
+    return request<ModelConfigsResponse>('/api/models');
+  },
+  updateModelConfig(id: string, config: any) {
+    return request<{ ok: boolean }>(`/api/models/${id}`, {
+      method: 'POST',
+      body: JSON.stringify(config),
     });
   },
 };

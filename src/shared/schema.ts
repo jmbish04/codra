@@ -120,6 +120,24 @@ export const repoConfigSchema = z.object({
       command: 'npm run lint && npm run typecheck',
     },
   }),
+  model: z
+    .object({
+      main: z.string().default('gemma-4-31b-it'),
+      fallbacks: z.array(z.string()).default([]),
+      size_overrides: z
+        .array(
+          z.object({
+            max_lines: z.number().int().positive(),
+            model: z.string(),
+            fallbacks: z.array(z.string()).optional(),
+          }),
+        )
+        .optional(),
+    })
+    .default({
+      main: 'gemma-4-31b-it',
+      fallbacks: [],
+    }),
 });
 
 export const reviewJobMessageSchema = z.object({
@@ -177,6 +195,7 @@ export const fileReviewRecordSchema = z.object({
   filePath: z.string(),
   fileStatus: z.enum(fileStatuses),
   modelUsed: z.string(),
+  modelProvider: z.string().optional(),
   diffLineCount: z.number().int().nullable(),
   diffInput: z.string().nullable(),
   rawAiOutput: z.string().nullable(),
@@ -205,6 +224,7 @@ export const jobDetailSchema = jobSummarySchema.extend({
 });
 
 export const repoConfigRecordSchema = z.object({
+  installationId: z.string(),
   owner: z.string(),
   repo: z.string(),
   rawYaml: z.string().nullable(),
@@ -213,6 +233,10 @@ export const repoConfigRecordSchema = z.object({
   updatedAt: dateStringSchema,
   lastJobCreatedAt: dateStringSchema.nullable(),
   lastJobVerdict: z.enum(reviewVerdicts).nullable(),
+  mainModel: z.string().nullable(),
+  fallbackModels: z.array(z.string()).nullable(),
+  sizeOverrides: z.any().nullable(),
+  enabled: z.boolean(),
 });
 
 export const statsSchema = z.object({
@@ -240,6 +264,7 @@ export const statsSchema = z.object({
   models: z.array(
     z.object({
       modelUsed: z.string(),
+      provider: z.string().optional(),
       calls: z.number().int(),
       inputTokens: z.number().int(),
       outputTokens: z.number().int(),
@@ -263,6 +288,16 @@ export type JobSummary = z.infer<typeof jobSummarySchema>;
 export type FileReviewRecord = z.infer<typeof fileReviewRecordSchema>;
 export type JobDetail = z.infer<typeof jobDetailSchema>;
 export type RepoConfigRecord = z.infer<typeof repoConfigRecordSchema>;
+export const modelConfigSchema = z.object({
+  modelId: z.string(),
+  rpm: z.number().int(),
+  tpm: z.number().int(),
+  rpd: z.number().int(),
+  provider: z.string(),
+  updatedAt: dateStringSchema,
+});
+
+export type ModelConfig = z.infer<typeof modelConfigSchema>;
 export type StatsPayload = z.infer<typeof statsSchema>;
 
 export const defaultRepoConfig = repoConfigSchema.parse({});
