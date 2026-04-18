@@ -6,19 +6,14 @@ import { Button } from '@client/components/ui/button';
 import { Alert } from '@client/components/ui/alert';
 import { PageHeader } from '@client/components/page-header';
 import { Switch } from '@client/components/ui/switch';
-import { REPO_CONFIG_FILENAME } from '@shared/config';
-import { GitBranch, Settings, RefreshCw, CheckCircle2, AlertCircle, Cpu, Layers, HardDrive, Save, ChevronRight, ListPlus, Trash2, ShieldCheck, Play, Pause, ChevronDown, ExternalLink } from 'lucide-react';
+import { GitBranch, RefreshCw, Layers, Save, ListPlus, Trash2, ChevronDown, ArrowUpRight, RotateCcw } from 'lucide-react';
 import { cn } from '@client/lib/utils';
-import type { RepoConfigRecord } from '@shared/schema';
+import { defaultRepoConfig, type RepoConfigRecord } from '@shared/schema';
+import { ModelChain, MODELS } from '@client/components/model-chain';
 
-const AVAILABLE_MODELS = [
-  'gemma-4-31b-it',
-  'gemma-3-27b',
-  'gemini-2.5-flash',
-  'gemini-3-flash',
-  '@cf/zai-org/glm-4.7-flash',
-  '@cf/moonshotai/kimi-k2.5'
-];
+const SYSTEM_DEFAULTS = defaultRepoConfig.model;
+
+// --- Main Components ---
 
 interface RepoItemProps {
   repo: RepoConfigRecord;
@@ -29,14 +24,14 @@ interface RepoItemProps {
 
 function RepoItem({ repo, isExpanded, onToggle, onRefresh }: RepoItemProps) {
   const [enabled, setEnabled] = useState(repo.enabled);
-  const [mainModel, setMainModel] = useState(repo.mainModel ?? 'gemma-4-31b-it');
-  const [fallbacks, setFallbacks] = useState<string[]>(repo.fallbackModels ?? []);
-  const [sizeOverrides, setSizeOverrides] = useState<any[]>(repo.sizeOverrides ?? []);
+  const [mainModel, setMainModel] = useState(repo.mainModel ?? SYSTEM_DEFAULTS.main);
+  const [fallbacks, setFallbacks] = useState<string[]>(repo.fallbackModels?.length ? repo.fallbackModels : SYSTEM_DEFAULTS.fallbacks);
+  const [sizeOverrides, setSizeOverrides] = useState<any[]>(repo.sizeOverrides ?? SYSTEM_DEFAULTS.size_overrides);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSave = async (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleSave = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     setSaving(true);
     setError(null);
     try {
@@ -56,21 +51,44 @@ function RepoItem({ repo, isExpanded, onToggle, onRefresh }: RepoItemProps) {
     }
   };
 
-  const addFallback = () => setFallbacks([...fallbacks, AVAILABLE_MODELS[0]]);
-  const updateFallback = (idx: number, val: string) => {
-    const next = [...fallbacks];
-    next[idx] = val;
-    setFallbacks(next);
+  const handleReset = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setMainModel(SYSTEM_DEFAULTS.main);
+    setFallbacks(SYSTEM_DEFAULTS.fallbacks);
+    setSizeOverrides(SYSTEM_DEFAULTS.size_overrides ?? []);
+    
+    // Immediate save to DB on reset ensures reliability
+    setSaving(true);
+    try {
+      await api.updateRepoConfig(repo.owner, repo.repo, {
+        enabled,
+        model: SYSTEM_DEFAULTS
+      });
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Reset failed');
+    } finally {
+      setSaving(false);
+    }
   };
-  const removeFallback = (idx: number) => setFallbacks(fallbacks.filter((_, i) => i !== idx));
 
   const addOverride = () => {
-    setSizeOverrides([...sizeOverrides, { max_lines: 500, model: AVAILABLE_MODELS[0], fallbacks: [] }]);
+    setSizeOverrides([...sizeOverrides, { 
+      max_lines: 300, 
+      model: MODELS[0].value, 
+      fallbacks: [...SYSTEM_DEFAULTS.fallbacks] 
+    }]);
   };
 
-  const updateOverride = (index: number, field: string, value: any) => {
+  const updateOverride = (index: number, primary: string, fbs: string[]) => {
     const next = [...sizeOverrides];
-    next[index] = { ...next[index], [field]: value };
+    next[index] = { ...next[index], model: primary, fallbacks: fbs };
+    setSizeOverrides(next);
+  };
+
+  const updateOverrideThreshold = (index: number, threshold: number) => {
+    const next = [...sizeOverrides];
+    next[index] = { ...next[index], max_lines: threshold };
     setSizeOverrides(next);
   };
 
@@ -78,70 +96,52 @@ function RepoItem({ repo, isExpanded, onToggle, onRefresh }: RepoItemProps) {
     setSizeOverrides(sizeOverrides.filter((_, i) => i !== index));
   };
 
-  const addOverrideFallback = (index: number) => {
-    const next = [...sizeOverrides];
-    next[index].fallbacks = [...(next[index].fallbacks || []), AVAILABLE_MODELS[0]];
-    setSizeOverrides(next);
-  };
-
-  const updateOverrideFallback = (ovIdx: number, fbIdx: number, val: string) => {
-    const next = [...sizeOverrides];
-    next[ovIdx].fallbacks[fbIdx] = val;
-    setSizeOverrides(next);
-  };
-
-  const removeOverrideFallback = (ovIdx: number, fbIdx: number) => {
-    const next = [...sizeOverrides];
-    next[ovIdx].fallbacks = next[ovIdx].fallbacks.filter((_: any, i: number) => i !== fbIdx);
-    setSizeOverrides(next);
-  };
-
   return (
     <div className={cn(
-      "surface transition-all duration-300 border mb-4 overflow-hidden",
+      "group/item relative bg-card border transition-all duration-300 rounded-2xl mb-4 overflow-hidden shadow-sm",
       isExpanded 
-        ? "border-primary/40 shadow-xl shadow-primary/5 ring-1 ring-primary/10" 
-        : "border-border/40 hover:border-border/100 hover:shadow-md"
+        ? "border-primary/30 ring-4 ring-primary/[0.03] shadow-lg" 
+        : "border-border/50 hover:border-border hover:shadow-md"
     )}>
-      {/* Collapsed Header */}
+      {/* List Item Header */}
       <div 
         className={cn(
-          "px-6 py-4 flex items-center justify-between cursor-pointer select-none group",
-          isExpanded ? "bg-primary/5" : "bg-background"
+          "px-6 py-5 flex items-center justify-between cursor-pointer select-none",
+          isExpanded ? "bg-primary/[0.01]" : "bg-transparent"
         )}
         onClick={onToggle}
       >
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-5">
           <div className={cn(
-            "p-2 rounded-lg transition-colors",
-            enabled ? "bg-emerald-500/10 text-emerald-500" : "bg-muted text-muted-foreground"
+            "w-10 h-10 flex items-center justify-center rounded-xl transition-all shadow-inner border",
+            enabled ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border/50 text-muted-foreground"
           )}>
-            <GitBranch size={18} />
+            <GitBranch size={20} />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-bold text-sm tracking-tight">{repo.owner} / {repo.repo}</h3>
-              <div className="flex items-center gap-1.5">
-                {repo.configMissing ? (
-                   <span className="text-[8px] font-black uppercase tracking-widest bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">Default Config</span>
-                ) : (
-                   <span className="text-[8px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-500 px-1.5 py-0.5 rounded border border-emerald-500/20 font-bold">Custom Config</span>
-                )}
-              </div>
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <h3 className="font-semibold text-base text-foreground tracking-tight">{repo.owner} / {repo.repo}</h3>
+              {repo.configMissing ? (
+                 <span className="px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-600 text-[10px] font-bold uppercase tracking-wide border border-orange-500/20">Standard Defaults</span>
+              ) : (
+                 <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 text-[10px] font-bold uppercase tracking-wide border border-blue-500/20">Active Overrides</span>
+              )}
             </div>
-            <p className="text-[10px] text-muted-foreground mt-0.5 font-medium">
-              Last review: {repo.lastJobCreatedAt ? new Date(repo.lastJobCreatedAt).toLocaleDateString() : 'Never'}
-            </p>
+            <div className="flex items-center gap-3 text-[11px] text-muted-foreground/70 font-medium">
+               <span>Last Activity: {repo.lastJobCreatedAt ? new Date(repo.lastJobCreatedAt).toLocaleDateString() : 'Never'}</span>
+               <span className="w-1 h-1 rounded-full bg-muted-foreground/30"></span>
+               <a>v1.2.0 Stable</a>
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3 px-4 py-1.5 border-x border-border/20" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-8">
+          <div className="flex items-center gap-3 pr-6 border-r border-border/20" onClick={e => e.stopPropagation()}>
              <span className={cn(
-               "text-[9px] font-black uppercase tracking-widest transition-colors",
-               enabled ? "text-primary/70" : "text-muted-foreground/40"
+               "text-[10px] font-black uppercase tracking-wider transition-colors",
+               enabled ? "text-primary/70" : "text-muted-foreground/30"
              )}>
-               Status
+               Review Engine
              </span>
              <Switch 
                checked={enabled} 
@@ -150,220 +150,133 @@ function RepoItem({ repo, isExpanded, onToggle, onRefresh }: RepoItemProps) {
           </div>
           
           <ChevronDown 
-            size={18} 
-            className={cn("text-muted-foreground transition-transform duration-300", isExpanded && "rotate-180")} 
+            size={20} 
+            className={cn("text-muted-foreground/60 transition-transform duration-500", isExpanded && "rotate-180")} 
           />
         </div>
       </div>
 
-      {/* Expanded Content */}
+      {/* Configuration Panel */}
       {isExpanded && (
-        <div className="p-8 bg-background border-t border-border/20 animate-in slide-in-from-top-2 duration-300">
-           {error && <Alert variant="destructive" className="mb-6">{error}</Alert>}
+        <div className="px-10 py-10 bg-background border-t border-border/50 animate-in fade-in slide-in-from-top-4 duration-500">
+           {error && <Alert variant="destructive" className="mb-8">{error}</Alert>}
            
-           <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-10">
-              <div className="space-y-8">
+           <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-12">
+              <div className="space-y-16">
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
-                    <h4 className="text-xs font-black uppercase tracking-widest text-foreground flex items-center gap-2">
-                      <Layers size={14} className="text-primary" /> Configuration Rules
+                    <h4 className="text-sm font-bold tracking-tight text-foreground flex items-center gap-2">
+                      <Layers size={14} className="text-primary" /> Logic & Scaling Rules
                     </h4>
-                    <p className="text-[11px] text-muted-foreground">Define volume scaling and fallback sequences</p>
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80">
+                      <span>Baseline tiers can be customized globally in</span>
+                      <a href="/settings" className="text-primary font-bold hover:underline flex items-center gap-0.5">
+                        Settings <ArrowUpRight size={10} />
+                      </a>
+                    </div>
                   </div>
-                  <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1.5 px-3 border-secondary/30 text-secondary hover:bg-secondary/5" onClick={addOverride}>
-                    <ListPlus size={12} /> Add Scale Tier
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={addOverride}
+                    className="h-8 text-[10px] font-black uppercase tracking-widest gap-2 bg-background shadow-sm rounded-xl"
+                  >
+                    <ListPlus size={14} /> Add Scaling Rule
                   </Button>
                 </div>
 
-                <div className="space-y-6">
-                  {/* Baseline Configuration */}
-                  <div className="surface p-6 border-2 border-primary/20 bg-primary/5 relative">
-                    <div className="absolute -top-2.5 left-4 px-2 bg-background border border-primary/20 rounded text-[9px] font-black uppercase tracking-widest text-primary">
-                      Baseline Configuration
+                <div className="space-y-8">
+                  {/* Baseline Tier Wrapper */}
+                  <div className="relative p-8 rounded-2xl border border-primary/20 bg-primary/[0.01] transition-shadow hover:shadow-md">
+                    {/* Dynamic Baseline Label */}
+                    <div className="absolute -top-3 left-6 px-3 py-0.5 bg-background border border-primary/20 rounded-full shadow-sm flex items-center gap-1.5">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-primary">
+                        Baseline Tier
+                      </span>
+                      {sizeOverrides.length > 0 && (
+                        <span className="text-[9px] font-bold text-muted-foreground/40 border-l border-border/20 pl-1.5 ml-0.5">
+                          &gt; {Math.max(...sizeOverrides.map(o => o.max_lines))} Lines
+                        </span>
+                      )}
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-8">
-                       <div className="space-y-2">
-                          <label className="text-[9px] font-black uppercase text-muted-foreground/70">PR Size</label>
-                          <div className="text-xs font-bold text-muted-foreground bg-muted/40 p-2 rounded-lg border border-border/20">
-                            Catch-all / Default
-                          </div>
-                          <p className="text-[9px] text-muted-foreground leading-relaxed italic mt-1">
-                            This configuration applies if no other scaling rules match the PR complexity.
-                          </p>
-                       </div>
-
-                       <div className="space-y-5">
-                          <div className="space-y-2">
-                            <label className="text-[9px] font-black uppercase text-primary/80">Primary Model</label>
-                            <select 
-                              value={mainModel} 
-                              onChange={(e) => setMainModel(e.target.value)}
-                              className="w-full bg-background border border-border/60 rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-primary/20 outline-none"
-                            >
-                              {AVAILABLE_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
-                            </select>
-                          </div>
-
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between">
-                              <label className="text-[9px] font-black uppercase text-amber-500/80">Fallback Chain</label>
-                              <button onClick={addFallback} className="text-[9px] font-bold text-primary hover:underline flex items-center gap-1">
-                                <ListPlus size={10} /> Add Fallback
-                              </button>
-                            </div>
-                            <div className="space-y-2">
-                              {fallbacks.map((fb, fbIdx) => (
-                                <div key={fbIdx} className="flex items-center gap-2">
-                                  <div className="w-1 h-1 rounded-full bg-amber-500/40"></div>
-                                  <select 
-                                    value={fb} 
-                                    onChange={(e) => updateFallback(fbIdx, e.target.value)}
-                                    className="flex-1 bg-muted/30 border border-border/40 rounded-md px-2 py-1.5 text-[11px] font-medium focus:ring-1 focus:ring-primary/20 outline-none"
-                                  >
-                                    {AVAILABLE_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
-                                  </select>
-                                  <button onClick={() => removeFallback(fbIdx)} className="p-1 text-muted-foreground/50 hover:text-red-500">
-                                    <Trash2 size={12} />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                       </div>
-                    </div>
+                    <ModelChain 
+                      primary={mainModel} 
+                      fallbacks={fallbacks} 
+                      onChange={(p, fbs) => { setMainModel(p); setFallbacks(fbs); }} 
+                    />
                   </div>
 
-                  {/* Volume Scaling Rules */}
+                  {/* Specific Overrides (Thresholds) */}
                   {sizeOverrides.map((ov, i) => (
-                    <div key={i} className="surface p-6 border border-border/60 bg-muted/5 relative group hover:border-primary/30 transition-all">
-                      <button 
+                    <div key={i} className="relative p-8 rounded-2xl border border-border bg-muted/5 transition-all hover:bg-muted/[0.08]">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
                         onClick={() => removeOverride(i)}
-                        className="absolute top-4 right-4 p-1.5 text-muted-foreground/40 hover:text-red-500 transition-colors"
+                        className="absolute top-4 right-4 h-8 w-8 text-muted-foreground/30 hover:text-red-500"
                       >
-                        <Trash2 size={14} />
-                      </button>
+                        <Trash2 size={16} />
+                      </Button>
 
-                      <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-8">
-                         <div className="space-y-4">
-                            <div className="space-y-2">
-                              <label className="text-[9px] font-black uppercase text-muted-foreground/70">PR Size Threshold</label>
-                              <div className="flex items-center gap-2">
-                                <input 
-                                  type="number" 
-                                  value={ov.max_lines} 
-                                  onChange={(e) => updateOverride(i, 'max_lines', parseInt(e.target.value))}
-                                  className="w-full bg-background border border-border/60 rounded-lg px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-primary/20 outline-none"
-                                />
-                                <span className="text-[10px] font-medium text-muted-foreground">Lines</span>
-                              </div>
+                      <div className="grid grid-cols-1 md:grid-cols-[180px_1fr] gap-10">
+                         <div className="space-y-3">
+                            <label className="text-[10px] font-black uppercase text-muted-foreground/70 tracking-wider">Complexity Threshold</label>
+                            <div className="flex items-center gap-3 p-1 pl-3 bg-background border border-border rounded-lg focus-within:ring-2 focus-within:ring-primary/10 transition-shadow">
+                               <input 
+                                type="number" 
+                                value={ov.max_lines} 
+                                onChange={(e) => updateOverrideThreshold(i, parseInt(e.target.value))}
+                                className="w-full bg-transparent border-0 py-1.5 text-sm font-bold focus:ring-0 outline-none"
+                              />
+                              <span className="text-[10px] font-bold text-muted-foreground/60 pr-3 uppercase">Lines</span>
                             </div>
+                            <p className="text-[11px] text-muted-foreground/60 italic leading-relaxed">
+                              Applies to files with up to {ov.max_lines} lines of code.
+                            </p>
                          </div>
 
-                         <div className="space-y-5">
-                            <div className="space-y-2">
-                              <label className="text-[9px] font-black uppercase text-primary/80">Primary Model</label>
-                              <select 
-                                value={ov.model} 
-                                onChange={(e) => updateOverride(i, 'model', e.target.value)}
-                                className="w-full bg-background border border-border/60 rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-primary/20 outline-none"
-                              >
-                                {AVAILABLE_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
-                              </select>
-                            </div>
-
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between">
-                                <label className="text-[9px] font-black uppercase text-amber-500/80">Fallback Models</label>
-                                <button onClick={() => addOverrideFallback(i)} className="text-[9px] font-bold text-primary hover:underline flex items-center gap-1">
-                                  <ListPlus size={10} /> Add Fallback
-                                </button>
-                              </div>
-                              <div className="space-y-2">
-                                {(ov.fallbacks || []).map((fb: string, fbIdx: number) => (
-                                  <div key={fbIdx} className="flex items-center gap-2">
-                                    <div className="w-1 h-1 rounded-full bg-amber-500/40"></div>
-                                    <select 
-                                      value={fb} 
-                                      onChange={(e) => updateOverrideFallback(i, fbIdx, e.target.value)}
-                                      className="flex-1 bg-muted/30 border border-border/40 rounded-md px-2 py-1.5 text-[11px] font-medium focus:ring-1 focus:ring-primary/20 outline-none"
-                                    >
-                                      {AVAILABLE_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
-                                    </select>
-                                    <button onClick={() => removeOverrideFallback(i, fbIdx)} className="p-1 text-muted-foreground/50 hover:text-red-500">
-                                      <Trash2 size={12} />
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                         </div>
+                         <ModelChain 
+                           primary={ov.model} 
+                           fallbacks={ov.fallbacks || []} 
+                           onChange={(p, fbs) => updateOverride(i, p, fbs)} 
+                         />
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="space-y-6">
-                 <div className="surface p-6 border border-border/60 bg-gradient-to-br from-background to-muted/20">
-                    <div className="flex items-center gap-2 mb-4">
-                      <ShieldCheck size={18} className="text-primary" />
-                      <h4 className="text-[10px] font-black uppercase tracking-wider">Control Panel</h4>
-                    </div>
-                    
-                    <div className="space-y-5">
-                       <Button 
-                         onClick={handleSave} 
-                         disabled={saving} 
-                         className="w-full gap-2 shadow-lg shadow-primary/10"
-                       >
-                         {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
-                         {saving ? 'Applying...' : 'Save Rule Config'}
-                       </Button>
+              {/* Action Sidebar */}
+              <div className="space-y-10">
+                 <div className="space-y-6 pt-2">
+                    <Button 
+                      onClick={() => handleSave()} 
+                      disabled={saving} 
+                      className="w-full h-12 gap-3 rounded-2xl shadow-xl shadow-primary/10"
+                    >
+                      {saving ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18} />}
+                      <span className="font-bold">Apply Changes</span>
+                    </Button>
 
-                       <div className="pt-4 border-t border-border/40 space-y-3">
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="text-muted-foreground">Sync Mode</span>
-                            <span className="font-bold text-foreground">Real-time Webhook</span>
-                          </div>
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="text-muted-foreground">Provider Access</span>
-                            <span className="text-emerald-500 font-bold uppercase tracking-tighter text-[9px] bg-emerald-500/10 px-1.5 py-0.5 rounded">Verified</span>
-                          </div>
-                       </div>
-                       
-                       <div className="bg-[#0d1117] rounded-lg p-3 overflow-hidden border border-border/10">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-[9px] font-bold text-zinc-500 uppercase">Snapshot</span>
-                            <Settings size={10} className="text-zinc-600" />
-                          </div>
-                          <pre className="text-[9px] font-mono text-indigo-300/70 overflow-hidden text-ellipsis">
-                            {JSON.stringify(repo.parsedJson.model, null, 2)}
-                          </pre>
-                       </div>
-                    </div>
+                    <Button 
+                      variant="ghost"
+                      onClick={handleReset}
+                      className="w-full h-11 gap-3 rounded-2xl text-muted-foreground/60 hover:text-foreground hover:bg-muted/50 border border-transparent hover:border-border/50 transition-all font-bold text-sm"
+                    >
+                      <RotateCcw size={16} />
+                      Reset to Default
+                    </Button>
                  </div>
 
-                 <div className="p-6 rounded-2xl bg-indigo-500/5 border border-indigo-500/10 space-y-3">
-                    <div className="flex items-center gap-2">
-                      <AlertCircle size={16} className="text-indigo-400" />
-                      <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Repository Links</p>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                       <a 
-                         href={`https://github.com/${repo.owner}/${repo.repo}`} 
-                         target="_blank" 
-                         className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                       >
-                         GitHub Repo <ExternalLink size={10} />
-                       </a>
-                       <a 
-                         href={`https://github.com/${repo.owner}/${repo.repo}/settings/installations`} 
-                         target="_blank" 
-                         className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                       >
-                         App Settings <Settings size={10} />
-                       </a>
-                    </div>
+                 <div className="space-y-2 pt-6 border-t border-border/10">
+                    <a 
+                      href={`https://github.com/${repo.owner}/${repo.repo}`} 
+                      target="_blank" 
+                      className="flex items-center justify-between p-4 rounded-2xl bg-muted/30 hover:bg-muted/60 text-[13px] font-bold text-foreground/80 transition-all group"
+                    >
+                      GitHub Project 
+                      <ArrowUpRight size={16} className="text-muted-foreground/40 group-hover:text-primary transition-colors" />
+                    </a>
                  </div>
               </div>
            </div>
@@ -416,32 +329,31 @@ export function ReposPage() {
 
   if (loading && repos.length === 0) {
     return (
-      <div className="flex flex-col gap-6 p-8 animate-pulse">
-        <Skeleton width="400px" height="48px" className="mb-8" />
-        <div className="space-y-4">
-          <Skeleton height="80px" className="rounded-xl" />
-          <Skeleton height="80px" className="rounded-xl" />
-          <Skeleton height="80px" className="rounded-xl" />
+      <div className="flex flex-col gap-6 p-10 animate-pulse">
+        <Skeleton width="480px" height="56px" className="mb-12 rounded-2xl" />
+        <div className="space-y-6">
+          <Skeleton height="96px" className="rounded-2xl" />
+          <Skeleton height="96px" className="rounded-2xl" />
+          <Skeleton height="96px" className="rounded-2xl" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="page-enter flex flex-col gap-8 pb-20">
+    <div className="page-enter flex flex-col gap-12 pb-32 max-w-6xl mx-auto w-full">
       <PageHeader
-        category="Configuration"
-        title="Managed Repositories"
-        description="Toggle status and define volume-based model scaling for your projects"
+        category="Operations"
+        title="Project Fleet"
+        description="Configure automated intelligence scaling across your repository ecosystem"
         actions={
-          <div className="flex items-center gap-3">
-             <Button onClick={handleSync} disabled={syncing} variant="outline" size="sm" className="gap-2">
-              <RefreshCw size={14} className={cn(syncing && 'animate-spin')} />
-              Sync Now
+          <div className="flex items-center gap-4">
+             <Button onClick={handleSync} disabled={syncing} variant="outline" className="h-11 gap-2 px-6 rounded-2xl border-border/80 shadow-sm bg-background font-bold text-sm">
+              <RefreshCw size={18} className={cn(syncing && 'animate-spin')} />
+              Refresh Projects
             </Button>
-            <Button asChild variant="secondary" size="sm" className="gap-2">
+            <Button asChild className="h-11 gap-2 px-6 rounded-2xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-xl shadow-primary/20 font-bold text-sm">
               <a href="https://github.com/apps/codra-app/installations/new" target="_blank" rel="noopener noreferrer">
-                <Settings size={14} />
                 Manage Access
               </a>
             </Button>
@@ -449,16 +361,16 @@ export function ReposPage() {
         }
       />
 
-      {error && <Alert variant="destructive">{error}</Alert>}
+      {error && <Alert variant="destructive" className="rounded-3xl border-red-500/20 bg-red-500/[0.01] text-red-600 mb-6">{error}</Alert>}
 
       <div className="flex flex-col">
         {repos.length === 0 ? (
-          <div className="surface border border-dashed border-border/50 bg-background/50 flex items-center justify-center py-32 rounded-3xl">
+          <div className="surface border border-dashed border-border/50 bg-background/50 flex flex-col items-center justify-center py-48 rounded-[4rem]">
             <EmptyState
-              icon={<GitBranch size={48} className="text-muted-foreground/20" />}
-              title="No repositories found"
-              description="Sync your repositories or check your GitHub App installation settings to grant access."
-              className="border-0 bg-transparent"
+              icon={<GitBranch size={80} className="text-muted-foreground/10 mb-8" />}
+              title="Empty Fleet"
+              description="No repositories are currently connected to Codra. Sync your GitHub projects to begin."
+              className="border-0 bg-transparent max-w-lg text-center"
             />
           </div>
         ) : (
@@ -475,21 +387,6 @@ export function ReposPage() {
             );
           })
         )}
-      </div>
-
-      <div className="mt-8 p-10 rounded-[2.5rem] bg-gradient-to-br from-indigo-500/5 to-primary/5 border border-primary/10 relative overflow-hidden">
-         <div className="absolute -right-8 -bottom-8 opacity-[0.03]">
-           <Settings size={280} />
-         </div>
-         <div className="max-w-2xl relative z-10">
-            <h4 className="text-sm font-bold mb-3 flex items-center gap-2">
-              <ShieldCheck size={18} className="text-primary" />
-              Pro Design Note
-            </h4>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Codra uses a hierarchical configuration system. If no volume-scaling rules match for a given pull request, the system defaults to the primary model defined in your <code className="text-primary font-mono">{REPO_CONFIG_FILENAME}</code>. Toggle a project to <span className="text-red-500 font-bold">Disabled</span> to stop all webhook processing immediately.
-            </p>
-         </div>
       </div>
     </div>
   );

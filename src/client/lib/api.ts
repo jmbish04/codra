@@ -115,4 +115,13 @@ export const api = {
       body: JSON.stringify(config),
     });
   },
+  getGlobalConfig() {
+    return request<{ config: any }>('/api/models/global');
+  },
+  updateGlobalConfig(config: any) {
+    return request<{ ok: boolean }>('/api/models/global', {
+      method: 'PATCH',
+      body: JSON.stringify(config),
+    });
+  },
 };

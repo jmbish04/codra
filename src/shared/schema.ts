@@ -136,7 +136,8 @@ export const repoConfigSchema = z.object({
     })
     .default({
       main: 'gemma-4-31b-it',
-      fallbacks: [],
+      fallbacks: ['gemma-3-27b', '@cf/zai-org/glm-4.7-flash'],
+      size_overrides: [],
     }),
 });
 

@@ -13,11 +13,11 @@ export class ModelService {
   constructor(private env: AppBindings, private tracker?: TokenTracker) {}
 
   private selectModel(params: {
-    file: any;
+    totalLineCount: number;
     config: RepoConfig;
   }): { primary: string; fallbacks: string[] } {
     const { model: modelCfg } = params.config;
-    const fileLines = params.file.lineCount;
+    const thresholdBase = params.totalLineCount;
 
     // Use default if not configured
     if (!modelCfg) {
@@ -27,10 +27,10 @@ export class ModelService {
     let selectedModel = modelCfg.main;
     let fallbackModels = modelCfg.fallbacks || [];
 
-    // Apply size overrides
+    // Apply size overrides based on total PR lines
     if (modelCfg.size_overrides && modelCfg.size_overrides.length > 0) {
       const sortedOverrides = [...modelCfg.size_overrides].sort((a, b) => a.max_lines - b.max_lines);
-      const matched = sortedOverrides.find(o => fileLines <= o.max_lines);
+      const matched = sortedOverrides.find(o => thresholdBase <= o.max_lines);
       if (matched) {
         selectedModel = matched.model;
         fallbackModels = matched.fallbacks || fallbackModels;
@@ -56,13 +56,17 @@ export class ModelService {
     prTitle: string | null;
     prDescription: string | null;
     config: RepoConfig;
+    totalLineCount: number;
   }) {
     const { systemPrompt, userPrompt } = buildFileReviewPrompts({
       ...params,
       config: params.config.review,
     });
 
-    const { primary, fallbacks } = this.selectModel(params);
+    const { primary, fallbacks } = this.selectModel({
+      totalLineCount: params.totalLineCount,
+      config: params.config,
+    });
     const modelsToTry = [primary, ...fallbacks];
 
     let lastError: any;
@@ -98,7 +102,7 @@ export class ModelService {
     fileSummaries: Array<{ path: string; summary: string; verdict: string }>;
     config: RepoConfig;
   }) {
-    const { primary, fallbacks } = this.selectModel({ file: { lineCount: 0 }, config: params.config });
+    const { primary, fallbacks } = this.selectModel({ totalLineCount: 0, config: params.config });
     const modelsToTry = [primary, ...fallbacks];
 
     let lastError: any;

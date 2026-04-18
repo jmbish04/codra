@@ -153,6 +153,7 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
       }
     }
 
+    const totalLineCount = files.reduce((sum, f) => sum + f.lineCount, 0);
     for (const [index, file] of files.entries()) {
       // Periodic check for supersession
       const currentJob = await getJobForProcessing(env, job.id);
@@ -209,6 +210,7 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) 
           prTitle: pr.title ?? null,
           prDescription: pr.body ?? null,
           config: config,
+          totalLineCount,
         });
 
         reviewedComments.push(...response.parsed.comments);

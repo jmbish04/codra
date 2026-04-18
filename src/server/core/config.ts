@@ -16,6 +16,19 @@ function cacheKey(owner: string, repo: string) {
   return `config:${REPO_CONFIG_CACHE_VERSION}:${REPO_CONFIG_FILENAME}:${owner}/${repo}`;
 }
 
+const GLOBAL_CONFIG_KEY = 'config:global_model';
+
+export async function getGlobalConfig(env: Pick<AppBindings, 'APP_KV'>): Promise<RepoConfig['model']> {
+  const cached = await env.APP_KV.get(GLOBAL_CONFIG_KEY, 'json');
+  if (cached) return cached as RepoConfig['model'];
+  
+  return defaultRepoConfig.model;
+}
+
+export async function updateGlobalConfig(env: Pick<AppBindings, 'APP_KV'>, config: RepoConfig['model']) {
+  await env.APP_KV.put(GLOBAL_CONFIG_KEY, JSON.stringify(config));
+}
+
 export function parseRepoConfig(rawYaml: string | null) {
   if (!rawYaml) {
     return {
@@ -46,12 +59,21 @@ export async function loadRepoConfig(
     return cached as CachedConfig;
   }
 
-  // Check DB first for existing enabled status
+  // Check DB first for existing enabled status or overrides
   const existing = await getRepoConfigRecord(env, input.owner, input.repo);
 
   const repoFile = await github.getRepoFileOrNull(input.owner, input.repo, REPO_CONFIG_FILENAME);
   const parsed = parseRepoConfig(repoFile);
   
+  // If there's no YAML and no DB override, use the GLOBAL config
+  if (parsed.configMissing && (!existing || !existing.mainModel)) {
+    const globalModel = await getGlobalConfig(env);
+    parsed.parsedJson = {
+      ...parsed.parsedJson,
+      model: globalModel
+    };
+  }
+
   // Combine: use DB's enabled status if it exists
   const finalConfig: CachedConfig = {
     ...parsed,
