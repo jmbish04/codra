@@ -56,8 +56,12 @@ export function parseUnifiedDiff(rawDiff: string): FileDiff[] {
   for (const line of lines) {
     if (line.startsWith('diff --git ')) {
       pushCurrentFile();
+      const parts = line.split(' ');
+      const bPath = parts[parts.length - 1];
+      const path = bPath.startsWith('b/') ? bPath.slice(2) : bPath;
+
       currentFile = {
-        path: '',
+        path,
         previousPath: null,
         isNew: false,
         isDeleted: false,

@@ -161,11 +161,11 @@ export function parseFileReviewResponse(raw: string, file: FileDiff): {
       const cleanText = (text: string) => {
         let current = text.trim();
         let prev = '';
-        // Multi-pass cleaning to catch nested or consecutive tags
         while (current !== prev) {
           prev = current;
           current = current
-            .replace(/^([\u{1F300}-\u{1F9FF}]|\[QUALITY\]|\[SECURITY\]|\[BUG\]|\[P[0-3]\]|\[NIT\]|QUALITY|SECURITY|BUG|P[0-3]|NIT|[:\-\s\uFE0F]|[^\w\s])+/giu, '')
+            .replace(/^([\u{1F300}-\u{1F9FF}]|\[QUALITY\]|\[SECURITY\]|\[BUG\]|\[PERFORMANCE\]|\[CORRECTNESS\]|\[P[0-3]\]|\[NIT\]|QUALITY|SECURITY|BUG|P[0-3]|NIT|[:\-\s\uFE0F]|[^\w\s])+/giu, '')
+            .replace(/\n\s*/g, ' ') // Flatten newlines in titles/snippets
             .trim();
         }
         return current;

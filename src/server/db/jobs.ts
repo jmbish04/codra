@@ -204,6 +204,9 @@ export async function listJobs(
 }
 
 export async function getJobForProcessing(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobId: string) {
+  if (!jobId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
+    return null;
+  }
   const [row] = await queryRows<JobRow>(
     env,
     `
@@ -219,6 +222,9 @@ export async function getJobForProcessing(env: Pick<AppBindings, 'NEON_DATABASE_
 }
 
 export async function getJobDetail(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobId: string) {
+  if (!jobId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
+    return null;
+  }
   const [row] = await queryRows<JobDetailRow>(
     env,
     `
