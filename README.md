@@ -1,149 +1,140 @@
 # Codra
 
-Codra is a private PR review bot built for Cloudflare Workers, Hono, React, Queues, and Neon.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/codra-gh-banner-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./assets/codra-gh-banner-light.svg">
+  <img alt="Codra banner" src="./assets/codra-gh-banner-light.svg">
+</picture>
 
-## Quick Start
+Open source PR review infrastructure for Cloudflare Workers.
 
-1. `npm install`
-2. Copy `.dev.vars.example` to `.dev.vars` and fill in local-only values
-3. Create the Cloudflare KV and Queue resources referenced by [wrangler.jsonc](/C:/Users/devar/Dropbox/Documents/GitHub/codra/wrangler.jsonc)
-4. Run the SQL in [db/migrations/001_initial.sql](/C:/Users/devar/Dropbox/Documents/GitHub/codra/db/migrations/001_initial.sql) against your Neon database
-5. `npm run dev`
+Codra listens to GitHub pull request events, runs AI-powered review jobs, posts inline findings back to the PR, and gives you a dashboard to inspect jobs, repos, models, and review history.
 
-## Production Env And Secrets
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/devarshishimpi/codra)
 
-Codra uses three configuration channels:
+## What Codra Does
 
-- `vars` in [wrangler.jsonc](/C:/Users/devar/Dropbox/Documents/GitHub/codra/wrangler.jsonc) for non-sensitive values that can live in source control
-- Cloudflare Worker secrets for credentials and database URLs
-- local `.dev.vars` for development-only secret injection when running `wrangler dev`
+- Reviews pull requests automatically on `opened`, `synchronize`, `ready_for_review`, and `reopened`
+- Supports mention-triggered reviews through `.codra.yml`
+- Posts inline PR comments and updates GitHub check runs
+- Queues review jobs through Cloudflare Queues so webhook intake stays fast
+- Stores job history, repo settings, and review metadata in Neon Postgres
+- Ships with a built-in dashboard for jobs, repos, stats, settings, and replay/debug workflows
+- Lets each repository override review behavior, skip globs, labels, and model routing
 
-Do not put secrets into `vars`. Cloudflare's current guidance is to use Worker secrets for sensitive values and keep `.dev.vars` out of git.
+## Stack
 
-### Non-sensitive `vars`
+- Cloudflare Workers + Hono
+- React + Vite
+- Cloudflare Queues + KV + Workers AI
+- Neon Postgres via `@neondatabase/serverless`
+- GitHub App webhooks + checks + PR review APIs
 
-These values are committed in `wrangler.jsonc` because they are safe to expose and should remain consistent across deploys:
+## Architecture
 
-- `BOT_USERNAME`: GitHub app bot username used in outbound API calls
-- `ENVIRONMENT`: deployment label such as `production`
-- `GEMINI_MODEL`: default Gemini model name
+1. GitHub sends a webhook to Codra.
+2. Codra validates the signature and loads repo config from `.codra.yml`.
+3. A review job is inserted into Neon and queued on Cloudflare Queues.
+4. The worker consumes the job, fetches the PR diff, runs model review passes, and formats findings.
+5. Codra posts inline comments plus a summary review back to GitHub and stores the run for the dashboard.
 
-If you later introduce staging or preview environments, keep each environment's non-secret values in Wrangler config and continue storing credentials as secrets.
+## Deploy To Cloudflare
 
-### Required Worker secrets
+Use the button above to clone and deploy Codra to your own Cloudflare account.
 
-Configure these with Wrangler before deploying:
+Cloudflare can provision or bind the Cloudflare-native resources defined in [`wrangler.jsonc`](/C:/Users/devar/Dropbox/Documents/GitHub/codra/wrangler.jsonc), including:
 
-- `APP_PRIVATE_KEY`: GitHub App private key PEM
-- `GITHUB_APP_ID`: GitHub App ID
-- `GITHUB_APP_WEBHOOK_SECRET`: webhook signature secret
-- `GEMINI_API_KEY`: Gemini API key
-- `NEON_DATABASE_URL`: Neon connection string
-- `DASHBOARD_PASSWORD`: dashboard login password
+- `APP_KV`
+- `REVIEW_QUEUE`
+- Workers AI binding
+- static asset hosting from `dist/client`
 
-Example commands:
+What the deploy button does not provision for you:
 
-```bash
-npx wrangler secret put APP_PRIVATE_KEY
-npx wrangler secret put GITHUB_APP_ID
-npx wrangler secret put GITHUB_APP_WEBHOOK_SECRET
-npx wrangler secret put GEMINI_API_KEY
-npx wrangler secret put NEON_DATABASE_URL
-npx wrangler secret put DASHBOARD_PASSWORD
-```
+- your Neon database
+- GitHub App credentials
+- Gemini API key
+- dashboard password
 
-For local development, put the same keys in `.dev.vars`. The checked-in [.dev.vars.example](/C:/Users/devar/Dropbox/Documents/GitHub/codra/.dev.vars.example) shows the expected shape without containing real credentials.
+That means the deploy flow is best thought of as "Cloudflare infrastructure bootstrap", followed by a short secrets setup step.
 
-## Cloudflare Bindings
+For this repo's own production deployment, the checked-in route and binding IDs in [`wrangler.jsonc`](/C:/Users/devar/Dropbox/Documents/GitHub/codra/wrangler.jsonc) are intentional. They are what keep `codra.devarshi.dev` deploying against the same Worker, KV namespace, and queues. If you fork Codra, replace those values with your own resources.
 
-### Wrangler config
+## Required Secrets
 
-[wrangler.jsonc](/C:/Users/devar/Dropbox/Documents/GitHub/codra/wrangler.jsonc) is the source of truth for runtime bindings:
+Codra expects these secrets in Cloudflare production and in local `.dev.vars` for development:
 
-- `APP_KV`: KV namespace used for cached installation tokens, session state, and app config
-- `REVIEW_QUEUE`: producer binding used to enqueue review jobs
-- queue consumer config: binds the Worker as the consumer for `codra-review-jobs`
-- `AI`: Workers AI binding
-- `ASSETS`: static asset binding for the React app
+- `APP_PRIVATE_KEY`
+- `GITHUB_APP_ID`
+- `GITHUB_APP_WEBHOOK_SECRET`
+- `GEMINI_API_KEY`
+- `NEON_DATABASE_URL`
+- `DASHBOARD_PASSWORD`
 
-When you change bindings, run `npm run build` so Wrangler regenerates [src/server/worker-env.d.ts](/C:/Users/devar/Dropbox/Documents/GitHub/codra/src/server/worker-env.d.ts).
+Optional, only for DLQ inspection and replay APIs:
 
-### KV
+- `CF_API_TOKEN`
+- `CF_ACCOUNT_ID`
 
-Create the production KV namespace and set the resulting IDs in `wrangler.jsonc`.
+The expected local shape is already documented in [`.dev.vars.example`](/C:/Users/devar/Dropbox/Documents/GitHub/codra/.dev.vars.example).
 
-```bash
-npx wrangler kv namespace create APP_KV
-npx wrangler kv namespace create APP_KV --preview
-```
+## Neon Postgres Setup
 
-Then copy the returned IDs into:
+Codra currently supports Neon only. The server code uses `@neondatabase/serverless` directly and reads a single `NEON_DATABASE_URL` binding, so if you OSS this repo, Neon should be the documented database path.
 
-- `kv_namespaces[].id`: production namespace ID
-- `kv_namespaces[].preview_id`: preview/remote-dev namespace ID
+### 1. Create a Neon project
 
-Notes:
+Create a project and database in Neon, then open the connection dialog for that database.
 
-- `wrangler dev` uses local storage by default for KV, which is safer for day-to-day local development
-- use remote development only when you explicitly need to exercise real Cloudflare-bound state
-- this app stores cache-like and session-like data in KV, so use a dedicated namespace per environment instead of sharing one namespace across production and staging
+### 2. Copy the pooled connection string
 
-### Queues
-
-Codra uses one producer queue and one dead-letter queue:
-
-- `codra-review-jobs`: primary queue
-- `codra-review-dlq`: dead-letter queue for messages that exceed retry policy
-
-Create them before deploying:
-
-```bash
-npx wrangler queues create codra-review-jobs
-npx wrangler queues create codra-review-dlq
-```
-
-The current queue binding strategy in `wrangler.jsonc` is:
-
-- producer binding `REVIEW_QUEUE` sends jobs to `codra-review-jobs`
-- this Worker also consumes `codra-review-jobs`
-- failed messages are routed to `codra-review-dlq`
-- `max_batch_size` is `1` so review jobs execute in isolation
-- `max_batch_timeout` is `5` seconds
-- `max_retries` is `3`
-
-Use distinct queue names per environment if you add staging, because sharing queues across environments makes retries and dead-letter handling much harder to reason about.
-
-## Neon
-
-`NEON_DATABASE_URL` must be stored as a secret, not a Wrangler var.
-
-For the Worker runtime, use Neon's pooled connection string. Neon's current documentation recommends pooled connections for serverless and edge workloads, and those URLs include `-pooler` in the hostname.
-
-Example shape:
+For the Worker runtime, use the pooled Neon connection string. It should include `-pooler` in the hostname and look like this:
 
 ```text
 postgresql://<user>:<password>@<endpoint>-pooler.<region>.aws.neon.tech/<db>?sslmode=require&channel_binding=require
 ```
 
-Operational guidance:
+### 3. Run the migration
 
-- use the pooled Neon URL for the deployed Worker runtime
-- use a direct, non-pooled Neon connection for schema migrations if your migration tooling requires session-level behavior
-- rotate the database password in Neon, then immediately update `NEON_DATABASE_URL` with `wrangler secret put`
-- keep production and non-production data on separate Neon branches or databases
+Codra now ships with a single bootstrap migration:
 
-## Local Development
+- [`db/migrations/001_initial.sql`](/C:/Users/devar/Dropbox/Documents/GitHub/codra/db/migrations/001_initial.sql)
 
-1. Copy `.dev.vars.example` to `.dev.vars`
-2. Fill in local secrets
-3. Confirm `wrangler.jsonc` points to the right Cloudflare account and binding IDs
-4. Start the app with `npm run dev`
+You can run it from the Neon SQL editor or with your preferred Postgres client.
 
-If you use `.dev.vars`, Wrangler will load local secrets for development. Keep that file untracked.
+### 4. Add the database URL to Cloudflare
 
-## Scripts
+Set the pooled Neon URL as a Worker secret:
 
-- `npm run dev` runs the client build watcher and `wrangler dev` together.
-- `npm run build` builds the React SPA and refreshes Worker env types.
-- `npm run test` runs the Vitest suite.
-- `npm run deploy` builds and deploys the Worker.
+```bash
+npx wrangler secret put NEON_DATABASE_URL
+```
+
+For local development, put the same value in `.dev.vars`.
+
+### 5. Keep one direct URL around for admin work
+
+For schema/admin tooling, keep a direct non-pooled Neon connection string handy as well. The deployed worker should use the pooled URL, but direct connections are still useful for migration tools or session-level database operations.
+
+
+## Repository Config
+
+Each connected repo can add a `.codra.yml` file to customize behavior. Codra loads this file, caches it in KV, and persists the parsed snapshot in Neon.
+
+Example:
+
+```yaml
+review:
+  on: [opened, synchronize, ready_for_review, reopened]
+  ignore_drafts: true
+  mention_trigger: "@codra-app"
+  max_files: 15
+  custom_rules:
+    - "Prefer narrow, actionable findings over broad style comments."
+
+model:
+  main: "gemma-4-31b-it"
+  fallbacks:
+    - "gemma-3-27b"
+    - "@cf/zai-org/glm-4.7-flash"
+```
