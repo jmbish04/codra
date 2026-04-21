@@ -109,8 +109,8 @@ export function Hero() {
 
         {/* Description + CTAs in one tight row */}
         <div className="flex flex-col lg:flex-row lg:items-end gap-8 lg:gap-16 mb-16">
-          <p className="text-base lg:text-lg text-muted-foreground font-medium leading-relaxed max-w-sm lg:max-w-xs">
-            The transparent PR engine for high-performance teams. Self-host it, own it, ship faster.
+          <p className="text-base lg:text-lg text-muted-foreground font-medium leading-relaxed max-w-lg">
+            Codra is a self-hosted AI reviewer that understands your repository's structure, enforces your patterns, and flags bugs before they ship — on every pull request.
           </p>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">

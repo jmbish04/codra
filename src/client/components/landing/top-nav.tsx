@@ -7,46 +7,49 @@ export function TopNav() {
   const { theme, toggleTheme } = useTheme();
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 flex h-16 items-center justify-between px-8 glass border-b border-border/40">
-      <div className="flex items-center gap-4">
-        <Link to="/" className="flex items-center gap-3 group transition-transform hover:scale-105">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary shadow-lg shadow-primary/20">
-            <Zap size={18} className="text-primary-foreground" strokeWidth={3} />
-          </div>
-          <div className="flex flex-col leading-none">
-            <span className="text-lg font-black tracking-tighter text-foreground uppercase">Codra</span>
-            <span className="text-[8px] font-black tracking-[0.3em] text-primary uppercase">Engine</span>
-          </div>
-        </Link>
-      </div>
+    <nav className="fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-6 md:px-10 border-b border-border/30 bg-background/85 backdrop-blur-xl">
+      {/* Logo */}
+      <Link to="/" className="flex items-center gap-2.5 group">
+        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary shadow-md shadow-primary/25 transition-transform group-hover:scale-105">
+          <Zap size={14} className="text-primary-foreground" strokeWidth={2.5} />
+        </div>
+        <span className="text-sm font-bold tracking-tight text-foreground">
+          Codra
+        </span>
+        <span className="hidden sm:inline text-[9px] font-semibold tracking-[0.2em] uppercase text-primary/60 border border-primary/20 rounded px-1.5 py-0.5">
+          Review
+        </span>
+      </Link>
 
-      <div className="hidden items-center gap-10 md:flex">
+      {/* Center nav */}
+      <div className="hidden md:flex items-center gap-8">
         {[
-          { name: 'Architecture', href: '#features' },
-          { name: 'Ecosystem', href: '#' },
-          { name: 'Docs', href: '#' },
-        ].map((item) => (
+          { label: 'Features', href: '#features' },
+          { label: 'How it works', href: '#how' },
+          { label: 'Open source', href: '#oss' },
+        ].map(item => (
           <a
-            key={item.name}
+            key={item.label}
             href={item.href}
-            className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground transition-colors hover:text-primary"
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors font-medium"
           >
-            {item.name}
+            {item.label}
           </a>
         ))}
       </div>
 
-      <div className="flex items-center gap-6">
+      {/* Right actions */}
+      <div className="flex items-center gap-3">
         <button
           onClick={toggleTheme}
-          className="flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 text-muted-foreground transition-all hover:bg-secondary hover:text-primary active:scale-90"
+          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
           aria-label="Toggle theme"
         >
-          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
         </button>
         <Link to="/login">
-          <Button size="sm" className="h-9 px-6 text-[10px] font-black uppercase tracking-widest shadow-lg shadow-primary/10">
-            Sign In
+          <Button size="sm" className="h-8 px-4 text-xs font-semibold">
+            Sign in
           </Button>
         </Link>
       </div>

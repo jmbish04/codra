@@ -9,7 +9,6 @@ import { JobsPage } from './pages/Jobs';
 import { JobDetailPage } from './pages/job-detail';
 import { ReposPage } from './pages/repos';
 import { StatsPage } from './pages/Stats';
-import { HealthPage } from './pages/health';
 import { SettingsPage } from './pages/Settings';
 import { NotFoundPage } from './pages/NotFound';
 import './app.css';
@@ -31,7 +30,6 @@ const router = createBrowserRouter([
       { path: 'jobs/:id',  element: <JobDetailPage /> },
       { path: 'repos',     element: <ReposPage /> },
       { path: 'stats',     element: <StatsPage /> },
-      { path: 'health',    element: <HealthPage /> },
       { path: 'settings',  element: <SettingsPage /> },
     ],
   },

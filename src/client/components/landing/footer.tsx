@@ -1,37 +1,51 @@
-import { Zap } from 'lucide-react';
+import { Zap, GitBranch } from 'lucide-react';
 
 export function Footer() {
   return (
-    <footer className="border-t border-border/40 py-12 mt-20">
-      <div className="container mx-auto px-6">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-8 md:gap-4 text-center md:text-left">
-          {/* Brand & Logo */}
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-5 w-5 items-center justify-center rounded-sm bg-primary/20">
-              <Zap size={10} className="text-primary" />
+    <footer className="border-t border-border/30 py-10">
+      <div className="container mx-auto px-6 md:px-10">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+
+          {/* Brand */}
+          <div className="flex items-center gap-2">
+            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/15">
+              <Zap size={11} className="text-primary" />
             </div>
-            <span className="text-[10px] font-black tracking-[0.2em] text-foreground uppercase pt-0.5">Codra</span>
+            <span className="text-sm font-semibold text-foreground">Codra</span>
+            <span className="text-[10px] text-muted-foreground/40 font-medium">· MIT License</span>
           </div>
 
-          {/* Essential Links */}
-          <div className="flex items-center gap-10 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/40">
-            <a href="https://github.com/devarshishimpi/codra" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">GitHub</a>
-            <a href="#" className="hover:text-foreground transition-colors">Documentation</a>
-            <a href="#" className="hover:text-foreground transition-colors">Changelog</a>
+          {/* Links */}
+          <div className="flex items-center gap-8">
+            {[
+              { label: 'GitHub', href: 'https://github.com/devarshishimpi/codra', external: true },
+              { label: 'Documentation', href: '#', external: false },
+              { label: 'Changelog', href: '#', external: false },
+            ].map(link => (
+              <a
+                key={link.label}
+                href={link.href}
+                target={link.external ? '_blank' : undefined}
+                rel={link.external ? 'noopener noreferrer' : undefined}
+                className="text-xs text-muted-foreground/50 hover:text-foreground transition-colors font-medium"
+              >
+                {link.label}
+              </a>
+            ))}
           </div>
-          
-          {/* Credit with Love */}
-          <div className="text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground/40">
-            Built with love by{' '}
-            <a 
-              href="https://devarshi.dev" 
-              target="_blank" 
+
+          {/* Credit */}
+          <p className="text-xs text-muted-foreground/40">
+            Built by{' '}
+            <a
+              href="https://devarshi.dev"
+              target="_blank"
               rel="noopener noreferrer"
-              className="text-foreground hover:text-primary transition-all font-semibold"
+              className="text-muted-foreground hover:text-primary transition-colors font-semibold"
             >
               Devarshi Shimpi
             </a>
-          </div>
+          </p>
         </div>
       </div>
     </footer>
