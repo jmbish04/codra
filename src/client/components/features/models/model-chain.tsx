@@ -40,7 +40,7 @@ export function ModelSelector({ value, onValueChange, hideLabels, className }: M
   [provider]);
 
   return (
-    <div className={cn("grid grid-cols-[140px_1fr] gap-2 items-end", className)}>
+    <div className={cn("grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-2 sm:items-end", className)}>
       <Select 
         label={hideLabels ? undefined : "Provider"}
         value={provider}

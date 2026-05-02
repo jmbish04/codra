@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "codra",
   "main": "./src/server/index.ts",
-  "compatibility_date": "2026-04-21",
+  "compatibility_date": "2026-04-16",
   "compatibility_flags": [
     "nodejs_compat"
   ],
@@ -24,7 +24,8 @@
     }
   },
   "ai": {
-    "binding": "AI"
+    "binding": "AI",
+    "remote": true
   },
   "kv_namespaces": [
     {
@@ -82,10 +83,10 @@
     ]
   },
   "vars": {
-    "APP_URL": "https://app.codra.devarshi.dev",
-    "AUTH_CALLBACK_URL": "https://app.codra.devarshi.dev/auth/github/callback",
+    "APP_URL": "http://localhost:8787",
+    "AUTH_CALLBACK_URL": "http://localhost:8787/auth/github/callback",
     "BOT_USERNAME": "codra-app",
     "DASHBOARD_ALLOWED_USERS": "devarshishimpi",
-    "ENVIRONMENT": "production"
+    "ENVIRONMENT": "development"
   }
 }

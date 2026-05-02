@@ -18,7 +18,7 @@ export function PageHeader({
 }: PageHeaderProps) {
   return (
     <header 
-      className={cn('flex items-end justify-between', className)} 
+      className={cn('flex flex-col sm:flex-row sm:items-end justify-between gap-4 sm:gap-0', className)} 
       {...props}
     >
       <div>
@@ -26,7 +26,7 @@ export function PageHeader({
           {category}
         </p>
         <h1 
-          className="text-2xl font-bold text-foreground" 
+          className="text-xl md:text-2xl font-bold text-foreground" 
           style={{ letterSpacing: '-0.025em' }}
         >
           {title}
@@ -38,7 +38,7 @@ export function PageHeader({
         )}
       </div>
       {actions && (
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
           {actions}
         </div>
       )}

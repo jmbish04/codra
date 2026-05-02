@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@client/lib/api';
 import {
   LayoutDashboard,
+  AlignLeft,
   GitBranch,
   BarChart2,
   HeartPulse,
@@ -11,6 +12,8 @@ import {
   Moon,
   Activity,
   Settings,
+  Star,
+  X,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
 import { useTheme } from '@client/lib/theme';
@@ -29,6 +32,7 @@ const links = [
 export function AppShell() {
   const { theme, toggleTheme } = useTheme();
   const [sessionUser, setSessionUser] = useState<AuthSessionUser | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,22 +57,51 @@ export function AppShell() {
   return (
     <div className="flex min-h-svh bg-background">
 
+      {/* Mobile Overlay */}
+      {mobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-background/80 backdrop-blur-sm z-30 lg:hidden" 
+          onClick={() => setMobileMenuOpen(false)} 
+        />
+      )}
+
       {/* ────────────────────────── Sidebar ────────────────────────── */}
       <aside
         style={{ width: 'var(--sidebar-width)' }}
-        className="fixed inset-y-0 left-0 z-30 flex flex-col glass border-r border-border transition-colors duration-300"
+        className={cn(
+          "fixed inset-y-0 left-0 z-40 flex flex-col glass border-r border-border transition-transform duration-300 lg:translate-x-0 h-[100dvh]",
+          mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+        )}
       >
 
-        <Link to="/dashboard" className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4 transition-colors hover:bg-secondary/50">
-          <img 
-            src={theme === 'dark' ? codraDark : codraLight} 
-            alt="Codra" 
-            className="h-7 w-auto" 
-          />
-        </Link>
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
+          <Link to="/dashboard" className="flex items-center gap-2 transition-colors hover:opacity-80">
+            <img 
+              src={theme === 'dark' ? codraDark : codraLight} 
+              alt="Codra" 
+              className="h-7 w-auto" 
+            />
+          </Link>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={toggleTheme}
+              className="hidden lg:flex h-8 w-8 items-center justify-center rounded border border-border text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+              aria-label="Toggle theme"
+            >
+              {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
+            <button
+              onClick={() => setMobileMenuOpen(false)}
+              className="lg:hidden h-8 w-8 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+              aria-label="Close sidebar"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-2.5 pt-3">
+        <nav className="flex-1 p-2.5 pt-3 overflow-y-auto">
           <div className="mb-1 px-2 pb-1.5">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
               Navigation
@@ -80,6 +113,7 @@ export function AppShell() {
                 key={to}
                 to={to}
                 end={end}
+                onClick={() => setMobileMenuOpen(false)}
                 className={({ isActive }) =>
                   cn('nav-item', isActive && 'active')
                 }
@@ -104,6 +138,15 @@ export function AppShell() {
 
         {/* Footer */}
         <div className="shrink-0 border-t border-border p-2.5">
+          <a
+            href="https://github.com/devarshishimpi/codra"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 mb-3 w-full rounded-md bg-secondary text-secondary-foreground hover:brightness-110 border border-border py-2 text-xs font-semibold transition-all"
+          >
+            <Star size={14} />
+            Star on GitHub
+          </a>
           {sessionUser && (
             <div className="mb-2 rounded-xl border border-border/60 bg-background/60 px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
@@ -115,18 +158,6 @@ export function AppShell() {
             </div>
           )}
           <div className="flex flex-col gap-0.5">
-            <button
-              id="theme-toggle"
-              type="button"
-              onClick={toggleTheme}
-              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              className="nav-item"
-            >
-              {theme === 'dark'
-                ? <><Sun size={15} strokeWidth={1.75} className="shrink-0 text-muted-foreground/70" /> Light mode</>
-                : <><Moon size={15} strokeWidth={1.75} className="shrink-0 text-muted-foreground/70" /> Dark mode</>
-              }
-            </button>
             <button
               id="logout-btn"
               type="button"
@@ -146,11 +177,28 @@ export function AppShell() {
       </aside>
 
       {/* ────────────────────────── Main ────────────────────────── */}
-      <main
-        style={{ marginLeft: 'var(--sidebar-width)' }}
-        className="flex-1 min-w-0 transition-colors duration-300"
-      >
-        <div className="mx-auto max-w-screen-xl px-8 py-8">
+      <main className="flex-1 min-w-0 transition-colors duration-300 lg:ml-[var(--sidebar-width)] flex flex-col">
+        
+        {/* Top Header */}
+        <header className="lg:hidden h-14 border-b border-border flex items-center justify-between px-4 shrink-0">
+          <button
+            className="p-2 -ml-2 text-muted-foreground hover:text-foreground"
+            onClick={() => setMobileMenuOpen(true)}
+            aria-label="Open menu"
+          >
+            <AlignLeft size={20} />
+          </button>
+
+          <button
+            onClick={toggleTheme}
+            className="h-8 w-8 flex items-center justify-center rounded border border-border text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            aria-label="Toggle theme"
+          >
+            {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+          </button>
+        </header>
+
+        <div className="mx-auto max-w-screen-xl w-full px-4 md:px-8 py-6 md:py-8">
           <Outlet />
         </div>
       </main>

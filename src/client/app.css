@@ -607,11 +607,11 @@
 .chart-card > * { position: relative; z-index: 1; }
 
 @utility stat-number {
-  @apply text-[2.25rem] font-bold tracking-[-0.04em] leading-none text-foreground tabular-nums;
+  @apply text-2xl md:text-3xl lg:text-[2.25rem] font-bold tracking-[-0.04em] leading-none text-foreground tabular-nums;
 }
 
 @utility stat-label {
-  @apply text-[0.72rem] font-semibold tracking-[0.06em] uppercase text-muted-foreground;
+  @apply text-[0.65rem] md:text-[0.7rem] lg:text-[0.72rem] font-semibold tracking-[0.06em] uppercase text-muted-foreground;
 }
 
 @utility prose {

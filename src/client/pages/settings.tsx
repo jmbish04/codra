@@ -152,7 +152,7 @@ export function SettingsPage() {
       {/* ── Section 1: Global Intelligence Scaling ────── */}
       <div className="flex flex-col gap-4">
         {/* Section header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
           <div className="flex items-center gap-2">
             <Layers size={13} strokeWidth={1.75} className="text-primary" />
             <h2 className="text-sm font-semibold text-foreground">Global Intelligence Strategy</h2>
@@ -272,9 +272,10 @@ export function SettingsPage() {
             ))}
           </div>
         ) : (
-          <div className="surface overflow-hidden">
-            {/* Table header */}
-            <div className="grid grid-cols-[1fr_80px_80px_80px_100px_90px] gap-0 border-b border-border bg-muted/40">
+          <div className="surface overflow-x-auto">
+            <div className="min-w-[700px]">
+              {/* Table header */}
+              <div className="grid grid-cols-[1fr_80px_80px_80px_100px_90px] gap-0 border-b border-border bg-muted/40">
               <div className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Model</div>
               <div className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground text-center">RPM</div>
               <div className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground text-center">RPD</div>
@@ -368,8 +369,9 @@ export function SettingsPage() {
                     {saving === cfg.modelId ? 'Saving…' : 'Apply'}
                   </Button>
                 </div>
-              </div>
-            ))}
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

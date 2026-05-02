@@ -9,7 +9,7 @@
     "deploy": "npm run build && npm run migrate && wrangler deploy",
     "dev": "concurrently -k -n CLIENT,WORKER -c cyan,green \"npm:dev:client\" \"npm:dev:worker\"",
     "dev:client": "vite build --watch --mode development",
-    "dev:worker": "wrangler dev",
+    "dev:worker": "wrangler dev --local",
     "start": "npm run dev",
     "migrate": "node scripts/migrate.mjs",
     "test": "vitest run",

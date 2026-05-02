@@ -30,6 +30,36 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
   });
 }
 
+const originalConsoleWarn = console.warn;
+console.warn = (...args: any[]) => {
+  if (typeof args[0] === 'string' && args[0].includes('The width(-1) and height(-1) of chart should be greater than 0')) {
+    return;
+  }
+  originalConsoleWarn(...args);
+};
+
+const isJsonLog = (args: any[]) => {
+  if (typeof args[0] === 'string' && args[0].includes('"timestamp"') && args[0].includes('"level"')) return true;
+  return false;
+};
+
+const originalConsoleInfo = console.info;
+console.info = (...args: any[]) => {
+  if (isJsonLog(args)) return;
+  originalConsoleInfo(...args);
+};
+
+const originalConsoleError = console.error;
+console.error = (...args: any[]) => {
+  if (isJsonLog(args)) return;
+  originalConsoleError(...args);
+};
+
+const originalConsoleLog = console.log;
+console.log = (...args: any[]) => {
+  if (isJsonLog(args)) return;
+  originalConsoleLog(...args);
+};
 // Global cleanup for database tables (Disabled temporarily to debug race conditions)
 /*
 beforeEach(async () => {

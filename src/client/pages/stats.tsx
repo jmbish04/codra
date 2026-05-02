@@ -392,7 +392,7 @@ export function StatsPage() {
         <>
           <AreaVolumeChart data={stats.trend} isDark={isDark} days={days} />
 
-          <div className="grid grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <ModelsBarChart models={stats.models} isDark={isDark} />
             <VerdictDonut verdictData={verdictData} />
           </div>
@@ -404,7 +404,7 @@ export function StatsPage() {
       {loading && !stats && (
         <div className="flex flex-col gap-5">
           <div className="chart-card h-[200px] animate-pulse" />
-          <div className="grid grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="chart-card h-[200px] animate-pulse" />
             <div className="chart-card h-[200px] animate-pulse" />
           </div>

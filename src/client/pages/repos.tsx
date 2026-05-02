@@ -152,25 +152,26 @@ function RepoItem({ repo, isExpanded, onToggle, onRefresh, globalConfig }: RepoI
       {/* ── Row header ───────────────────────────────── */}
       <div
         className={cn(
-          'flex items-center gap-4 px-5 py-4 cursor-pointer select-none transition-colors',
+          'flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 sm:px-5 py-4 cursor-pointer select-none transition-colors relative',
           isExpanded ? 'bg-primary/[0.02]' : 'hover:bg-muted/30',
         )}
         onClick={onToggle}
       >
-        {/* Status dot */}
-        <div
-          className={cn(
-            'shrink-0 w-2 h-2 rounded-full',
-            enabled ? 'bg-success' : 'bg-muted-foreground/30',
-          )}
-        />
+        <div className="flex items-start sm:items-center gap-3 flex-1 min-w-0 pr-6 sm:pr-0">
+          {/* Status dot */}
+          <div
+            className={cn(
+              'shrink-0 w-2 h-2 rounded-full mt-1.5 sm:mt-0',
+              enabled ? 'bg-success' : 'bg-muted-foreground/30',
+            )}
+          />
 
-        {/* Repo name + meta */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2.5 mb-0.5">
-            <span className="text-sm font-semibold text-foreground tracking-tight">
-              {repo.owner}/{repo.repo}
-            </span>
+          {/* Repo name + meta */}
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 mb-0.5">
+              <span className="text-sm font-semibold text-foreground tracking-tight truncate max-w-[200px] sm:max-w-none">
+                {repo.owner}/{repo.repo}
+              </span>
             {(!repo.mainModel && !repo.fallbackModels && !repo.sizeOverrides) ? (
               <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-muted text-muted-foreground border border-border">
                 Global Strategy
@@ -188,9 +189,10 @@ function RepoItem({ repo, isExpanded, onToggle, onRefresh, globalConfig }: RepoI
               : 'Never'}
           </p>
         </div>
+        </div>
 
         {/* Toggle */}
-        <div className="flex items-center gap-2.5 pr-5 border-r border-border/40" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2.5 pl-5 sm:pl-0 mt-2 sm:mt-0 sm:pr-5 sm:border-r border-border/40" onClick={e => e.stopPropagation()}>
           <span className={cn(
             'text-[10px] font-bold uppercase tracking-widest transition-colors',
             enabled ? 'text-success' : 'text-muted-foreground/40',
@@ -203,7 +205,7 @@ function RepoItem({ repo, isExpanded, onToggle, onRefresh, globalConfig }: RepoI
         <ChevronDown
           size={15}
           className={cn(
-            'shrink-0 text-muted-foreground/40 transition-transform duration-300',
+            'shrink-0 text-muted-foreground/40 transition-transform duration-300 absolute right-4 top-4 sm:relative sm:top-0 sm:right-0',
             isExpanded && 'rotate-180',
           )}
         />

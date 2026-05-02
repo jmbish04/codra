@@ -11,8 +11,8 @@ interface JobHeaderProps {
 
 export function JobHeader({ job, isRetrying, onRetry }: JobHeaderProps) {
   return (
-    <header className="flex items-start justify-between gap-4">
-      <div className="min-w-0">
+    <header className="flex flex-col sm:flex-row items-start justify-between gap-4">
+      <div className="min-w-0 w-full">
         <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
           <Link to="/jobs" className="hover:text-foreground transition-colors">Jobs</Link>
           <ChevronRight size={12} className="opacity-40" />
@@ -45,7 +45,7 @@ export function JobHeader({ job, isRetrying, onRetry }: JobHeaderProps) {
         variant={job.status === 'failed' ? 'destructive' : 'default'}
         disabled={isRetrying || job.status === 'running' || job.status === 'queued'}
         onClick={onRetry}
-        className="shrink-0 gap-2"
+        className="shrink-0 gap-2 w-full sm:w-auto"
       >
         <RotateCcw size={14} />
         {isRetrying ? 'Starting…' : job.status === 'failed' ? 'Retry job' : 'Re-run job'}

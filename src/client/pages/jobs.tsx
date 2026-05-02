@@ -122,7 +122,7 @@ export function JobsPage() {
       {/* System Failures (DLQ) Section */}
       {dlqMessages.length > 0 && (
         <div className="surface border-warning/30 bg-warning/[0.02] overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-warning/20">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-5 py-3.5 border-b border-warning/20 gap-4 sm:gap-0">
             <div className="flex items-center gap-2.5">
               <div className="flex h-6 w-6 items-center justify-center rounded bg-warning text-warning-foreground">
                 <AlertTriangle size={14} />
@@ -132,7 +132,7 @@ export function JobsPage() {
                 <p className="text-[11px] text-muted-foreground">Jobs that were interrupted by system-level crashes or timeouts.</p>
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2 w-full sm:w-auto">
               <Button
                 variant="outline" size="sm"
                 onClick={() => handleReplayDlq(dlqMessages.map(m => m.lease_id))}
