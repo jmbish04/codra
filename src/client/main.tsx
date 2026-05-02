@@ -8,6 +8,7 @@ import { DashboardPage } from './pages/dashboard';
 import { LoginPage } from './pages/login';
 import { JobsPage } from './pages/jobs';
 import { JobDetailPage } from './pages/job-detail';
+import { JobLogsPage } from './pages/job-logs';
 import { ReposPage } from './pages/repos';
 import { StatsPage } from './pages/stats';
 import { SettingsPage } from './pages/settings';
@@ -44,6 +45,7 @@ const router = createBrowserRouter([
       { path: 'dashboard', element: <DashboardPage /> },
       { path: 'jobs', element: <JobsPage /> },
       { path: 'jobs/:id', element: <JobDetailPage /> },
+      { path: 'jobs/:id/logs', element: <JobLogsPage /> },
       { path: 'repos', element: <ReposPage /> },
       { path: 'stats', element: <StatsPage /> },
       { path: 'settings', element: <SettingsPage /> },

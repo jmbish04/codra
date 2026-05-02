@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ChevronRight, ExternalLink, RotateCcw } from 'lucide-react';
+import { ChevronRight, ExternalLink, RotateCcw, Terminal } from 'lucide-react';
 import { Button } from '@client/components/ui/button';
 import type { JobDetail } from '@shared/schema';
 
@@ -41,15 +41,23 @@ export function JobHeader({ job, isRetrying, onRetry }: JobHeaderProps) {
         </p>
       </div>
 
-      <Button
-        variant={job.status === 'failed' ? 'destructive' : 'default'}
-        disabled={isRetrying || job.status === 'running' || job.status === 'queued'}
-        onClick={onRetry}
-        className="shrink-0 gap-2 w-full sm:w-auto"
-      >
-        <RotateCcw size={14} />
-        {isRetrying ? 'Starting…' : job.status === 'failed' ? 'Retry job' : 'Re-run job'}
-      </Button>
+      <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+        <Button variant="outline" asChild className="w-full sm:w-auto gap-2">
+          <Link to={`/jobs/${job.id}/logs`}>
+            <Terminal size={14} />
+            Raw Logs
+          </Link>
+        </Button>
+        <Button
+          variant={job.status === 'failed' ? 'destructive' : 'default'}
+          disabled={isRetrying || job.status === 'running' || job.status === 'queued'}
+          onClick={onRetry}
+          className="shrink-0 gap-2 w-full sm:w-auto"
+        >
+          <RotateCcw size={14} />
+          {isRetrying ? 'Starting…' : job.status === 'failed' ? 'Retry job' : 'Re-run job'}
+        </Button>
+      </div>
     </header>
   );
 }

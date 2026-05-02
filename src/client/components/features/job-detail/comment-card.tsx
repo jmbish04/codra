@@ -18,7 +18,7 @@ export function CommentCard({ comment, filePath }: CommentCardProps) {
   return (
     <article
       className={cn(
-        'surface-hover rounded-2xl border p-5 transition-all mb-4',
+        'surface-hover rounded-md border p-5 transition-all mb-4',
         sev.bg, sev.border,
       )}
     >
@@ -58,8 +58,8 @@ export function CommentCard({ comment, filePath }: CommentCardProps) {
           <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/70 mb-2">
             Suggested Fix
           </p>
-          <div className="rounded-xl overflow-hidden border border-border/60 bg-muted/20">
-            <div className="p-3 overflow-x-auto text-[13px] font-mono leading-relaxed prose-pre:m-0 prose-pre:bg-transparent prose-pre:p-0">
+          <div className="rounded-md overflow-hidden border" style={{ background: 'var(--code-bg)', borderColor: 'var(--code-border)', color: 'var(--code-fg)' }}>
+            <div className="p-3 overflow-x-auto text-[13px] font-mono leading-relaxed prose-pre:m-0 prose-pre:bg-transparent prose-pre:border-none prose-pre:p-0">
               <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
                 {`\`\`\`\n${comment.codeSuggestion.replace(/```suggestion\n?|```/g, '').trim()}\n\`\`\``}
               </ReactMarkdown>

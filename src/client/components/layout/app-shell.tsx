@@ -148,7 +148,7 @@ export function AppShell() {
             Star on GitHub
           </a>
           {sessionUser && (
-            <div className="mb-2 rounded-xl border border-border/60 bg-background/60 px-3 py-2">
+            <div className="mb-2 rounded-md border border-border/60 bg-background/60 px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
                 Signed In
               </p>

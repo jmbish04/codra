@@ -227,7 +227,7 @@ function RepoItem({ repo, isExpanded, onToggle, onRefresh, globalConfig }: RepoI
                 <div className="flex items-center gap-2">
                   <Layers size={13} strokeWidth={1.75} className="text-primary" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                    Intelligence Scaling
+                    Model Settings
                   </span>
                   <a
                     href="/settings"

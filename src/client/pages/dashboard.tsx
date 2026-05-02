@@ -57,21 +57,7 @@ export function DashboardPage() {
               value={days}
               onValueChange={setDays}
             />
-            <Button
-              asChild
-              variant="outline"
-              size="sm"
-              className="gap-2"
-            >
-              <a
-                href="https://github.com/apps/codra-app/installations/new"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <Settings size={13} />
-                Configure App
-              </a>
-            </Button>
+
             <Button
               variant="outline"
               size="sm"

@@ -75,7 +75,7 @@ export function JobMetaCards({ job }: JobMetaCardsProps) {
 
           {job.errorMessage && (
             <div
-              className="mt-4 rounded-lg border p-3"
+              className="mt-4 rounded-md border p-3"
               style={{ background: 'var(--danger-bg)', borderColor: 'var(--danger-border)', color: 'var(--danger)' }}
             >
               <p className="mb-1 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--danger)' }}>Error</p>
@@ -96,7 +96,7 @@ export function JobMetaCards({ job }: JobMetaCardsProps) {
               {(job.steps ?? []).map((step, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center justify-between rounded-xl border border-border/40 bg-muted/20 px-4 py-2.5"
+                  className="flex items-center justify-between rounded-md border border-border/40 bg-muted/20 px-4 py-2.5"
                 >
                   <div className="flex items-center gap-3">
                     <div className={`step-dot ${step.status}`} />

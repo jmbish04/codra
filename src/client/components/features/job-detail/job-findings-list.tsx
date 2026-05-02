@@ -25,7 +25,7 @@ export function JobFindingsList({ job }: JobFindingsListProps) {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">View by</span>
-          <div className="flex rounded-lg bg-secondary p-0.5 gap-0.5">
+          <div className="flex rounded-md bg-secondary p-0.5 gap-0.5">
             {(['files', 'severity'] as const).map((view) => (
               <button
                 key={view}

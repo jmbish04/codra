@@ -10,7 +10,7 @@ export function JobDetailSkeleton({ error }: JobDetailSkeletonProps) {
     <section className="flex flex-col gap-6">
       {error && (
         <div
-          className="rounded-xl border px-4 py-3 text-sm"
+          className="rounded-md border px-4 py-3 text-sm"
           style={{ background: 'var(--danger-bg)', borderColor: 'var(--danger-border)', color: 'var(--danger)' }}
         >
           {error}
@@ -37,7 +37,7 @@ export function JobDetailSkeleton({ error }: JobDetailSkeletonProps) {
         <Card><CardContent className="p-5 space-y-3">
           <Skeleton width="50%" height="1.2rem" />
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="flex items-center justify-between rounded-xl bg-muted/30 px-4 py-3">
+            <div key={i} className="flex items-center justify-between rounded-md bg-muted/30 px-4 py-3">
               <div className="flex items-center gap-3">
                 <Skeleton width={12} height={12} borderRadius="50%" />
                 <Skeleton width={120} height="0.9rem" />

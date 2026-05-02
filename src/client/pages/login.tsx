@@ -53,7 +53,7 @@ export function LoginPage() {
         className="relative z-10 w-full max-w-[420px]"
         style={{ animation: 'fade-up 0.6s var(--ease-out-expo) both' }}
       >
-        <div className="glass p-10 flex flex-col gap-8 rounded-2xl shadow-2xl">
+        <div className="glass p-10 flex flex-col gap-8 rounded-md shadow-2xl">
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-3">
               <img
@@ -69,7 +69,7 @@ export function LoginPage() {
 
           <div className="h-px bg-border" />
 
-          <div className="rounded-xl border border-border/70 bg-background/70 px-4 py-3 text-sm text-muted-foreground leading-relaxed">
+          <div className="rounded-md border border-border/70 bg-background/70 px-4 py-3 text-sm text-muted-foreground leading-relaxed">
             Dashboard access is restricted to GitHub users listed in the deployment allowlist. This production instance currently accepts the configured owner account only.
           </div>
 

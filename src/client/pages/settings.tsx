@@ -139,7 +139,7 @@ export function SettingsPage() {
       <PageHeader
         category="System Configuration"
         title="Settings"
-        description="Global intelligence scaling and model rate limits."
+        description="Global model settings and usage rate limits."
       />
 
       {error && (
@@ -149,13 +149,13 @@ export function SettingsPage() {
         </Alert>
       )}
 
-      {/* ── Section 1: Global Intelligence Scaling ────── */}
+      {/* ── Section 1: Global Model Settings ────── */}
       <div className="flex flex-col gap-4">
         {/* Section header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
           <div className="flex items-center gap-2">
             <Layers size={13} strokeWidth={1.75} className="text-primary" />
-            <h2 className="text-sm font-semibold text-foreground">Global Intelligence Strategy</h2>
+            <h2 className="text-sm font-semibold text-foreground">Global Model Settings</h2>
             <span className="text-xs text-muted-foreground">· Account-wide model chains &amp; complexity thresholds</span>
           </div>
           <Button
@@ -259,7 +259,7 @@ export function SettingsPage() {
       <div className="flex flex-col gap-4">
         <div className="flex items-center gap-2">
           <ShieldAlert size={13} strokeWidth={1.75} className="text-warning" />
-          <h2 className="text-sm font-semibold text-foreground">Model Intelligence Quotas</h2>
+          <h2 className="text-sm font-semibold text-foreground">Model Usage Quotas</h2>
           <span className="text-xs text-muted-foreground">· Provider rate limits and token capacity</span>
         </div>
 

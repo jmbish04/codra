@@ -68,6 +68,11 @@
   --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.05);
   --shadow-md: 0 4px 12px oklch(0% 0 0 / 0.06), 0 1px 4px oklch(0% 0 0 / 0.03);
   --shadow-lg: 0 12px 24px -4px oklch(0% 0 0 / 0.08), 0 4px 12px -2px oklch(0% 0 0 / 0.04);
+
+  /* Code Blocks (Zinc) */
+  --code-bg: #f4f4f5;
+  --code-fg: #27272a;
+  --code-border: #e4e4e7;
 }
 
 /* ─────────────────────────────────────────────────────
@@ -117,6 +122,11 @@
   --shadow-sm: 0 1px 2px oklch(100% 0 0 / 0.05), 0 1px 2px oklch(0% 0 0 / 0.3);
   --shadow-md: 0 4px 12px oklch(0% 0 0 / 0.45), 0 1px 4px oklch(0% 0 0 / 0.25);
   --shadow-lg: 0 12px 24px -4px oklch(0% 0 0 / 0.5), 0 4px 12px -2px oklch(0% 0 0 / 0.3);
+
+  /* Code Blocks (Zinc) */
+  --code-bg: #18181b;
+  --code-fg: #d4d4d8;
+  --code-border: #27272a;
 }
 
 /* ─────────────────────────────────────────────────────
@@ -506,11 +516,10 @@
 }
 
 @utility code-block {
-  @apply m-0 whitespace-pre-wrap break-words px-[1.125rem] py-4 rounded-md bg-[oklch(13%_0.012_115)] text-[oklch(85%_0.010_115)] font-mono text-[0.775rem] leading-[1.7] overflow-auto border border-[oklch(23%_0.016_115)] tracking-[0.01em];
-
-  .dark & {
-    @apply bg-[oklch(10%_0.010_115)] border-[oklch(21%_0.014_115)];
-  }
+  @apply m-0 whitespace-pre-wrap break-words px-[1.125rem] py-4 rounded-md font-mono text-[0.775rem] leading-[1.7] overflow-auto tracking-[0.01em];
+  background-color: var(--code-bg);
+  color: var(--code-fg);
+  border: 1px solid var(--code-border);
 }
 
 @utility severity-tag {
@@ -632,8 +641,13 @@
     @apply font-mono text-[0.78em] bg-muted px-[0.3em] py-[0.1em] rounded-[3px] border border-border;
   }
   & pre {
-    @apply bg-[oklch(13%_0.012_115)] text-[oklch(85%_0.01_115)] px-4 py-[0.85rem] rounded-md overflow-x-auto text-[0.78em] border border-[oklch(23%_0.016_115)];
-    .dark & { @apply bg-[oklch(10%_0.01_115)] border-[oklch(21%_0.014_115)]; }
+    @apply px-4 py-[0.85rem] rounded-md overflow-x-auto text-[0.78em];
+    background-color: var(--code-bg);
+    color: var(--code-fg);
+    border: 1px solid var(--code-border);
+  }
+  & pre code {
+    @apply bg-transparent border-none p-0 text-inherit;
   }
   & blockquote {
     @apply border-l-2 border-primary pl-4 text-muted-foreground my-[0.85em];
