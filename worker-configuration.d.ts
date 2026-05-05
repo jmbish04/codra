@@ -13,7 +13,6 @@ declare interface Env {
   GITHUB_APP_WEBHOOK_SECRET: string;
   GEMINI_API_KEY: string;
   GEMINI_MODEL: string;
-  DASHBOARD_PASSWORD: string;
   BOT_USERNAME: string;
   ENVIRONMENT: string;
   CF_API_TOKEN: string;

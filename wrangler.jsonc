@@ -72,7 +72,8 @@
       "/health*",
       "/api/*",
       "/auth/*",
-      "/webhook*"
+      "/webhook*",
+      "/settings*"
     ]
   },
   "secrets": {
