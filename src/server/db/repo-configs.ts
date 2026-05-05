@@ -1,5 +1,5 @@
 import type { AppBindings } from '@server/env';
-import { queryRows } from './client';
+import { parseJsonColumn, queryRows } from './client';
 import { defaultRepoConfig, repoConfigRecordSchema, repoConfigSchema, type RepoConfig } from '@shared/schema';
 import { getOrCreateRepository } from './repositories';
 
@@ -7,18 +7,18 @@ type RepoConfigRow = {
   installation_id: string;
   owner: string;
   repo: string;
-  parsed_json: RepoConfig | null;
+  parsed_json: RepoConfig | string | null;
   updated_at: string;
   main_model: string | null;
-  fallback_models: string[] | null;
-  size_overrides: any | null;
+  fallback_models: string[] | string | null;
+  size_overrides: any | string | null;
   enabled: boolean;
   last_job_created_at: string | null;
   last_job_verdict: 'approve' | 'comment' | null;
 };
 
 function mapRepo(row: RepoConfigRow) {
-  const parsedJson = repoConfigSchema.parse(row.parsed_json ?? defaultRepoConfig);
+  const parsedJson = repoConfigSchema.parse(parseJsonColumn(row.parsed_json, defaultRepoConfig));
   return repoConfigRecordSchema.parse({
     installationId: row.installation_id,
     owner: row.owner,
@@ -28,14 +28,14 @@ function mapRepo(row: RepoConfigRow) {
     lastJobCreatedAt: row.last_job_created_at,
     lastJobVerdict: row.last_job_verdict,
     mainModel: row.main_model,
-    fallbackModels: row.fallback_models,
-    sizeOverrides: row.size_overrides,
+    fallbackModels: parseJsonColumn(row.fallback_models, null),
+    sizeOverrides: parseJsonColumn(row.size_overrides, null),
     enabled: row.enabled,
   });
 }
 
 export async function upsertRepoConfig(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   input: {
     installationId: string;
     owner: string;
@@ -79,7 +79,7 @@ export async function upsertRepoConfig(
 // Used during sync — only creates the record if it doesn't exist.
 // Preserves all existing model overrides if the repo is already configured.
 export async function syncRepoConfig(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   input: {
     installationId: string;
     owner: string;
@@ -105,7 +105,7 @@ export async function syncRepoConfig(
 }
 
 export async function updateRepoConfigEnabled(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   input: {
     owner: string;
     repo: string;
@@ -127,7 +127,7 @@ export async function updateRepoConfigEnabled(
   );
 }
 
-export async function listRepoConfigs(env: Pick<AppBindings, 'NEON_DATABASE_URL'>) {
+export async function listRepoConfigs(env: Pick<AppBindings, 'HYPERDRIVE'>) {
   const rows = await queryRows<RepoConfigRow>(
     env,
     `
@@ -159,7 +159,7 @@ export async function listRepoConfigs(env: Pick<AppBindings, 'NEON_DATABASE_URL'
   return rows.map(mapRepo);
 }
 
-export async function getRepoConfigRecord(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, owner: string, repo: string) {
+export async function getRepoConfigRecord(env: Pick<AppBindings, 'HYPERDRIVE'>, owner: string, repo: string) {
   const [row] = await queryRows<RepoConfigRow>(
     env,
     `

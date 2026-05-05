@@ -50,7 +50,6 @@
     "wrangler": "^4.81.1"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.0.2",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-separator": "^1.1.8",
@@ -62,6 +61,7 @@
     "jsonrepair": "^3.13.3",
     "lucide-react": "^1.8.0",
     "picomatch": "^4.0.4",
+    "postgres": "^3.4.9",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",

@@ -6,7 +6,12 @@ GITHUB_CLIENT_SECRET="replace-with-your-dashboard-oauth-client-secret"
 AUTH_CALLBACK_URL="http://127.0.0.1:8787/auth/github/callback"
 DASHBOARD_ALLOWED_USERS="devarshishimpi"
 GEMINI_API_KEY="replace-with-your-gemini-api-key"
-NEON_DATABASE_URL="postgresql://user:password@your-endpoint-pooler.region.aws.neon.tech/dbname?sslmode=require&channel_binding=require"
+# Used by wrangler dev for the HYPERDRIVE binding. Do not commit real credentials.
+CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="postgresql://user:password@localhost:5432/codra"
+# Used by npm test for DB integration tests. Keep separate from production DBs.
+TEST_DATABASE_URL="postgresql://user:password@localhost:5432/codra_test"
+# Used by npm run migrate. Can point directly at Postgres or PgBouncer.
+DATABASE_URL="postgresql://user:password@localhost:5432/codra"
 # Optional: required only for DLQ inspection/replay via /api/dlq
 # Generate at https://dash.cloudflare.com/profile/api-tokens (Queues:Edit permission)
 CF_API_TOKEN="replace-with-cloudflare-api-token"

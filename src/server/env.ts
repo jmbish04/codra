@@ -12,6 +12,10 @@ export interface AssetsBinding {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }
 
+export interface HyperdriveBinding {
+  connectionString: string;
+}
+
 export interface DashboardSessionUser {
   githubUserId: number;
   login: string;
@@ -26,6 +30,7 @@ export interface AppBindings {
   APP_KV: KVNamespace;
   REVIEW_QUEUE: QueueProducer<ReviewJobMessage>;
   ASSETS: AssetsBinding;
+  HYPERDRIVE: HyperdriveBinding;
   APP_PRIVATE_KEY: string;
   GITHUB_APP_ID: string;
   GITHUB_APP_SLUG?: string;
@@ -36,7 +41,6 @@ export interface AppBindings {
   APP_URL: string;
   DASHBOARD_ALLOWED_USERS: string;
   GEMINI_API_KEY: string;
-  NEON_DATABASE_URL: string;
   BOT_USERNAME: string;
   ENVIRONMENT: string;
   CF_API_TOKEN?: string;

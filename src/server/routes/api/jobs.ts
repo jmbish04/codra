@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { defaultRepoConfig, jobsQuerySchema, repoConfigSchema } from '@shared/schema';
 import type { AppEnv } from '@server/env';
-import { getJobDetail, getJobForProcessing, insertJob, listJobs, mapJob, supersedeOlderJobs } from '@server/db/jobs';
+import { bytesToHex, getJobDetail, getJobForProcessing, insertJob, listJobs, mapJob, supersedeOlderJobs } from '@server/db/jobs';
 import { jsonError } from '@server/core/http';
 
 export function createJobsRouter() {
@@ -40,7 +40,7 @@ export function createJobsRouter() {
       prTitle: source.prTitle,
       prAuthor: source.prAuthor,
       commitSha: source.commitSha,
-      baseSha: rawSource.base_sha.toString('hex'), // base_sha is only in raw row/detail
+      baseSha: bytesToHex(rawSource.base_sha), // base_sha is only in raw row/detail
       trigger: 'retry',
       headRef: rawSource.head_ref,
       baseRef: rawSource.base_ref,

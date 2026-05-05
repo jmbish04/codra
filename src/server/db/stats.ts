@@ -3,7 +3,7 @@ import { queryRows } from './client';
 import { statsSchema } from '@shared/schema';
 import { getModelUsageStats } from './file-reviews';
 
-export async function getStats(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, days = 30) {
+export async function getStats(env: Pick<AppBindings, 'HYPERDRIVE'>, days = 30) {
   const parsedDays = Number(days);
   const safeDays = Number.isFinite(parsedDays) ? Math.trunc(parsedDays) : 30;
   const clampedDays = Math.min(Math.max(safeDays, 1), 365);

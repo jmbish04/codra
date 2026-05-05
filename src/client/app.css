@@ -23,7 +23,7 @@
   --popover:            oklch(100%  0 0);
   --popover-foreground: oklch(12%   0.02  115);
 
-  /* Signature Neon Lime - Darkened in light mode for AA accessibility on white */
+  /* Signature lime - darkened in light mode for AA accessibility on white */
   --primary:             oklch(64%   0.24  115);
   --primary-foreground:  oklch(100%  0     0);   /* White text on the deeper green */
 

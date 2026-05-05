@@ -4,6 +4,7 @@ import type { AppBindings } from './env';
 import { reviewJobMessageSchema } from '@shared/schema';
 import { recoverStaleJobs } from '@server/db/jobs';
 import { logger } from '@server/core/logger';
+import { runWithDb } from '@server/db/client';
 
 const app = createApp();
 
@@ -15,9 +16,12 @@ const app = createApp();
 const STALE_JOB_THRESHOLD_MINUTES = 20;
 
 export default {
-  fetch: app.fetch,
+  fetch(request: Request, env: AppBindings, ctx: ExecutionContext) {
+    return runWithDb(env, () => app.fetch(request, env, ctx));
+  },
 
   async queue(batch: MessageBatch<unknown>, env: AppBindings, _ctx: ExecutionContext) {
+    return runWithDb(env, async () => {
     // ── Stale-job recovery ──────────────────────────────────────────────────
     // Run once per batch. Any job that was 'running' for > threshold is a
     // leftover from a previous crashed invocation; mark it failed now so the
@@ -56,5 +60,6 @@ export default {
         message.retry();
       }
     }
+    });
   },
 } satisfies ExportedHandler<AppBindings>;

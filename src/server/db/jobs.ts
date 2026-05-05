@@ -1,5 +1,5 @@
 import type { AppBindings } from '@server/env';
-import { queryRows } from './client';
+import { parseJsonColumn, queryRows } from './client';
 import { defaultRepoConfig, jobDetailSchema, jobSummarySchema, repoConfigSchema, type RepoConfig } from '@shared/schema';
 import { getOrCreateRepository } from './repositories';
 
@@ -11,11 +11,11 @@ type JobRow = {
   pr_number: number;
   pr_title: string | null;
   pr_author: string | null;
-  commit_sha: Buffer;
-  base_sha: Buffer;
+  commit_sha: ByteaValue;
+  base_sha: ByteaValue;
   trigger: 'auto' | 'mention' | 'retry';
   status: 'queued' | 'running' | 'done' | 'failed' | 'superseded';
-  config_snapshot: { review?: RepoConfig['review']; model?: RepoConfig['model'] } | null;
+  config_snapshot: { review?: RepoConfig['review']; model?: RepoConfig['model'] } | string | null;
   check_run_id: number | null;
   created_at: string;
   started_at: string | null;
@@ -33,7 +33,7 @@ type JobRow = {
   retry_of_job_id: string | null;
   summary_model: string | null;
   overall_confidence_score: number | null;
-  steps: JobStep[] | null;
+  steps: JobStep[] | string | null;
 };
 
 type JobStep = {
@@ -45,8 +45,30 @@ type JobStep = {
 };
 
 type JobDetailRow = JobRow & {
-  files_json: unknown[] | null;
+  files_json: unknown[] | string | null;
 };
+
+type ByteaValue = ArrayBuffer | ArrayBufferView | string;
+
+function hexToBytes(hex: string) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+export function bytesToHex(value: ByteaValue) {
+  if (typeof value === 'string') {
+    return value.startsWith('\\x') ? value.slice(2).toLowerCase() : value.toLowerCase();
+  }
+
+  const bytes = ArrayBuffer.isView(value)
+    ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+    : new Uint8Array(value);
+
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 
 export function mapJob(row: JobRow) {
   return jobSummarySchema.parse({
@@ -57,7 +79,7 @@ export function mapJob(row: JobRow) {
     prNumber: row.pr_number,
     prTitle: row.pr_title,
     prAuthor: row.pr_author,
-    commitSha: row.commit_sha.toString('hex'),
+    commitSha: bytesToHex(row.commit_sha),
     trigger: row.trigger,
     status: row.status,
     verdict: row.verdict,
@@ -70,15 +92,15 @@ export function mapJob(row: JobRow) {
     finishedAt: row.finished_at,
     errorMessage: row.error_msg,
     overallConfidenceScore: row.overall_confidence_score,
-    steps: row.steps ?? [],
+    steps: parseJsonColumn(row.steps, []),
     checkRunId: row.check_run_id,
-    configSnapshot: row.config_snapshot ? repoConfigSchema.parse(row.config_snapshot) : null,
+    configSnapshot: row.config_snapshot ? repoConfigSchema.parse(parseJsonColumn(row.config_snapshot, defaultRepoConfig)) : null,
     retryOfJobId: row.retry_of_job_id,
   });
 }
 
 export async function insertJob(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   input: {
     installationId: string;
     owner: string;
@@ -131,8 +153,8 @@ export async function insertJob(
       input.prNumber,
       input.prTitle,
       input.prAuthor,
-      Buffer.from(input.commitSha, 'hex'),
-      Buffer.from(input.baseSha, 'hex'),
+      hexToBytes(input.commitSha),
+      hexToBytes(input.baseSha),
       input.trigger,
       JSON.stringify(input.configSnapshot ?? defaultRepoConfig),
       input.headRef,
@@ -145,7 +167,7 @@ export async function insertJob(
 }
 
 export async function listJobs(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   query: {
     owner?: string;
     repo?: string;
@@ -217,7 +239,7 @@ export async function listJobs(
   };
 }
 
-export async function getJobForProcessing(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobId: string) {
+export async function getJobForProcessing(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string) {
   if (!jobId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
     return null;
   }
@@ -236,7 +258,7 @@ export async function getJobForProcessing(env: Pick<AppBindings, 'NEON_DATABASE_
   return row ?? null;
 }
 
-export async function getJobDetail(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobId: string) {
+export async function getJobDetail(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string) {
   if (!jobId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
     return null;
   }
@@ -305,19 +327,19 @@ export async function getJobDetail(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, 
 
   return jobDetailSchema.parse({
     ...mapJob(row),
-    baseSha: row.base_sha.toString('hex'),
+    baseSha: bytesToHex(row.base_sha),
     headRef: row.head_ref,
     baseRef: row.base_ref,
     summaryMarkdown: row.summary_markdown,
-    configSnapshot: repoConfigSchema.parse(row.config_snapshot ?? defaultRepoConfig),
+    configSnapshot: repoConfigSchema.parse(parseJsonColumn(row.config_snapshot, defaultRepoConfig)),
     reviewId: row.review_id,
     retryOfJobId: row.retry_of_job_id,
     summaryModel: row.summary_model,
-    files: row.files_json ?? [],
+    files: parseJsonColumn(row.files_json, []),
   });
 }
 
-export async function startJobProcessing(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobId: string, stepName: string) {
+export async function startJobProcessing(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string, stepName: string) {
   const now = new Date().toISOString();
   const rows = await queryRows<{ id: string }>(
     env,
@@ -344,7 +366,7 @@ export async function startJobProcessing(env: Pick<AppBindings, 'NEON_DATABASE_U
   return rows.length > 0;
 }
 
-export async function updateJobCheckRun(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobId: string, checkRunId: number) {
+export async function updateJobCheckRun(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string, checkRunId: number) {
   await queryRows(
     env,
     `
@@ -357,7 +379,7 @@ export async function updateJobCheckRun(env: Pick<AppBindings, 'NEON_DATABASE_UR
 }
 
 export async function completeJob(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   jobId: string,
   input: {
     verdict: 'approve' | 'comment';
@@ -404,7 +426,7 @@ export async function completeJob(
   );
 }
 
-export async function failJob(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobId: string, errorMessage: string) {
+export async function failJob(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string, errorMessage: string) {
   await queryRows(
     env,
     `
@@ -430,7 +452,7 @@ export async function failJob(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobId
   );
 }
 
-export async function updateJobFileCount(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobId: string, fileCount: number) {
+export async function updateJobFileCount(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string, fileCount: number) {
   await queryRows(
     env,
     `
@@ -442,7 +464,7 @@ export async function updateJobFileCount(env: Pick<AppBindings, 'NEON_DATABASE_U
   );
 }
 
-export async function completePreparationStep(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobId: string, fileCount: number) {
+export async function completePreparationStep(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string, fileCount: number) {
   const now = new Date().toISOString();
   await queryRows(
     env,
@@ -465,7 +487,7 @@ export async function completePreparationStep(env: Pick<AppBindings, 'NEON_DATAB
 }
 
 export async function findExistingJobForHead(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   input: { owner: string; repo: string; prNumber: number; commitSha: string; trigger: 'auto' | 'mention' },
 ) {
   const [row] = await queryRows<JobRow>(
@@ -482,14 +504,14 @@ export async function findExistingJobForHead(
       ORDER BY j.created_at DESC
       LIMIT 1
     `,
-    [input.owner, input.repo, input.prNumber, Buffer.from(input.commitSha, 'hex'), input.trigger],
+    [input.owner, input.repo, input.prNumber, hexToBytes(input.commitSha), input.trigger],
   );
 
   return row ? mapJob(row) : null;
 }
 
 export async function updateJobStep(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   jobId: string,
   stepName: string,
   update: {
@@ -542,7 +564,7 @@ export async function updateJobStep(
 }
 
 export async function recoverStaleJobs(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   thresholdMinutes = 20,
 ): Promise<number> {
   const rows = await queryRows<{ id: string }>(env, `
@@ -559,7 +581,7 @@ export async function recoverStaleJobs(
 }
 
 export async function supersedeOlderJobs(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   input: {
     installationId: string;
     owner: string;

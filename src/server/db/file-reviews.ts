@@ -1,9 +1,9 @@
 import type { ParsedReviewComment } from '@shared/schema';
 import type { AppBindings } from '@server/env';
-import { queryRows } from './client';
+import { parseJsonColumn, queryRows } from './client';
 
 export async function insertFileReview(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   input: {
     jobId: string;
     filePath: string;
@@ -93,7 +93,7 @@ export async function insertFileReview(
   }
 }
 
-export async function getModelUsageStats(env: Pick<AppBindings, 'NEON_DATABASE_URL'>) {
+export async function getModelUsageStats(env: Pick<AppBindings, 'HYPERDRIVE'>) {
   return queryRows<{
     model_used: string;
     model_provider: string | null;
@@ -117,7 +117,7 @@ export async function getModelUsageStats(env: Pick<AppBindings, 'NEON_DATABASE_U
 }
 
 export async function batchInsertFileReviews(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   jobId: string,
   reviews: Array<{
     filePath: string;
@@ -240,10 +240,10 @@ export async function batchInsertFileReviews(
 
 
 
-export async function getFileReviewsForJobs(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, jobIds: string[]) {
+export async function getFileReviewsForJobs(env: Pick<AppBindings, 'HYPERDRIVE'>, jobIds: string[]) {
   if (jobIds.length === 0) return [];
 
-  return queryRows<{
+  const rows = await queryRows<{
     id: string;
     job_id: string;
     file_path: string;
@@ -252,7 +252,7 @@ export async function getFileReviewsForJobs(env: Pick<AppBindings, 'NEON_DATABAS
     diff_line_count: number;
     diff_input: string | null;
     raw_ai_output: string | null;
-    parsed_comments: any;
+    parsed_comments: ParsedReviewComment[] | string;
     input_tokens: number | null;
     output_tokens: number | null;
     duration_ms: number | null;
@@ -291,4 +291,9 @@ export async function getFileReviewsForJobs(env: Pick<AppBindings, 'NEON_DATABAS
     `,
     [jobIds],
   );
+
+  return rows.map((row) => ({
+    ...row,
+    parsed_comments: parseJsonColumn(row.parsed_comments, []),
+  }));
 }

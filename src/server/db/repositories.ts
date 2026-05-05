@@ -9,7 +9,7 @@ export type RepositoryRow = {
 };
 
 export async function getOrCreateRepository(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   input: { installationId: string; owner: string; repo: string }
 ): Promise<number> {
   const [row] = await queryRows<RepositoryRow>(

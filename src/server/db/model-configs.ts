@@ -22,7 +22,7 @@ function mapModelConfig(row: ModelConfigRow): ModelConfig {
   });
 }
 
-export async function listModelConfigs(env: Pick<AppBindings, 'NEON_DATABASE_URL'>): Promise<ModelConfig[]> {
+export async function listModelConfigs(env: Pick<AppBindings, 'HYPERDRIVE'>): Promise<ModelConfig[]> {
   const rows = await queryRows<ModelConfigRow>(
     env,
     `SELECT model_id, rpm, tpm, rpd, provider, updated_at FROM model_configs ORDER BY model_id ASC`
@@ -30,7 +30,7 @@ export async function listModelConfigs(env: Pick<AppBindings, 'NEON_DATABASE_URL
   return rows.map(mapModelConfig);
 }
 
-export async function getModelConfig(env: Pick<AppBindings, 'NEON_DATABASE_URL'>, modelId: string): Promise<ModelConfig | null> {
+export async function getModelConfig(env: Pick<AppBindings, 'HYPERDRIVE'>, modelId: string): Promise<ModelConfig | null> {
   const [row] = await queryRows<ModelConfigRow>(
     env,
     `SELECT model_id, rpm, tpm, rpd, provider, updated_at FROM model_configs WHERE model_id = $1`,
@@ -40,7 +40,7 @@ export async function getModelConfig(env: Pick<AppBindings, 'NEON_DATABASE_URL'>
 }
 
 export async function updateModelConfig(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   config: Omit<ModelConfig, 'updatedAt'>
 ) {
   await queryRows(

@@ -20,7 +20,7 @@ Codra is a monorepo-style project built with **Hono** (Worker), **React** (Vite)
 ### 1. Prerequisites
 - [Node.js](https://nodejs.org/) (Latest LTS)
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-upgrading/) (`npm install -g wrangler`)
-- A [Neon](https://neon.tech/) database for Postgres.
+- A Postgres-compatible database and a Cloudflare Hyperdrive config.
 
 ### 2. Installation
 ```bash
@@ -38,7 +38,8 @@ You will need to set up:
 - A GitHub App (for webhooks/checks).
 - A GitHub OAuth App (for dashboard authentication).
 - A Gemini API Key.
-- A Neon Postgres connection string.
+- A Hyperdrive local connection string for `wrangler dev`.
+- A direct `DATABASE_URL` for migrations.
 
 ### 4. Running Locally
 Codra uses `concurrently` to run the Vite frontend and the Wrangler worker simultaneously:
@@ -56,7 +57,7 @@ We aim for a **"Precise, Understated, Dependable"** aesthetic. Please refer to [
 
 ### Design Principles
 1.  **Clarity over cleverness**: Information should be immediately legible.
-2.  **Restraint is a feature**: Use our signature **Neon Lime** (`oklch(94% 0.23 115)`) sparingly for meaning.
+2.  **Restraint is a feature**: Use our signature lime (`oklch(94% 0.23 115)`) sparingly for meaning.
 3.  **Trust through density**: Developer tools should pack information confidently without clutter.
 4.  **Typography**: Use **Figtree** for UI and **JetBrains Mono** for code.
 
@@ -70,7 +71,7 @@ We aim for a **"Precise, Understated, Dependable"** aesthetic. Please refer to [
 
 ## 🧪 Testing
 
-We use **Vitest** for unit and integration testing. Ensure your changes pass the existing suite before submitting.
+We use **Vitest** for unit and integration testing. `npm test` runs the non-database tests by default and automatically enables DB integration tests when `TEST_DATABASE_URL` points at a disposable Postgres database.
 
 ```bash
 # Run all tests

@@ -67,7 +67,22 @@ W9J/4M1v8XJ/U0zZ5y8/Y+Y/W9J/4M1v8XJ/U0zZ5y8/Y+Y/W9J/4M1v8XJ/U0zZ
 W9J/AgMBAAECggEAIl77HjE=
 -----END PRIVATE KEY-----`;
 
-export const TEST_NEON_DB_URL = 'postgresql://neondb_owner:npg_SZg5DNCBdl0T@ep-twilight-bonus-a1xcg0jb-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+export const TEST_DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:5432/codra_test';
+
+function usableEnvValue(value: string | undefined) {
+  return value && value !== 'undefined' && value !== 'null' ? value : null;
+}
+
+export function getTestDatabaseUrl() {
+  return (
+    usableEnvValue(process.env.TEST_DATABASE_URL) ??
+    TEST_DATABASE_URL
+  );
+}
+
+export function hasConfiguredTestDatabaseUrl() {
+  return Boolean(usableEnvValue(process.env.TEST_DATABASE_URL));
+}
 
 export function createTestEnv(overrides: Partial<AppBindings> = {}): AppBindings {
   return {
@@ -79,6 +94,9 @@ export function createTestEnv(overrides: Partial<AppBindings> = {}): AppBindings
     APP_KV: new MemoryKV() as unknown as KVNamespace,
     REVIEW_QUEUE: new MockQueue() as any,
     ASSETS: new MockAssets() as any,
+    HYPERDRIVE: {
+      connectionString: getTestDatabaseUrl(),
+    },
     APP_PRIVATE_KEY: DUMMY_PRIVATE_KEY,
     GITHUB_APP_ID: '123',
     GITHUB_APP_SLUG: 'codra-app',
@@ -89,7 +107,6 @@ export function createTestEnv(overrides: Partial<AppBindings> = {}): AppBindings
     APP_URL: 'https://codra.test',
     DASHBOARD_ALLOWED_USERS: 'devarshishimpi',
     GEMINI_API_KEY: 'gemini-key',
-    NEON_DATABASE_URL: TEST_NEON_DB_URL,
     BOT_USERNAME: 'codra-app',
     ENVIRONMENT: 'test',
     ...overrides,

@@ -69,7 +69,7 @@ export async function invalidateAllRepoConfigCache(env: Pick<AppBindings, 'APP_K
 
 
 export async function loadRepoConfig(
-  env: Pick<AppBindings, 'APP_KV' | 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'APP_KV' | 'HYPERDRIVE'>,
   input: { installationId: string; owner: string; repo: string },
 ) {
   const key = await cacheKey(env, input.owner, input.repo);

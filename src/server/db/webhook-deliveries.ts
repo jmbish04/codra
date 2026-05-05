@@ -1,8 +1,8 @@
 import type { AppBindings } from '@server/env';
-import { queryRows } from './client';
+import { parseJsonColumn, queryRows } from './client';
 
 export async function recordWebhookDelivery(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   input: {
     deliveryId: string;
     eventName: string;
@@ -39,7 +39,7 @@ export async function recordWebhookDelivery(
 }
 
 export async function getWebhookDelivery(
-  env: Pick<AppBindings, 'NEON_DATABASE_URL'>,
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
   deliveryId: string,
 ) {
   const [row] = await queryRows<{
@@ -57,5 +57,5 @@ export async function getWebhookDelivery(
     [deliveryId],
   );
 
-  return row ?? null;
+  return row ? { ...row, payload: parseJsonColumn(row.payload, null) } : null;
 }

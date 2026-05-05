@@ -18,7 +18,7 @@ Codra listens to GitHub pull request events, runs AI-powered review jobs, posts 
 - Supports mention-triggered reviews
 - Posts inline PR comments and updates GitHub check runs
 - Queues review jobs through Cloudflare Queues so webhook intake stays fast
-- Stores job history, repo settings, and review metadata in Neon Postgres
+- Stores job history, repo settings, and review metadata in external Postgres through Cloudflare Hyperdrive
 - Ships with a built-in dashboard for jobs, repos, stats, settings, and replay/debug workflows
 - Lets each repository override review behavior, skip globs, labels, and model routing
 
@@ -27,14 +27,14 @@ Codra listens to GitHub pull request events, runs AI-powered review jobs, posts 
 - Cloudflare Workers + Hono
 - React + Vite
 - Cloudflare Queues + KV + Workers AI
-- Neon Postgres via `@neondatabase/serverless`
+- External Postgres via Cloudflare Hyperdrive and `postgres`
 - GitHub App webhooks + checks + PR review APIs
 
 ## Architecture
 
 1. GitHub sends a webhook to Codra.
 2. Codra validates the signature and loads repo config from the database.
-3. A review job is inserted into Neon and queued on Cloudflare Queues.
+3. A review job is inserted into Postgres via Hyperdrive and queued on Cloudflare Queues.
 4. The worker consumes the job, fetches the PR diff, runs model review passes, and formats findings.
 5. Codra posts inline comments plus a summary review back to GitHub and stores the run for the dashboard.
 
@@ -51,7 +51,7 @@ Cloudflare can provision or bind the Cloudflare-native resources defined in [`wr
 
 What the deploy button does not provision for you:
 
-- your Neon database
+- your Postgres database and Hyperdrive config
 - GitHub App credentials
 - GitHub OAuth app credentials
 - Gemini API key
@@ -60,7 +60,7 @@ That means the deploy flow is best thought of as "Cloudflare infrastructure boot
 
 For this repo's own production deployment, the checked-in route and binding IDs in [`wrangler.jsonc`](/wrangler.jsonc) are intentional. They are what keep `codra.run` deploying against the same Worker, KV namespace, and queues. If you fork Codra, replace those values with your own resources.
 
-## Required Secrets
+## Required Secrets And Local DB Vars
 
 Codra expects these secrets in Cloudflare production and in local `.dev.vars` for development:
 
@@ -70,7 +70,11 @@ Codra expects these secrets in Cloudflare production and in local `.dev.vars` fo
 - `GITHUB_CLIENT_ID`
 - `GITHUB_CLIENT_SECRET`
 - `GEMINI_API_KEY`
-- `NEON_DATABASE_URL`
+
+Local development and migrations also need:
+
+- `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` for local Worker DB access
+- `DATABASE_URL` for local/admin migrations
 
 Optional, only for DLQ inspection and replay APIs:
 
@@ -93,21 +97,23 @@ Production setup requires:
 - one GitHub OAuth App for the dashboard
 - the existing GitHub App for webhook/check/review automation
 
-## Neon Postgres Setup
+## Postgres + Hyperdrive Setup
 
-Codra currently supports Neon only. The server code uses `@neondatabase/serverless` directly and reads a single `NEON_DATABASE_URL` binding, so if you OSS this repo, Neon should be the documented database path.
+Codra uses Cloudflare Hyperdrive to connect Workers to an external Postgres database. The database can be self-hosted or managed, and can sit behind PgBouncer.
 
-### 1. Create a Neon project
+### 1. Create a Postgres database
 
-Create a project and database in Neon, then open the connection dialog for that database.
+Create a Postgres database and keep a direct connection string available for migrations.
 
-### 2. Copy the pooled connection string
+### 2. Create a Hyperdrive config
 
-For the Worker runtime, use the pooled Neon connection string. It should include `-pooler` in the hostname and look like this:
+Point Hyperdrive at your database or PgBouncer endpoint:
 
-```text
-postgresql://<user>:<password>@<endpoint>-pooler.<region>.aws.neon.tech/<db>?sslmode=require&channel_binding=require
+```bash
+npx wrangler hyperdrive create codra-postgres --connection-string "postgresql://<user>:<password>@<host>:5432/<db>"
 ```
+
+Copy the returned Hyperdrive ID into the `HYPERDRIVE` binding in [`wrangler.jsonc`](/wrangler.jsonc).
 
 ### 3. Run migrations
 
@@ -118,25 +124,25 @@ Codra applies SQL migrations automatically during deploy:
 
 On a fresh database, `npm run deploy` initializes `001` and then applies newer migration files in order. On an existing database that predates migration tracking, deploy marks `001` as already applied and then runs later migrations.
 
-For local/admin runs, set `NEON_DATABASE_URL` and run:
+For local/admin runs, set `DATABASE_URL` and run:
 
 ```bash
 npm run migrate
 ```
 
-### 4. Add the database URL to Cloudflare
+### 4. Configure local development
 
-Set the pooled Neon URL as a Worker secret:
+For `wrangler dev`, set Hyperdrive's local connection-string override in `.dev.vars`:
 
-```bash
-npx wrangler secret put NEON_DATABASE_URL
+```text
+CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="postgresql://<user>:<password>@localhost:5432/<db>"
 ```
 
-For local development, put the same value in `.dev.vars`.
+Do not commit a real local connection string.
 
 ### 5. Keep one direct URL around for admin work
 
-For schema/admin tooling, keep a direct non-pooled Neon connection string handy as well. The deployed worker should use the pooled URL, but direct connections are still useful for migration tools or session-level database operations.
+For schema/admin tooling, keep a direct Postgres or PgBouncer connection string handy as `DATABASE_URL`. The deployed worker should use the Hyperdrive binding, while migration tools connect directly.
 
 
 ## Repository Config

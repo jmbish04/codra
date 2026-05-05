@@ -1,4 +1,4 @@
-import { neon } from '@neondatabase/serverless';
+import postgres from 'postgres';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,7 +34,7 @@ async function readDatabaseUrlFromEnvFiles() {
         if (separatorIndex === -1) continue;
 
         const key = trimmed.slice(0, separatorIndex).trim();
-        if (key === 'NEON_DATABASE_URL') {
+        if (key === 'DATABASE_URL') {
           return parseEnvValue(trimmed.slice(separatorIndex + 1));
         }
       }
@@ -48,26 +48,35 @@ async function readDatabaseUrlFromEnvFiles() {
   return null;
 }
 
-const databaseUrl = process.env.NEON_DATABASE_URL ?? await readDatabaseUrlFromEnvFiles();
+const databaseUrl = process.env.DATABASE_URL ?? await readDatabaseUrlFromEnvFiles();
 
 if (!databaseUrl) {
   console.error([
-    'NEON_DATABASE_URL is required to run database migrations.',
+    'DATABASE_URL is required to run database migrations.',
     'Cloudflare Worker secrets are not readable by this local Node script.',
-    'Set NEON_DATABASE_URL in your shell/CI environment or add it to .dev.vars, .env.local, or .env.',
+    'Set DATABASE_URL in your shell/CI environment or add it to .dev.vars, .env.local, or .env.',
   ].join('\n'));
   process.exit(1);
 }
 
-const sql = neon(databaseUrl);
+const sql = postgres(databaseUrl, {
+  max: 1,
+  fetch_types: false,
+  prepare: false,
+  onnotice: false,
+});
+
+function query(sqlText, params = []) {
+  return sql.unsafe(sqlText, params, { prepare: false });
+}
 
 async function tableExists(tableName) {
-  const rows = await sql.query('SELECT to_regclass($1) AS name', [`public.${tableName}`]);
+  const rows = await query('SELECT to_regclass($1) AS name', [`public.${tableName}`]);
   return rows[0]?.name !== null;
 }
 
 async function appliedMigrations() {
-  const rows = await sql.query('SELECT name FROM schema_migrations ORDER BY name ASC');
+  const rows = await query('SELECT name FROM schema_migrations ORDER BY name ASC');
   return new Set(rows.map((row) => row.name));
 }
 
@@ -190,7 +199,7 @@ function splitSqlStatements(sqlText) {
 }
 
 async function ensureMigrationTable() {
-  await sql.query(`
+  await query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       name       TEXT PRIMARY KEY,
       applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -209,7 +218,7 @@ async function bootstrapLegacyDatabase(migrationFiles) {
     return;
   }
 
-  await sql.query(
+  await query(
     'INSERT INTO schema_migrations (name) VALUES ($1) ON CONFLICT (name) DO NOTHING',
     [initialMigration],
   );
@@ -222,14 +231,14 @@ async function runMigration(name) {
 
   console.log(`Applying ${name}...`);
   for (const statement of splitSqlStatements(migrationSql)) {
-    await sql.query(statement);
+    await query(statement);
   }
-  await sql.query('INSERT INTO schema_migrations (name) VALUES ($1)', [name]);
+  await query('INSERT INTO schema_migrations (name) VALUES ($1)', [name]);
   console.log(`Applied ${name}.`);
 }
 
 async function main() {
-  await sql.query('SELECT pg_advisory_lock($1)', [migrationLockId]);
+  await query('SELECT pg_advisory_lock($1)', [migrationLockId]);
   try {
     await ensureMigrationTable();
 
@@ -248,7 +257,8 @@ async function main() {
 
     console.log('Database migrations are up to date.');
   } finally {
-    await sql.query('SELECT pg_advisory_unlock($1)', [migrationLockId]);
+    await query('SELECT pg_advisory_unlock($1)', [migrationLockId]);
+    await sql.end();
   }
 }
 

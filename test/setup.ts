@@ -1,4 +1,6 @@
 import { vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 // Global mocks for Cloudflare environment
 vi.stubGlobal('QUEUE', {
@@ -7,9 +9,50 @@ vi.stubGlobal('QUEUE', {
   },
 });
 
-// Neon Database URL for testing
-// Provided by user: postgresql://neondb_owner:npg_SZg5DNCBdl0T@ep-twilight-bonus-a1xcg0jb-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
-process.env.TEST_DATABASE_URL = 'postgresql://neondb_owner:npg_SZg5DNCBdl0T@ep-twilight-bonus-a1xcg0jb-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+function parseEnvValue(value: string) {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+
+  return trimmed;
+}
+
+function readTestDatabaseUrlFromEnvFiles() {
+  for (const file of ['.env.test', '.env.local', '.env', '.dev.vars']) {
+    try {
+      const content = readFileSync(path.join(process.cwd(), file), 'utf8');
+      for (const line of content.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+
+        const separatorIndex = trimmed.indexOf('=');
+        if (separatorIndex === -1) continue;
+
+        const key = trimmed.slice(0, separatorIndex).trim();
+        if (key === 'TEST_DATABASE_URL') {
+          return parseEnvValue(trimmed.slice(separatorIndex + 1));
+        }
+      }
+    } catch (error) {
+      if ((error as { code?: string }).code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }
+
+  return null;
+}
+
+// Postgres database URL for integration tests. Set TEST_DATABASE_URL or put
+// TEST_DATABASE_URL in .env.test/.env.local/.env/.dev.vars.
+const configuredDatabaseUrl = process.env.TEST_DATABASE_URL || readTestDatabaseUrlFromEnvFiles();
+if (configuredDatabaseUrl && configuredDatabaseUrl !== 'undefined' && configuredDatabaseUrl !== 'null') {
+  process.env.TEST_DATABASE_URL = configuredDatabaseUrl;
+}
 
 // Standard test timeout
 vi.setConfig({ testTimeout: 20000 });
@@ -65,7 +108,7 @@ console.log = (...args: any[]) => {
 beforeEach(async () => {
     if (process.env.TEST_DATABASE_URL) {
         const { getDb } = await import('@server/db/client');
-        const sql = getDb({ NEON_DATABASE_URL: process.env.TEST_DATABASE_URL });
+        const sql = getDb({ HYPERDRIVE: { connectionString: process.env.TEST_DATABASE_URL } });
         try {
             await sql.query('DELETE FROM webhook_deliveries');
             await sql.query('DELETE FROM file_reviews');

@@ -27,6 +27,12 @@
     "binding": "AI",
     "remote": true
   },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "35b282fa80f24e67adfda063c3a839d1"
+    }
+  ],
   "kv_namespaces": [
     {
       "binding": "APP_KV",
@@ -77,7 +83,6 @@
       "GITHUB_CLIENT_ID",
       "GITHUB_CLIENT_SECRET",
       "GEMINI_API_KEY",
-      "NEON_DATABASE_URL",
       "CF_API_TOKEN",
       "CF_ACCOUNT_ID"
     ]
