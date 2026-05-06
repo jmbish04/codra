@@ -24,9 +24,27 @@ function getStoredTheme(): Theme | null {
   }
 }
 
-export function applyTheme(theme: Theme) {
+let themeTransitionPauseTimer: number | undefined;
+
+function pauseThemeTransitions(root: HTMLElement) {
+  if (typeof window === 'undefined') return;
+
+  root.classList.add('theme-changing');
+
+  if (themeTransitionPauseTimer !== undefined) {
+    window.clearTimeout(themeTransitionPauseTimer);
+  }
+
+  themeTransitionPauseTimer = window.setTimeout(() => {
+    root.classList.remove('theme-changing');
+    themeTransitionPauseTimer = undefined;
+  }, 180);
+}
+
+export function applyTheme(theme: Theme, options: { pauseTransitions?: boolean } = {}) {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
+  if (options.pauseTransitions) pauseThemeTransitions(root);
   root.classList.toggle('dark', theme === 'dark');
   root.setAttribute('data-theme', theme);
   try {
@@ -45,13 +63,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const setTheme = useCallback((newTheme: Theme) => {
     setThemeState(newTheme);
-    applyTheme(newTheme);
+    applyTheme(newTheme, { pauseTransitions: true });
   }, []);
 
   const toggleTheme = useCallback(() => {
     setThemeState((prev) => {
       const next = prev === 'light' ? 'dark' : 'light';
-      applyTheme(next);
+      applyTheme(next, { pauseTransitions: true });
       return next;
     });
   }, []);

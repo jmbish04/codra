@@ -23,7 +23,7 @@ import codraLight from '@/assets/codra-fullicon-light.svg';
 import type { AuthSessionUser } from '@shared/api';
 
 const links = [
-  { to: '/dashboard', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/jobs', label: 'Jobs', icon: Activity, end: false },
   { to: '/repos', label: 'Repos', icon: GitBranch, end: false },
   { to: '/stats', label: 'Stats', icon: BarChart2, end: false },
@@ -61,6 +61,9 @@ export function AppShell() {
       ? 'var(--sidebar-collapsed-width)'
       : 'var(--sidebar-width)',
   } as CSSProperties;
+  const githubProfileHref = sessionUser ? `https://github.com/${sessionUser.login}` : 'https://github.com';
+  const accountName = sessionUser?.name?.trim() || sessionUser?.login || 'GitHub';
+  const accountInitial = accountName.charAt(0).toUpperCase();
 
   useEffect(() => {
     let cancelled = false;
@@ -271,7 +274,7 @@ export function AppShell() {
         <div className="dashboard-sidebar-divider" />
 
         {/* ── Footer ──────────────────────────────── */}
-        <div className="shrink-0 space-y-1 p-2 pt-3">
+        <div className={cn('shrink-0 space-y-2 p-2 pt-3', sidebarCollapsed && 'lg:flex lg:flex-col lg:items-center')}>
 
           {/* GitHub star */}
           <a
@@ -281,24 +284,20 @@ export function AppShell() {
             title="Star on GitHub"
             className={cn(
               'dashboard-sidebar-action',
-              'group relative flex h-[2.375rem] w-full items-center gap-2.5 rounded-lg px-3',
-              'border border-dashed border-border/60',
-              'text-xs font-semibold text-black dark:text-white',
-              'transition-[background-color,border-color,color,transform] duration-200 ease-[var(--ease-out-quart)]',
-              'hover:border-primary/30 hover:bg-secondary/60 hover:text-black active:translate-y-0 dark:hover:text-white',
-              sidebarCollapsed && 'lg:justify-center lg:px-0',
+              'group relative flex h-[2.375rem] w-full items-center justify-center gap-2 rounded-lg px-3',
+              'border border-dashed border-border/60 bg-transparent',
+              'text-xs font-bold text-black dark:text-white',
+              'transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-[var(--ease-out-quart)]',
+              'hover:border-primary/35 hover:bg-secondary/70 hover:text-black hover:shadow-[0_10px_20px_-18px_var(--primary)] active:translate-y-0 dark:hover:text-white',
+              sidebarCollapsed && 'lg:w-[2.375rem] lg:px-0',
             )}
           >
             <Star
-              size={13}
-              strokeWidth={2.15}
-              className={cn(
-                'dashboard-sidebar-action-icon',
-                'shrink-0 text-black transition-[color,transform] duration-200 ease-[var(--ease-out-quart)] group-hover:scale-110 dark:text-white',
-                !sidebarCollapsed && 'group-hover:translate-x-0.5',
-              )}
+              size={14}
+              strokeWidth={2.35}
+              className="dashboard-sidebar-action-icon shrink-0 text-black transition-[color,transform] duration-200 ease-[var(--ease-out-quart)] group-hover:scale-110 dark:text-white"
             />
-            <span className={cn('dashboard-sidebar-action-label transition-transform duration-200 ease-[var(--ease-out-quart)]', !sidebarCollapsed && 'group-hover:translate-x-0.5', sidebarCollapsed && 'lg:hidden')}>
+            <span className={cn('dashboard-sidebar-action-label transition-transform duration-200 ease-[var(--ease-out-quart)]', sidebarCollapsed && 'lg:hidden')}>
               Star on GitHub
             </span>
             <span className="dashboard-sidebar-tooltip">
@@ -306,23 +305,48 @@ export function AppShell() {
             </span>
           </a>
 
-          {/* User card */}
+          {/* Account */}
           {sessionUser && (
-            <div className={cn(
-              'flex w-full items-center rounded-lg px-3 py-2',
-              'border border-dashed border-border/60',
-              'text-xs font-semibold text-black dark:text-white',
-              sidebarCollapsed && 'lg:hidden',
-            )}>
-              <div className={cn('min-w-0 flex-1', sidebarCollapsed && 'lg:hidden')}>
-                <p className="text-xs font-semibold text-black dark:text-white">
-                  Signed in
-                </p>
-                <p className="truncate text-xs font-semibold text-black dark:text-white">
+            <a
+              href={githubProfileHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={`${accountName} on GitHub`}
+              className={cn(
+                'dashboard-sidebar-action',
+                'group relative flex w-full items-center gap-3 rounded-xl p-2',
+                'border border-border/60 bg-transparent',
+                'text-black dark:text-white',
+                'transition-[background-color,border-color,box-shadow,transform] duration-200 ease-[var(--ease-out-quart)]',
+                'hover:border-primary/35 hover:bg-secondary/75 hover:shadow-[0_10px_22px_-18px_var(--primary)]',
+                sidebarCollapsed && 'lg:h-[2.375rem] lg:w-[2.375rem] lg:justify-center lg:rounded-lg lg:border-dashed lg:p-0',
+              )}
+            >
+              <span className="relative shrink-0">
+                {sessionUser.avatarUrl ? (
+                  <img
+                    src={sessionUser.avatarUrl}
+                    alt=""
+                    className="h-9 w-9 rounded-full object-cover ring-1 ring-border/70 transition-transform duration-200 ease-[var(--ease-out-quart)] group-hover:scale-105 lg:group-hover:scale-110"
+                  />
+                ) : (
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground ring-1 ring-border/70 transition-transform duration-200 ease-[var(--ease-out-quart)] group-hover:scale-105 lg:group-hover:scale-110">
+                    {accountInitial}
+                  </span>
+                )}
+              </span>
+              <span className={cn('dashboard-sidebar-action-label min-w-0 flex-1', sidebarCollapsed && 'lg:hidden')}>
+                <span className="block truncate text-[13px] font-bold leading-tight text-black dark:text-white">
+                  {accountName}
+                </span>
+                <span className="mt-0.5 block truncate text-[11px] font-semibold leading-tight text-zinc-800 dark:text-zinc-200">
                   @{sessionUser.login}
-                </p>
-              </div>
-            </div>
+                </span>
+              </span>
+              <span className="dashboard-sidebar-tooltip">
+                {accountName}
+              </span>
+            </a>
           )}
 
           {/* Logout */}
@@ -332,29 +356,25 @@ export function AppShell() {
             title="Log out"
             className={cn(
               'dashboard-sidebar-action',
-              'group relative flex h-[2.375rem] w-full items-center gap-2.5 rounded-lg px-3',
-              'border border-dashed border-border/60',
-              'text-xs font-semibold text-black dark:text-white',
-              'transition-[background-color,border-color,color,transform] duration-200 ease-[var(--ease-out-quart)]',
-              'hover:border-primary/30 hover:bg-secondary/60 hover:text-black active:translate-y-0 dark:hover:text-white',
-              sidebarCollapsed && 'lg:justify-center lg:px-0',
+              'group relative flex h-[2.375rem] w-full items-center justify-center gap-2 rounded-lg px-3',
+              'border border-dashed border-border/60 bg-transparent',
+              'text-xs font-bold text-black dark:text-white',
+              'transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-[var(--ease-out-quart)]',
+              'hover:border-primary/35 hover:bg-secondary/70 hover:text-black hover:shadow-[0_10px_20px_-18px_var(--primary)] active:translate-y-0 dark:hover:text-white',
+              sidebarCollapsed && 'lg:w-[2.375rem] lg:px-0',
             )}
             onClick={async () => {
               await api.logout();
               location.href = '/login';
             }}
           >
-            <span
-              className={cn(
-                'dashboard-sidebar-action-icon',
-                'flex h-[1.625rem] w-[1.625rem] shrink-0 items-center justify-center rounded-md text-black transition-transform duration-200 ease-[var(--ease-out-quart)] group-hover:scale-110 dark:text-white',
-                !sidebarCollapsed && 'group-hover:translate-x-0.5',
-              )}
-            >
-              <LogOut size={14} strokeWidth={2.15} />
-            </span>
-            <span className={cn('dashboard-sidebar-action-label transition-transform duration-200 ease-[var(--ease-out-quart)]', !sidebarCollapsed && 'group-hover:translate-x-0.5', sidebarCollapsed && 'lg:hidden')}>
-              Log out
+            <LogOut
+              size={14}
+              strokeWidth={2.35}
+              className="dashboard-sidebar-action-icon shrink-0 text-black transition-transform duration-200 ease-[var(--ease-out-quart)] group-hover:scale-110 dark:text-white"
+            />
+            <span className={cn('dashboard-sidebar-action-label transition-transform duration-200 ease-[var(--ease-out-quart)]', sidebarCollapsed && 'lg:hidden')}>
+              Logout
             </span>
             <span className="dashboard-sidebar-tooltip">
               Log out

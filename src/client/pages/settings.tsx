@@ -137,9 +137,9 @@ export function SettingsPage() {
   return (
     <section className="page-enter flex flex-col gap-6 pb-20">
       <PageHeader
-        category="System Configuration"
-        title="Settings"
-        description="Global model settings and usage rate limits."
+        category="Defaults"
+        title="Review settings"
+        description="Choose the default model chain, file-size tiers, and provider quotas."
       />
 
       {error && (

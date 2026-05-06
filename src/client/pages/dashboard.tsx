@@ -48,9 +48,9 @@ export function DashboardPage() {
     <section className="page-enter flex flex-col gap-6">
 
       <PageHeader
-        category="Overview"
+        category="Home"
         title="Dashboard"
-        description="Live activity stream and system snapshot."
+        description="Totals and recent review jobs for the selected time range."
         actions={
           <>
             <TimeRangeSelect 
@@ -81,7 +81,7 @@ export function DashboardPage() {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2.5">
             <History size={14} strokeWidth={1.75} className="text-primary" />
-            <h2 className="text-sm font-semibold text-foreground">Recent Activity</h2>
+            <h2 className="text-sm font-semibold text-foreground">Recent reviews</h2>
           </div>
           <Link to="/jobs">
             <Button
@@ -104,7 +104,7 @@ export function DashboardPage() {
           {!loading && recentJobs.length > 0 && (
             <div className="px-5 py-2.5 bg-muted/20 border-t border-border/50">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground/40 text-center">
-                {recentJobs.length} events · auto-refreshes every 15s
+                {recentJobs.length} review jobs · refreshes every 15s
               </p>
             </div>
           )}

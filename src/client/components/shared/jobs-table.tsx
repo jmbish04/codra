@@ -72,7 +72,7 @@ export function JobsTable({ jobs, loading, columns }: JobsTableProps) {
             Array.from({ length: 7 }).map((_, i) => (
               <tr key={i} className="border-b border-border/40">
                 {cols.map((col) => (
-                  <td key={col} className={cn("px-4 py-3.5", COLUMN_CLASSES[col])}>
+                  <td key={col} className={cn("px-4 py-5", COLUMN_CLASSES[col])}>
                     <Skeleton width={SKELETON_WIDTHS[col]} />
                   </td>
                 ))}
@@ -85,7 +85,7 @@ export function JobsTable({ jobs, loading, columns }: JobsTableProps) {
                 className="border-b border-border/40 transition-colors hover:bg-primary/[0.03] cursor-default last:border-0"
               >
                 {cols.includes('repo') && (
-                  <td className={cn("px-4 py-3.5", COLUMN_CLASSES['repo'])}>
+                  <td className={cn("px-4 py-5", COLUMN_CLASSES['repo'])}>
                     <Link
                       to={`/jobs/${job.id}`}
                       className="font-semibold text-primary hover:underline underline-offset-2 text-sm"
@@ -96,7 +96,7 @@ export function JobsTable({ jobs, loading, columns }: JobsTableProps) {
                 )}
 
                 {cols.includes('pr') && (
-                  <td className={cn("px-4 py-3.5 max-w-[260px]", COLUMN_CLASSES['pr'])}>
+                  <td className={cn("px-4 py-5 max-w-[260px]", COLUMN_CLASSES['pr'])}>
                     <div className="flex items-baseline gap-1.5 min-w-0">
                       <span className="shrink-0 font-mono text-[11px] font-semibold text-muted-foreground">
                         #{job.prNumber}
@@ -109,7 +109,7 @@ export function JobsTable({ jobs, loading, columns }: JobsTableProps) {
                 )}
 
                 {cols.includes('trigger') && (
-                  <td className={cn("px-4 py-3.5", COLUMN_CLASSES['trigger'])}>
+                  <td className={cn("px-4 py-5", COLUMN_CLASSES['trigger'])}>
                     <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-secondary text-secondary-foreground">
                       {job.trigger}
                     </span>
@@ -117,13 +117,13 @@ export function JobsTable({ jobs, loading, columns }: JobsTableProps) {
                 )}
 
                 {cols.includes('status') && (
-                  <td className={cn("px-4 py-3.5", COLUMN_CLASSES['status'])}>
+                  <td className={cn("px-4 py-5", COLUMN_CLASSES['status'])}>
                     <StatusBadge label={job.status} job={job} />
                   </td>
                 )}
 
                 {cols.includes('verdict') && (
-                  <td className={cn("px-4 py-3.5", COLUMN_CLASSES['verdict'])}>
+                  <td className={cn("px-4 py-5", COLUMN_CLASSES['verdict'])}>
                     {job.verdict
                       ? <StatusBadge label={job.verdict} />
                       : <span className="text-muted-foreground/40">—</span>}
@@ -131,27 +131,28 @@ export function JobsTable({ jobs, loading, columns }: JobsTableProps) {
                 )}
 
                 {cols.includes('files') && (
-                  <td className={cn("px-4 py-3.5 text-right font-mono text-xs text-muted-foreground tabular-nums", COLUMN_CLASSES['files'])}>
+                  <td className={cn("px-4 py-5 text-right font-mono text-xs text-muted-foreground tabular-nums", COLUMN_CLASSES['files'])}>
                     {job.fileCount}
                   </td>
                 )}
 
                 {cols.includes('tokens') && (
-                  <td className={cn("px-4 py-3.5 text-right font-mono text-xs text-muted-foreground tabular-nums", COLUMN_CLASSES['tokens'])}>
+                  <td className={cn("px-4 py-5 text-right font-mono text-xs text-muted-foreground tabular-nums", COLUMN_CLASSES['tokens'])}>
                     {(job.totalInputTokens + job.totalOutputTokens).toLocaleString()}
                   </td>
                 )}
 
                 {cols.includes('created') && (
-                  <td className={cn("px-4 py-3.5 whitespace-nowrap", COLUMN_CLASSES['created'])}>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-sm text-muted-foreground">
-                        {new Date(job.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </span>
-                      <span className="text-[11px] font-mono text-muted-foreground/60">
-                        {new Date(job.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
+                  <td className={cn("px-4 py-5 whitespace-nowrap", COLUMN_CLASSES['created'])}>
+                    <span className="text-sm font-medium text-foreground/80">
+                      {new Date(job.createdAt).toLocaleString(undefined, {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
                   </td>
                 )}
               </tr>

@@ -204,6 +204,13 @@
 @layer base {
   *, *::before, *::after { box-sizing: border-box; }
 
+  html.theme-changing,
+  html.theme-changing *,
+  html.theme-changing *::before,
+  html.theme-changing *::after {
+    transition: none !important;
+  }
+
   html {
     font-synthesis: none;
     text-rendering: optimizeLegibility;
@@ -773,6 +780,7 @@
 
 @utility stat-label {
   @apply text-[0.65rem] md:text-[0.7rem] lg:text-[0.72rem] font-semibold tracking-[0.06em] uppercase text-muted-foreground;
+  .dark & { color: color-mix(in oklch, var(--foreground) 72%, transparent); }
 }
 
 @utility prose {

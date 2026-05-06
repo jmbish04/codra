@@ -94,9 +94,9 @@ export function JobsPage() {
     <section className="page-enter flex flex-col gap-6">
 
       <PageHeader
-        category="Overview"
-        title="Review jobs"
-        description={!loading && `${total.toLocaleString()} ${total === 1 ? 'job' : 'jobs'} found`}
+        category="Jobs"
+        title="Review history"
+        description={!loading && `${total.toLocaleString()} ${total === 1 ? 'review job' : 'review jobs'}`}
         actions={
           <div className="flex gap-2">
             {dlqMessages.length > 0 && (

@@ -365,8 +365,9 @@ export function StatsPage() {
     <section className="page-enter flex flex-col gap-5">
 
       <PageHeader 
-        category="Analytics" 
-        title="System insights" 
+        category="Reports" 
+        title="Review metrics"
+        description="Review volume, verdicts, model usage, and active repositories for the selected range."
         actions={
           <>
             <TimeRangeSelect value={days} onValueChange={setDays} />

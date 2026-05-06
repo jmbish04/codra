@@ -20,9 +20,9 @@ export function JobLogsPage() {
       </div>
 
       <PageHeader 
-        category="Debug logs" 
-        title={`Raw AI Logs`}
-        description={`PR #${job.prNumber} • Commit: ${job.commitSha.slice(0, 7)}`}
+        category="Logs" 
+        title="Review logs"
+        description={`${job.owner}/${job.repo} · PR #${job.prNumber} · ${job.commitSha.slice(0, 7)}`}
       />
 
       {error && <Alert variant="destructive">{error}</Alert>}

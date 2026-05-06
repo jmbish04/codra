@@ -400,7 +400,7 @@ export function ReposPage() {
   if (loading && repos.length === 0) {
     return (
       <section className="page-enter flex flex-col gap-6">
-        <PageHeader category="Configuration" title="Repositories" />
+        <PageHeader category="Repositories" title="Repository settings" />
         <div className="surface overflow-hidden">
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="px-5 py-4 border-b border-border/50 last:border-0">
@@ -415,9 +415,9 @@ export function ReposPage() {
   return (
     <section className="page-enter flex flex-col gap-6">
       <PageHeader
-        category="Configuration"
-        title="Repositories"
-        description={!loading && `${repos.length} ${repos.length === 1 ? 'repository' : 'repositories'} connected`}
+        category="Repositories"
+        title="Repository settings"
+        description={!loading && `${repos.length} ${repos.length === 1 ? 'repository' : 'repositories'} with Codra access`}
         actions={
           <div className="flex items-center gap-2">
             <Button
