@@ -45,6 +45,7 @@ export interface AppBindings {
   ENVIRONMENT: string;
   CF_API_TOKEN?: string;
   CF_ACCOUNT_ID?: string;
+  CF_DLQ_ID?: string;
 }
 
 export interface AppVariables {

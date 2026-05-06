@@ -23,7 +23,6 @@ import { logger } from '@server/core/logger';
  */
 
 const CF_QUEUES_BASE = 'https://api.cloudflare.com/client/v4';
-const DLQ_ID = 'ed6f5472cbd146f49ce94d3004eddb0f'; // UUID for "codra-review-dlq"
 
 /** Shape returned by the CF Queues pull endpoint. */
 type CfQueueMessage = {
@@ -83,7 +82,7 @@ export function createDlqRouter() {
     try {
       const result = await cfQueuesRequest(
         'POST',
-        `/accounts/${accountId}/queues/${DLQ_ID}/messages/pull`,
+        `/accounts/${accountId}/queues/${c.env.CF_DLQ_ID}/messages/pull`,
         apiToken,
         { batch_size: batchSize, visibility_timeout_ms: 30_000 },
       ) as { messages?: CfQueueMessage[] };
@@ -132,7 +131,7 @@ export function createDlqRouter() {
     try {
       const result = await cfQueuesRequest(
         'POST',
-        `/accounts/${accountId}/queues/${DLQ_ID}/messages/pull`,
+        `/accounts/${accountId}/queues/${c.env.CF_DLQ_ID}/messages/pull`,
         apiToken,
         { batch_size: 100, visibility_timeout_ms: 60_000 },
       ) as { messages?: CfQueueMessage[] };
@@ -154,7 +153,7 @@ export function createDlqRouter() {
     try {
       await cfQueuesRequest(
         'POST',
-        `/accounts/${accountId}/queues/${DLQ_ID}/messages/ack`,
+        `/accounts/${accountId}/queues/${c.env.CF_DLQ_ID}/messages/ack`,
         apiToken,
         { acks: targets.map((m) => ({ lease_id: m.lease_id })) },
       );
@@ -212,7 +211,7 @@ export function createDlqRouter() {
     try {
       await cfQueuesRequest(
         'POST',
-        `/accounts/${accountId}/queues/${DLQ_ID}/messages/ack`,
+        `/accounts/${accountId}/queues/${c.env.CF_DLQ_ID}/messages/ack`,
         apiToken,
         { acks: body.data.lease_ids.map((id) => ({ lease_id: id })) },
       );

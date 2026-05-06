@@ -12,7 +12,7 @@ const badgeVariants = cva(
         neutral:   'bg-secondary text-secondary-foreground border-border/50',
         info:      'bg-info-bg text-info border-info-border',
         success:   'bg-success-bg text-success border-success-border',
-        warning:   'bg-warning-bg text-warning border-warning-border',
+        warning:   'bg-warning-bg text-[oklch(50%_0.14_65)] border-warning-border dark:text-warning',
         danger:    'bg-danger-bg text-danger border-danger-border',
         outline:   'text-foreground border-border bg-transparent',
       },

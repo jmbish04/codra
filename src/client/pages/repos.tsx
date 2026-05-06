@@ -146,7 +146,7 @@ function RepoItem({ repo, isExpanded, onToggle, onRefresh, globalConfig }: RepoI
     <div
       className={cn(
         'surface overflow-hidden transition-all duration-200',
-        isExpanded && 'border-primary/30 shadow-md shadow-primary/5',
+        isExpanded && 'border-border shadow-md',
       )}
     >
       {/* ── Row header ───────────────────────────────── */}

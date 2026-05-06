@@ -21,7 +21,7 @@ export function CommentCard({ comment, filePath }: CommentCardProps) {
   return (
     <article
       className={cn(
-        'surface-hover rounded-md border p-5 transition-all mb-4',
+        'mb-4 rounded-md border p-5 transition-[box-shadow,transform] duration-300 hover:-translate-y-[1px] hover:shadow-lg hover:shadow-primary/5',
         sev.bg, sev.border,
       )}
     >

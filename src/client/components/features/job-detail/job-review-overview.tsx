@@ -41,7 +41,7 @@ export function JobReviewOverview({ job }: JobReviewOverviewProps) {
   };
 
   return (
-    <div className="surface overflow-hidden mb-6">
+    <div className="surface surface-static overflow-hidden mb-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-5 py-4 border-b border-border gap-3 sm:gap-0">
         <div className="flex items-center gap-2.5">

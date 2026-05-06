@@ -64,9 +64,8 @@ export class FormatterService {
 
   formatReviewOverview(commitSha: string, botUsername: string) {
     const shortSha = commitSha.slice(0, 10);
-    const iconBase = `${this.baseUrl}/icons`;
     
-    return `### <picture><source media="(prefers-color-scheme: dark)" srcset="${iconBase}/codra-icon-dark.svg"><source media="(prefers-color-scheme: light)" srcset="${iconBase}/codra-icon-light.svg"><img src="${iconBase}/codra-icon-light.svg" alt="Codra Icon" width="20" height="20" style="vertical-align: middle;"></picture> Codra Review
+    return `### Codra Review
 
 Here are some automated review suggestions for this pull request.
 

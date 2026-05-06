@@ -16,11 +16,11 @@
 :root {
   /* Surfaces - Pure & Crisp */
   /* Surfaces - High-Contrast */
-  --background:         oklch(100%  0 0);
+  --background:         #ffffff;
   --foreground:         oklch(12%   0.02  115);
-  --card:               oklch(100%  0 0);
+  --card:               #ffffff;
   --card-foreground:    oklch(12%   0.02  115);
-  --popover:            oklch(100%  0 0);
+  --popover:            #ffffff;
   --popover-foreground: oklch(12%   0.02  115);
 
   /* Signature lime - darkened in light mode for AA accessibility on white */
@@ -49,6 +49,7 @@
   /* Radius */
   --radius: 0.5rem;
   --sidebar-width: 240px;
+  --sidebar-collapsed-width: 72px;
 
   /* Semantic palette */
   --success:        oklch(64%   0.24  115);
@@ -81,11 +82,11 @@
 .dark {
   /* Surfaces - Deep & Layered */
   /* Surfaces - Ultra-Dark */
-  --background:          oklch(8%   0.01  115); /* #060601 Deep Black */
+  --background:          #09090b;
   --foreground:          oklch(98%  0.005 115);
-  --card:                oklch(12%  0.01  115); /* #0D0D0D */
+  --card:                #09090b;
   --card-foreground:     oklch(98%  0.005 115);
-  --popover:             oklch(12%  0.01  115);
+  --popover:             #09090b;
   --popover-foreground:  oklch(98%  0.005 115);
 
   --primary:             oklch(94%  0.23  115); /* #E0FE56 */
@@ -492,6 +493,15 @@
   &:hover { box-shadow: var(--shadow-md); }
 }
 
+.surface-static {
+  transition: none !important;
+}
+
+.surface-static:hover {
+  box-shadow: var(--shadow-sm) !important;
+  transform: none !important;
+}
+
 @utility glass {
   @apply backdrop-blur-md bg-card/75 border border-border;
   background-image: linear-gradient(to bottom right, oklch(100% 0 0 / 0.05), transparent);
@@ -596,6 +606,148 @@
     .dark & {
       @apply bg-[color-mix(in_oklch,var(--primary)_16%,transparent)];
     }
+  }
+}
+
+.dashboard-sidebar,
+.dashboard-sidebar :where(a, button, p, span, div, svg) {
+  color: oklch(0% 0 0) !important;
+}
+
+.dashboard-sidebar {
+  background-color: #ffffff !important;
+}
+
+.dark .dashboard-sidebar,
+.dark .dashboard-sidebar :where(a, button, p, span, div, svg) {
+  color: oklch(100% 0 0) !important;
+}
+
+.dark .dashboard-sidebar {
+  background-color: #000000 !important;
+}
+
+.app-shell-content {
+  --background: #ffffff;
+  --card: #ffffff;
+  --muted: #ffffff;
+  --popover: #ffffff;
+  --secondary: #ffffff;
+}
+
+.dark .app-shell-content {
+  --background: #09090b;
+  --card: #09090b;
+  --muted: #09090b;
+  --popover: #09090b;
+  --secondary: #09090b;
+}
+
+.dashboard-sidebar-divider {
+  height: 1px;
+  margin: 0 0.75rem;
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklch, var(--foreground) 12%, transparent) 18%,
+      color-mix(in oklch, var(--primary) 18%, transparent) 50%,
+      color-mix(in oklch, var(--foreground) 12%, transparent) 82%,
+      transparent
+    );
+}
+
+.dark .dashboard-sidebar-divider {
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklch, var(--foreground) 16%, transparent) 18%,
+      color-mix(in oklch, var(--primary) 24%, transparent) 50%,
+      color-mix(in oklch, var(--foreground) 16%, transparent) 82%,
+      transparent
+    );
+}
+
+.dashboard-sidebar-action {
+  will-change: transform;
+}
+
+.dashboard-sidebar-action:hover,
+.dashboard-sidebar-action:focus-visible {
+  transform: translate3d(0, -2px, 0) !important;
+}
+
+.dashboard-sidebar-action:active {
+  transform: translate3d(0, 0, 0) !important;
+}
+
+.dashboard-sidebar-action-icon,
+.dashboard-sidebar-action-label {
+  will-change: transform;
+}
+
+.dashboard-sidebar-shine {
+  transform: skew(-13deg) translateX(-110%);
+  transition: transform 0ms linear;
+  will-change: transform;
+}
+
+.dashboard-sidebar-action:hover .dashboard-sidebar-shine,
+.dashboard-sidebar-action:focus-visible .dashboard-sidebar-shine {
+  transform: skew(-13deg) translateX(110%);
+  transition-duration: 1000ms;
+  transition-timing-function: var(--ease-out-quart);
+}
+
+.dashboard-sidebar:not(.dashboard-sidebar-collapsed) .dashboard-sidebar-action:hover .dashboard-sidebar-action-icon,
+.dashboard-sidebar:not(.dashboard-sidebar-collapsed) .dashboard-sidebar-action:focus-visible .dashboard-sidebar-action-icon,
+.dashboard-sidebar:not(.dashboard-sidebar-collapsed) .dashboard-sidebar-action:hover .dashboard-sidebar-action-label,
+.dashboard-sidebar:not(.dashboard-sidebar-collapsed) .dashboard-sidebar-action:focus-visible .dashboard-sidebar-action-label {
+  transform: translate3d(4px, 0, 0) !important;
+}
+
+.dashboard-sidebar-tooltip:not(.dashboard-sidebar-action-label) {
+  display: none !important;
+}
+
+@media (min-width: 1024px) {
+  .dashboard-sidebar-collapsed .dashboard-sidebar-action:hover .dashboard-sidebar-action-icon,
+  .dashboard-sidebar-collapsed .dashboard-sidebar-action:focus-visible .dashboard-sidebar-action-icon {
+    transform: scale(1.12) !important;
+  }
+
+  .dashboard-sidebar-collapsed .dashboard-sidebar-tooltip {
+    position: absolute !important;
+    left: calc(100% + 0.75rem) !important;
+    top: 50% !important;
+    z-index: 60 !important;
+    display: block !important;
+    width: max-content !important;
+    max-width: 11rem !important;
+    padding: 0.375rem 0.75rem !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 0.5rem !important;
+    background: oklch(100% 0 0) !important;
+    box-shadow: 0 10px 24px oklch(0% 0 0 / 0.14) !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transform: translate3d(6px, -50%, 0) !important;
+    transition:
+      opacity 150ms var(--ease-out-quart),
+      transform 150ms var(--ease-out-quart) !important;
+    white-space: nowrap !important;
+  }
+
+  .dark .dashboard-sidebar-collapsed .dashboard-sidebar-tooltip {
+    background: var(--popover) !important;
+    box-shadow: 0 10px 24px oklch(0% 0 0 / 0.48) !important;
+  }
+
+  .dashboard-sidebar-collapsed .dashboard-sidebar-action:hover .dashboard-sidebar-tooltip,
+  .dashboard-sidebar-collapsed .dashboard-sidebar-action:focus-visible .dashboard-sidebar-tooltip {
+    opacity: 1 !important;
+    transform: translate3d(0, -50%, 0) !important;
   }
 }
 

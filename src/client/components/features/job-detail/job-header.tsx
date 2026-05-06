@@ -32,12 +32,12 @@ export function JobHeader({ job, isRetrying, onRetry }: JobHeaderProps) {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 hover:text-primary transition-colors"
           >
-            PR #{job.prNumber}
+            {job.prTitle ?? 'Untitled pull request'}
             <ExternalLink size={16} className="text-muted-foreground/50" />
           </a>
         </h1>
         <p className="mt-1 text-sm text-muted-foreground leading-snug max-w-[480px] truncate">
-          {job.prTitle ?? 'Untitled pull request'}
+          PR #{job.prNumber}
         </p>
       </div>
 

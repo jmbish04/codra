@@ -94,6 +94,7 @@
     "BOT_USERNAME": "codra-app",
     "GITHUB_APP_SLUG": "codra-app-personal",
     "DASHBOARD_ALLOWED_USERS": "devarshishimpi",
-    "ENVIRONMENT": "production"
+    "ENVIRONMENT": "production",
+    "CF_DLQ_ID": "ed6f5472cbd146f49ce94d3004eddb0f"
   }
 }

@@ -15,7 +15,7 @@ interface FileFindingProps {
 
 export function FileFinding({ file }: FileFindingProps) {
   return (
-    <details key={file.id} className="group rounded-md border border-border/60 bg-card/80 transition-all surface-hover backdrop-blur-sm">
+    <details key={file.id} className="group rounded-md border border-border/60 bg-card/80 backdrop-blur-sm transition-[box-shadow,transform] duration-300 hover:-translate-y-[1px] hover:shadow-lg hover:shadow-primary/5">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 [&::-webkit-details-marker]:hidden">
         <div className="flex items-center gap-2 min-w-0">
           <ChevronRight size={15} className="shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />

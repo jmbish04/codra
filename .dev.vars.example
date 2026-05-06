@@ -1,18 +1,51 @@
-APP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nreplace-with-your-github-app-private-key\n-----END PRIVATE KEY-----"
-GITHUB_APP_ID="123456"
-GITHUB_APP_WEBHOOK_SECRET="replace-with-your-webhook-secret"
-GITHUB_CLIENT_ID="replace-with-your-dashboard-oauth-client-id"
-GITHUB_CLIENT_SECRET="replace-with-your-dashboard-oauth-client-secret"
-AUTH_CALLBACK_URL="http://127.0.0.1:8787/auth/github/callback"
-DASHBOARD_ALLOWED_USERS="devarshishimpi"
-GEMINI_API_KEY="replace-with-your-gemini-api-key"
-# Used by wrangler dev for the HYPERDRIVE binding. Do not commit real credentials.
-CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="postgresql://user:password@localhost:5432/codra"
-# Used by npm test for DB integration tests. Keep separate from production DBs.
+# ──────────────────────────────────────────────────────────────────────────────
+# Codra Environment Configuration Example
+# Copy this file to .dev.vars for local development: cp .dev.vars.example .dev.vars
+# ──────────────────────────────────────────────────────────────────────────────
+
+# --- GitHub App Authentication ---
+# Create at: https://github.com/settings/apps
+APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nREPLACE_WITH_YOUR_GITHUB_APP_PRIVATE_KEY_CONTENT\n-----END RSA PRIVATE KEY-----"
+GITHUB_APP_ID="REPLACE_WITH_YOUR_APP_ID"
+GITHUB_APP_SLUG="REPLACE_WITH_YOUR_APP_SLUG"
+GITHUB_APP_WEBHOOK_SECRET="REPLACE_WITH_YOUR_WEBHOOK_SECRET"
+
+# --- Dashboard OAuth (GitHub) ---
+# Use the same GitHub App's Client ID/Secret or a separate OAuth App
+GITHUB_CLIENT_ID="REPLACE_WITH_YOUR_CLIENT_ID"
+GITHUB_CLIENT_SECRET="REPLACE_WITH_YOUR_CLIENT_SECRET"
+AUTH_CALLBACK_URL="http://localhost:8787/auth/github/callback"
+
+# --- Authorization ---
+# Comma-separated list of GitHub usernames allowed to access the dashboard
+DASHBOARD_ALLOWED_USERS="username1,username2"
+
+# --- AI Intelligence (Gemini) ---
+# Generate at: https://aistudio.google.com/app/apikey
+GEMINI_API_KEY="REPLACE_WITH_YOUR_GEMINI_API_KEY"
+
+# --- Database Connections ---
+
+# 1. Local Development (Used by 'wrangler dev' for the HYPERDRIVE binding)
+# This usually points to a local Postgres instance or a dev branch in Neon.
+CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="postgresql://user:password@localhost:5432/codra_dev"
+
+# 2. Migrations (Used by 'npm run migrate')
+# This script runs via Node.js and needs a direct connection to the DB you want to migrate.
+DATABASE_URL="postgresql://user:password@localhost:5432/codra_dev"
+
+# 3. Integration Tests (Used by 'npm run test')
+# MUST be a separate database to avoid data loss during test sweeps.
 TEST_DATABASE_URL="postgresql://user:password@localhost:5432/codra_test"
-# Used by npm run migrate. Can point directly at Postgres or PgBouncer.
-DATABASE_URL="postgresql://user:password@localhost:5432/codra"
-# Optional: required only for DLQ inspection/replay via /api/dlq
-# Generate at https://dash.cloudflare.com/profile/api-tokens (Queues:Edit permission)
-CF_API_TOKEN="replace-with-cloudflare-api-token"
-CF_ACCOUNT_ID="replace-with-your-cloudflare-account-id"
+
+# --- Cloudflare Management (Optional) ---
+# Required only for inspecting/replaying Dead Letter Queues (DLQ) via /api/dlq
+# Generate token at https://dash.cloudflare.com/profile/api-tokens (Queues:Edit permission)
+CF_API_TOKEN="REPLACE_WITH_CLOUDFLARE_API_TOKEN"
+CF_ACCOUNT_ID="REPLACE_WITH_YOUR_CLOUDFLARE_ACCOUNT_ID"
+CF_DLQ_ID="REPLACE_WITH_YOUR_DLQ_QUEUE_ID"
+
+# --- Application Settings ---
+APP_URL="http://localhost:8787"
+BOT_USERNAME="codra-app-dev"
+ENVIRONMENT="development"

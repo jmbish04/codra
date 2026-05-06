@@ -13,7 +13,7 @@ export function JobMetaCards({ job }: JobMetaCardsProps) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {/* Details */}
-      <Card>
+      <Card className="surface-static">
         <CardHeader><CardTitle>Job details</CardTitle></CardHeader>
         <CardContent className="pt-0">
           <dl className="grid grid-cols-2 gap-x-4 gap-y-4">
@@ -35,7 +35,7 @@ export function JobMetaCards({ job }: JobMetaCardsProps) {
                   href={`https://github.com/${job.owner}/${job.repo}/commit/${job.commitSha}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 font-mono text-xs text-accent hover:underline"
+                  className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-foreground hover:text-primary hover:underline"
                 >
                   {job.commitSha.slice(0, 7)}
                   <ExternalLink size={11} />
@@ -50,7 +50,7 @@ export function JobMetaCards({ job }: JobMetaCardsProps) {
                     href={`https://github.com/${job.owner}/${job.repo}/pull/${job.prNumber}#pullrequestreview-${job.reviewId}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-accent hover:underline"
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-foreground hover:text-primary hover:underline"
                   >
                     View on GitHub <ExternalLink size={11} />
                   </a>
@@ -86,7 +86,7 @@ export function JobMetaCards({ job }: JobMetaCardsProps) {
       </Card>
 
       {/* Steps */}
-      <Card>
+      <Card className="surface-static">
         <CardHeader><CardTitle>Progress steps</CardTitle></CardHeader>
         <CardContent className="pt-0">
           {(job.steps ?? []).length === 0 ? (
