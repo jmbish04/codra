@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { api } from '@client/lib/api';
 import { JobsTable } from '@client/components/shared/jobs-table';
 import { EmptyState } from '@client/components/shared/empty-state';
@@ -22,7 +21,6 @@ export function JobsPage() {
 
   // System failures (DLQ) state
   const [dlqMessages, setDlqMessages] = useState<DlqMessage[]>([]);
-  const [loadingDlq, setLoadingDlq] = useState(true);
   const [processingDlq, setProcessingDlq] = useState(false);
 
   const [filters, setFilters] = useState({
@@ -53,7 +51,6 @@ export function JobsPage() {
       setError(e instanceof Error ? e.message : 'Failed to load jobs.');
     } finally {
       setLoading(false);
-      setLoadingDlq(false);
       setRefreshing(false);
     }
   };
@@ -62,7 +59,7 @@ export function JobsPage() {
     if (processingDlq) return;
     setProcessingDlq(true);
     try {
-      const res = await api.replayDlqMessages(leaseIds);
+      await api.replayDlqMessages(leaseIds);
       // Small delay to let the queue process a bit before refreshing
       setTimeout(() => load(true), 1000);
     } catch (e) {
@@ -121,7 +118,7 @@ export function JobsPage() {
 
       {/* System Failures (DLQ) Section */}
       {dlqMessages.length > 0 && (
-        <div className="surface border-warning/30 bg-warning/[0.02] overflow-hidden">
+        <div className="surface min-w-0 overflow-hidden border-warning/30 bg-warning/[0.02]">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-5 py-3.5 border-b border-warning/20 gap-4 sm:gap-0">
             <div className="flex items-center gap-2.5">
               <div className="flex h-6 w-6 items-center justify-center rounded bg-warning text-warning-foreground">
@@ -257,7 +254,7 @@ export function JobsPage() {
       )}
 
       {/* Table */}
-      <div className="surface overflow-hidden">
+      <div className="surface min-w-0 overflow-hidden">
         <JobsTable jobs={jobs} loading={loading} />
 
         {!loading && jobs.length === 0 && (

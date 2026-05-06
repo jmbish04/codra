@@ -3,7 +3,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import { ChevronRight } from 'lucide-react';
-import { StatusBadge } from '@client/components/shared/status-badge';
+import { StatusBadge } from '@client/components/ui/badge';
 import type { FileReviewRecord, ParsedReviewComment } from '@shared/schema';
 import { CommentCard } from './comment-card';
 

@@ -46,7 +46,6 @@ export function buildFileReviewPrompts(input: {
   config: RepoConfig['review'];
 }) {
   const languageInfo = getLanguageForFile(input.file.path);
-  const focus = input.config.focus.join(', ');
   const rules = input.config.custom_rules.length > 0 ? input.config.custom_rules.map((rule) => `- ${rule}`).join('\n') : '- None';
   
   const systemPrompt = buildFileReviewSystemPrompt(languageInfo?.persona);

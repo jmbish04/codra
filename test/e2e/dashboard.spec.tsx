@@ -8,7 +8,6 @@ import { DashboardPage } from '@client/pages/dashboard';
 import { MemoryRouter } from 'react-router-dom';
 import { api } from '@client/lib/api';
 import { ThemeProvider } from '@client/lib/theme';
-import React from 'react';
 
 // Mock the API client
 vi.mock('@client/lib/api', () => ({
@@ -82,6 +81,6 @@ describe('Frontend UI Flows (JSDOM)', () => {
 
     // Check for activity stream item
     expect(screen.getByText('test-owner/test-repo')).toBeDefined();
-    expect(screen.getByText('Fixing bug')).toBeDefined();
+    expect(screen.getByRole('link', { name: 'Fixing bug' })).toBeDefined();
   });
 });

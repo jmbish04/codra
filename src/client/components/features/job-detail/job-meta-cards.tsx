@@ -1,8 +1,7 @@
 import { ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@client/components/ui/card';
-import { StatusBadge } from '@client/components/shared/status-badge';
-import { Badge } from '@client/components/ui/badge';
+import { Badge, StatusBadge } from '@client/components/ui/badge';
 import type { JobDetail } from '@shared/schema';
 
 interface JobMetaCardsProps {

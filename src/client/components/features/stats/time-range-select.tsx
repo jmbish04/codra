@@ -1,5 +1,4 @@
-import * as React from 'react';
-import { Calendar, ChevronDown, Clock } from 'lucide-react';
+import { ChevronDown, Clock } from 'lucide-react';
 import { Button } from '@client/components/ui/button';
 import { cn } from '@client/lib/utils';
 import {

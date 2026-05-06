@@ -12,7 +12,7 @@ import {
   ChevronDown, ArrowUpRight, RotateCcw, ExternalLink,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
-import { defaultRepoConfig, type RepoConfigRecord } from '@shared/schema';
+import type { RepoConfigRecord } from '@shared/schema';
 import { ModelChain, MODELS } from '@client/components/features/models/model-chain';
 
 

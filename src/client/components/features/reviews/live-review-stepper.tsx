@@ -1,4 +1,4 @@
-import type { JobSummary, JobStep } from '@shared/schema';
+import type { JobSummary } from '@shared/schema';
 
 interface LiveReviewStepperProps {
   job: JobSummary;

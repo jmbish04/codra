@@ -549,6 +549,18 @@
   border: 1px solid var(--code-border);
 }
 
+@utility badge-warning {
+  background-color: #fffbeb;
+  color: #d97706;
+  border-color: #fcd34d;
+
+  .dark & {
+    background-color: var(--warning-bg);
+    color: var(--warning);
+    border-color: var(--warning-border);
+  }
+}
+
 @utility severity-tag {
   @apply text-[0.64rem] px-[5.5px] py-[1.5px] rounded-[3px] uppercase font-bold tracking-[0.07em] border border-transparent;
 
@@ -637,11 +649,11 @@
 
 .dark .dashboard-sidebar,
 .dark .dashboard-sidebar :where(a, button, p, span, div, svg) {
-  color: oklch(0% 0 0) !important;
+  color: oklch(100% 0 0) !important;
 }
 
 .dark .dashboard-sidebar {
-  background-color: #ffffff !important;
+  background-color: #000000 !important;
 }
 
 .app-shell-content {
@@ -679,9 +691,9 @@
     linear-gradient(
       90deg,
       transparent,
-      color-mix(in oklch, oklch(0% 0 0) 12%, transparent) 18%,
-      color-mix(in oklch, var(--primary) 24%, transparent) 50%,
-      color-mix(in oklch, oklch(0% 0 0) 12%, transparent) 82%,
+      color-mix(in oklch, oklch(100% 0 0) 14%, transparent) 18%,
+      color-mix(in oklch, var(--primary) 18%, transparent) 50%,
+      color-mix(in oklch, oklch(100% 0 0) 14%, transparent) 82%,
       transparent
     );
 }
@@ -692,8 +704,8 @@
 }
 
 .dark .dashboard-sidebar :where(button[aria-label='Expand sidebar'], button[aria-label='Collapse sidebar'], button[aria-label='Toggle theme'], button[aria-label='Close menu']) {
-  background-color: oklch(100% 0 0) !important;
-  color: oklch(0% 0 0) !important;
+  background-color: oklch(0% 0 0) !important;
+  color: oklch(100% 0 0) !important;
 }
 
 .dashboard-sidebar .dashboard-sidebar-username {
@@ -701,7 +713,7 @@
 }
 
 .dark .dashboard-sidebar .dashboard-sidebar-username {
-  color: oklch(27.4% 0.006 286.03) !important;
+  color: oklch(92% 0.004 286.32) !important;
 }
 
 .dashboard-sidebar-action {
@@ -716,7 +728,7 @@
 
 .dark .dashboard-sidebar-action:hover,
 .dark .dashboard-sidebar-action:focus-visible {
-  background-color: color-mix(in oklch, oklch(0% 0 0) 7%, transparent) !important;
+  background-color: color-mix(in oklch, oklch(100% 0 0) 10%, transparent) !important;
 }
 
 .dashboard-sidebar-action:active {
@@ -782,10 +794,10 @@
   }
 
   .dark .dashboard-sidebar-collapsed .dashboard-sidebar-tooltip {
-    border-color: color-mix(in oklch, oklch(0% 0 0) 12%, transparent) !important;
-    background: oklch(100% 0 0) !important;
-    color: oklch(0% 0 0) !important;
-    box-shadow: 0 10px 24px oklch(0% 0 0 / 0.16) !important;
+    border-color: color-mix(in oklch, oklch(100% 0 0) 14%, transparent) !important;
+    background: oklch(0% 0 0) !important;
+    color: oklch(100% 0 0) !important;
+    box-shadow: 0 10px 24px oklch(0% 0 0 / 0.14) !important;
   }
 
   .dashboard-sidebar-collapsed .dashboard-sidebar-action:hover .dashboard-sidebar-tooltip,

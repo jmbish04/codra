@@ -298,7 +298,6 @@ export const statsSchema = z.object({
 export type ParsedReviewComment = z.infer<typeof parsedReviewCommentSchema>;
 export type FileReviewModelOutput = z.infer<typeof fileReviewModelOutputSchema>;
 export type RepoConfig = z.infer<typeof repoConfigSchema>;
-import type { GitHubWebhookEventName, GitHubWebhookPayload, PullRequestWebhookPayload } from '@shared/github';
 export type ReviewJobMessage = z.infer<typeof reviewJobMessageSchema>;
 export type JobSummary = z.infer<typeof jobSummarySchema>;
 export type FileReviewRecord = z.infer<typeof fileReviewRecordSchema>;

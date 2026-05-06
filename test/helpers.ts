@@ -1,5 +1,4 @@
 import type { AppBindings } from '@server/env';
-import { vi } from 'vitest';
 
 export class MemoryKV {
   private readonly store = new Map<string, string>();

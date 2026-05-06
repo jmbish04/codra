@@ -1,339 +1,451 @@
-import { useEffect, useState } from 'react';
-import { api } from '@client/lib/api';
-import type { StatsPayload } from '@shared/schema';
+import { useState, type ReactNode } from 'react';
 import {
-  AreaChart, Area, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell,
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from 'recharts';
-import { TrendingUp, CheckCircle2, Cpu, Terminal, Activity, ArrowUpRight, MessageSquare, RefreshCw } from 'lucide-react';
+import {
+  Activity,
+  BarChart3,
+  Bot,
+  Gauge,
+  GitBranch,
+  RefreshCw,
+  Server,
+  TrendingUp,
+} from 'lucide-react';
+
 import { TimeRangeSelect } from '@client/components/features/stats/time-range-select';
 import { PageHeader } from '@client/components/layout/page-header';
-import { OverviewStats } from '@client/components/features/stats/overview-stats';
-import { usePolling } from '@client/hooks/use-polling';
-import { useIsDarkMode } from '@client/hooks/use-is-dark-mode';
-import { fmtNumber } from '@client/lib/utils';
+import { Skeleton } from '@client/components/shared/skeleton';
 import { Alert } from '@client/components/ui/alert';
 import { Button } from '@client/components/ui/button';
-import { useMemo } from 'react';
+import { useIsDarkMode } from '@client/hooks/use-is-dark-mode';
+import { usePolling } from '@client/hooks/use-polling';
+import { api } from '@client/lib/api';
+import { fmtNumber } from '@client/lib/utils';
+import type { StatsPayload } from '@shared/schema';
 
-/* ── Lime palette (static — needed for SVG attributes) ── */
-const LM      = '#84cc16'; // legible lime for light mode
-const LM_DARK = '#E0FE56'; // high-contrast lime
-
-const VERDICT_COLORS = {
-  approve:         LM,
-  comment:         '#f59e0b',
-  request_changes: '#f87171',
-  none:            '#6b7280',
+const CHART = {
+  primary: '#84cc16',
+  primaryDark: '#e0fe56',
+  comments: '#0ea5e9',
+  warning: '#f59e0b',
+  danger: '#ef4444',
+  quiet: '#64748b',
+  violet: '#8b5cf6',
 };
 
-/* ── Custom tooltip ── */
-const ChartTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="surface px-3 py-2.5 text-xs shadow-lg">
-      {label && <p className="font-semibold text-foreground mb-1">{label}</p>}
-      {payload.map((p: any, i: number) => (
-        <div key={i} className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full shrink-0" style={{ background: p.color }} />
-          <span className="text-muted-foreground capitalize">{p.name}:</span>
-          <span className="font-semibold text-foreground tabular-nums">{p.value}</span>
-        </div>
-      ))}
-    </div>
-  );
-};
-
-/* ── Shared axis props ── */
 const axisProps = {
-  fontSize: 10,
+  fontSize: 11,
   tickLine: false,
-  tickMargin: 8,
+  tickMargin: 10,
   axisLine: false,
   tick: { fontFamily: 'var(--font-sans)', fill: 'var(--muted-foreground)' } as const,
 };
 
-/* ══════════════════════════════════════════════════════════
-   EVIL Chart: Full-width Area — 30-day review volume
-   (Renamed to AreaVolumeChart for clarity)
- ══════════════════════════════════════════════════════════ */
-function AreaVolumeChart({ data, isDark, days }: { data: { day: string; jobs: number }[]; isDark: boolean; days: number }) {
-  const color = isDark ? LM_DARK : LM;
+function formatDay(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function formatCompact(value: number) {
+  return value >= 1000 ? fmtNumber(value) : value.toLocaleString();
+}
+
+function ratio(numerator: number, denominator: number, decimals = 1) {
+  if (!denominator) return '0';
+  return (numerator / denominator).toFixed(decimals);
+}
+
+function percent(numerator: number, denominator: number) {
+  if (!denominator) return 0;
+  return Math.round((numerator / denominator) * 100);
+}
+
+function modelName(model: string) {
+  return model.split('/').pop()?.replace(/-/g, ' ') ?? model;
+}
+
+function ChartTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+
   return (
-    <div className="chart-card">
-      <div className="chart-card-inner" />
-      <div className="flex items-center justify-between px-5 pt-5 pb-3">
-        <div className="flex items-center gap-2">
-          <TrendingUp size={14} className="text-primary" strokeWidth={2} />
-          <span className="text-sm font-semibold text-foreground">Review volume · last {days} days</span>
+    <div className="rounded-md border border-border bg-card px-3 py-2.5 text-xs shadow-lg">
+      {label && (
+        <p className="mb-2 font-semibold text-foreground">
+          {typeof label === 'string' && label.includes('-') ? formatDay(label) : label}
+        </p>
+      )}
+      <div className="space-y-1.5">
+        {payload.map((item: any) => (
+          <div key={item.dataKey ?? item.name} className="flex min-w-32 items-center gap-2">
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: item.color }}
+            />
+            <span className="flex-1 capitalize text-muted-foreground">{item.name}</span>
+            <span className="font-semibold tabular-nums text-foreground">
+              {typeof item.value === 'number' ? formatCompact(item.value) : item.value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GraphSectionTitle() {
+  return <div className="pt-2" aria-hidden="true" />;
+}
+
+function GraphShell({
+  title,
+  eyebrow,
+  icon: Icon,
+  children,
+  className = '',
+}: {
+  title: string;
+  eyebrow: string;
+  icon: typeof Activity;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <article className={`overflow-hidden rounded-lg border border-border bg-card shadow-[var(--shadow-md)] ${className}`}>
+      <div className="flex items-start justify-between gap-4 px-5 pt-5">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{eyebrow}</p>
+          <h3 className="mt-1 text-sm font-bold text-foreground">{title}</h3>
         </div>
-        <span className="text-xs text-muted-foreground font-mono">
-          {data.reduce((s, d) => s + d.jobs, 0)} total
+        <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary ring-1 ring-primary/15">
+          <Icon size={15} strokeWidth={2.2} />
         </span>
       </div>
-      <div className="px-1 pb-4" style={{ height: 200 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ left: -16, right: 12, top: 8, bottom: 0 }}>
-            <defs>
-              <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%"   stopColor={color} stopOpacity={0.35} />
-                <stop offset="55%"  stopColor={color} stopOpacity={0.08} />
-                <stop offset="100%" stopColor={color} stopOpacity={0} />
-              </linearGradient>
-              <filter id="areaGlow" x="-10%" y="-30%" width="120%" height="160%">
-                <feGaussianBlur stdDeviation="3.5" result="blur" in="SourceGraphic" />
-                <feMerge>
-                  <feMergeNode in="blur" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-            </defs>
+      {children}
+    </article>
+  );
+}
 
-            <CartesianGrid
-              strokeDasharray="3 3"
-              vertical={false}
-              stroke="var(--border)"
-              strokeOpacity={0.6}
-            />
-            <XAxis
-              dataKey="day"
-              {...axisProps}
-              tickFormatter={(v) => {
-                const parts = v.split('-');
-                if (parts.length < 3) return v;
-                return `${parts[1]}/${parts[2]}`;
-              }}
-              interval={Math.ceil(days / 8)}
-            />
-            <YAxis {...axisProps} />
-            <Tooltip
-              content={<ChartTooltip />}
-              cursor={{ stroke: color, strokeWidth: 1, strokeDasharray: '4 3' }}
-            />
-            <Area
-              type="monotone"
-              dataKey="jobs"
-              name="reviews"
-              stroke={color}
-              strokeWidth={2.5}
-              fill="url(#areaFill)"
-              filter="url(#areaGlow)"
-              dot={false}
-              activeDot={{
-                r: 4,
-                fill: color,
-                stroke: 'var(--card)',
-                strokeWidth: 2.5,
-              }}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
+function GraphCardGallery({ stats, days, isDark }: { stats: StatsPayload; days: number; isDark: boolean }) {
+  const color = isDark ? CHART.primaryDark : CHART.primary;
+  const tokenTrend = stats.trend.map((day) => ({
+    ...day,
+    tokens: day.inputTokens + day.outputTokens,
+    tokenDensity: Math.round((day.inputTokens + day.outputTokens) / Math.max(day.jobs, 1)),
+    commentRate: Number(ratio(day.comments, Math.max(day.jobs, 1), 1)),
+  }));
+  const cumulativeTrend = stats.trend.reduce<{ day: string; reviews: number; comments: number }[]>((acc, day) => {
+    const prev = acc[acc.length - 1];
+    acc.push({
+      day: day.day,
+      reviews: (prev?.reviews ?? 0) + day.jobs,
+      comments: (prev?.comments ?? 0) + day.comments,
+    });
+    return acc;
+  }, []);
+  const repoMax = Math.max(...stats.topRepos.map((repo) => repo.jobs), 1);
+  const modelMax = Math.max(...stats.models.map((model) => model.calls), 1);
+
+  return (
+    <div className="flex flex-col gap-5">
+      <GraphSectionTitle />
+
+      <div className="grid gap-5 lg:grid-cols-12">
+        <GraphShell title="Cumulative reviews" eyebrow="Line" icon={TrendingUp} className="lg:col-span-7">
+          <div className="h-64 px-2 pb-4 pt-4">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              <LineChart data={cumulativeTrend} margin={{ left: -18, right: 18, top: 10, bottom: 0 }}>
+                <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="day" {...axisProps} tickFormatter={formatDay} interval={Math.max(Math.floor(days / 8), 0)} />
+                <YAxis {...axisProps} />
+                <Tooltip content={<ChartTooltip />} />
+                <Line type="monotone" dataKey="reviews" name="reviews" stroke={color} strokeWidth={2.5} dot={false} />
+                <Line type="monotone" dataKey="comments" name="comments" stroke={CHART.comments} strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </GraphShell>
+
+        <GraphShell title="Token load" eyebrow="Area" icon={Server} className="lg:col-span-5">
+          <div className="h-64 px-2 pb-4 pt-4">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              <AreaChart data={tokenTrend} margin={{ left: -18, right: 18, top: 10, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="tokenLoadFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={CHART.violet} stopOpacity={0.28} />
+                    <stop offset="100%" stopColor={CHART.violet} stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="day" {...axisProps} tickFormatter={formatDay} interval={Math.max(Math.floor(days / 5), 0)} />
+                <YAxis {...axisProps} tickFormatter={formatCompact} />
+                <Tooltip content={<ChartTooltip />} />
+                <Area type="monotone" dataKey="tokens" name="tokens" stroke={CHART.violet} strokeWidth={2.25} fill="url(#tokenLoadFill)" dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </GraphShell>
       </div>
+
+      <div className="grid gap-5 lg:grid-cols-12">
+        <GraphShell title="Reviews vs comments" eyebrow="Dual bars" icon={BarChart3} className="lg:col-span-6">
+          <div className="h-64 px-2 pb-4 pt-4">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              <BarChart data={stats.trend} margin={{ left: -18, right: 18, top: 10, bottom: 0 }}>
+                <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="day" {...axisProps} tickFormatter={formatDay} interval={Math.max(Math.floor(days / 6), 0)} />
+                <YAxis {...axisProps} />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="jobs" name="reviews" fill={color} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="comments" name="comments" fill={CHART.comments} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </GraphShell>
+
+        <GraphShell title="Token density" eyebrow="Line" icon={Gauge} className="lg:col-span-6">
+          <div className="h-64 px-2 pb-4 pt-4">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              <LineChart data={tokenTrend} margin={{ left: -18, right: 18, top: 10, bottom: 0 }}>
+                <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="day" {...axisProps} tickFormatter={formatDay} interval={Math.max(Math.floor(days / 6), 0)} />
+                <YAxis {...axisProps} tickFormatter={formatCompact} />
+                <Tooltip content={<ChartTooltip />} />
+                <Line type="monotone" dataKey="tokenDensity" name="tokens/review" stroke={CHART.warning} strokeWidth={2.5} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </GraphShell>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-12">
+        <GraphShell title="Repository bars" eyebrow="Horizontal" icon={GitBranch} className="lg:col-span-6">
+          <div className="space-y-3 px-5 pb-5 pt-5">
+            {stats.topRepos.slice(0, 7).map((repo) => (
+              <div key={`${repo.owner}/${repo.repo}`} className="grid grid-cols-[minmax(0,1fr)_3rem] items-center gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="truncate font-semibold text-foreground">{repo.owner}/{repo.repo}</span>
+                  </div>
+                  <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-secondary">
+                    <div className="h-full rounded-full bg-primary" style={{ width: `${percent(repo.jobs, repoMax)}%` }} />
+                  </div>
+                </div>
+                <span className="text-right text-xs font-bold tabular-nums text-foreground">{repo.jobs}</span>
+              </div>
+            ))}
+          </div>
+        </GraphShell>
+
+        <GraphShell title="Model calls" eyebrow="Horizontal" icon={Bot} className="lg:col-span-6">
+          <div className="space-y-3 px-5 pb-5 pt-5">
+            {stats.models.slice(0, 7).map((model) => (
+              <div key={model.modelUsed} className="grid grid-cols-[minmax(0,1fr)_3rem] items-center gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="truncate font-semibold text-foreground">{modelName(model.modelUsed)}</span>
+                  </div>
+                  <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-secondary">
+                    <div className="h-full rounded-full bg-[oklch(54%_0.17_295)]" style={{ width: `${percent(model.calls, modelMax)}%` }} />
+                  </div>
+                </div>
+                <span className="text-right text-xs font-bold tabular-nums text-foreground">{model.calls}</span>
+              </div>
+            ))}
+          </div>
+        </GraphShell>
+      </div>
+
     </div>
   );
 }
 
-/* ══════════════════════════════════════════════════════════
-   EVIL Chart: Bar — language models
- ══════════════════════════════════════════════════════════ */
-function ModelsBarChart({
-  models, isDark,
+function PanelHeader({
+  label,
+  value,
+  detail,
 }: {
-  models: StatsPayload['models'];
+  label: string;
+  value?: string;
+  detail?: string;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 px-5 pt-5">
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary ring-1 ring-primary/15">
+          <TrendingUp size={15} strokeWidth={2.2} />
+        </span>
+        <div>
+          <h2 className="text-sm font-bold text-foreground">{label}</h2>
+          {detail && <p className="text-xs text-muted-foreground">{detail}</p>}
+        </div>
+      </div>
+      {value && (
+        <span className="rounded-md border border-border bg-background px-2.5 py-1 text-xs font-bold tabular-nums text-foreground">
+          {value}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ReviewFlowCard({
+  stats,
+  days,
+  isDark,
+}: {
+  stats: StatsPayload;
+  days: number;
   isDark: boolean;
 }) {
-  const color = isDark ? LM_DARK : LM;
-  const chartData = models.map((m) => ({
-    name: m.modelUsed.split('/').pop() ?? m.modelUsed,
-    calls: m.calls,
-  }));
-
-  return (
-    <div className="chart-card flex flex-col">
-      <div className="chart-card-inner" />
-      <div className="flex items-center gap-2 px-5 pt-5 pb-3">
-        <Cpu size={14} className="text-primary" strokeWidth={2} />
-        <span className="text-sm font-semibold text-foreground">Language models</span>
-      </div>
-      <div className="flex-1 px-1 pb-4" style={{ minHeight: 190 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ left: -16, right: 12, top: 8, bottom: 0 }}>
-            <defs>
-              <linearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%"   stopColor={color} stopOpacity={0.95} />
-                <stop offset="100%" stopColor={color} stopOpacity={0.45} />
-              </linearGradient>
-              <filter id="barGlow" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="2.5" result="blur" in="SourceGraphic" />
-                <feMerge>
-                  <feMergeNode in="blur" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" strokeOpacity={0.6} />
-            <XAxis dataKey="name" {...axisProps} />
-            <YAxis {...axisProps} />
-            <Tooltip content={<ChartTooltip />} cursor={{ fill: `${color}14` }} />
-            <Bar
-              dataKey="calls"
-              name="calls"
-              fill="url(#barFill)"
-              radius={[5, 5, 0, 0]}
-              maxBarSize={52}
-              filter="url(#barGlow)"
-            />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+  const color = isDark ? CHART.primaryDark : CHART.primary;
+  const totalReviews = stats.trend.reduce((sum, day) => sum + day.jobs, 0);
+  const maxDay = stats.trend.reduce(
+    (best, day) => (day.jobs > best.jobs ? day : best),
+    stats.trend[0] ?? { day: '', jobs: 0 },
   );
-}
 
-/* ══════════════════════════════════════════════════════════
-   EVIL Chart: Donut — decision mix
- ══════════════════════════════════════════════════════════ */
-const RADIAN = Math.PI / 180;
-function CustomLabel({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) {
-  if (percent < 0.08) return null;
-  const r = innerRadius + (outerRadius - innerRadius) * 0.5;
-  const x = cx + r * Math.cos(-midAngle * RADIAN);
-  const y = cy + r * Math.sin(-midAngle * RADIAN);
   return (
-    <text
-      x={x} y={y}
-      fill="white"
-      textAnchor="middle"
-      dominantBaseline="central"
-      fontSize={10}
-      fontWeight={700}
-      fontFamily="var(--font-sans)"
-    >
-      {`${(percent * 100).toFixed(0)}%`}
-    </text>
-  );
-}
-
-function VerdictDonut({ verdictData }: { verdictData: { name: string; value: number; color: string }[] }) {
-  return (
-    <div className="chart-card flex flex-col">
-      <div className="chart-card-inner" />
-      <div className="flex items-center gap-2 px-5 pt-5 pb-3">
-        <CheckCircle2 size={14} className="text-primary" strokeWidth={2} />
-        <span className="text-sm font-semibold text-foreground">Decision mix</span>
-      </div>
-      <div className="flex-1 flex items-center gap-4 px-4 pb-5" style={{ minHeight: 190 }}>
-        <div style={{ width: 160, height: 160, flexShrink: 0 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <defs>
-                <filter id="donutGlow" x="-20%" y="-20%" width="140%" height="140%">
-                  <feGaussianBlur stdDeviation="3" result="blur" in="SourceGraphic" />
-                  <feMerge>
-                    <feMergeNode in="blur" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
-                </filter>
-              </defs>
-              <Pie
-                data={verdictData}
-                innerRadius={44}
-                outerRadius={70}
-                paddingAngle={3}
-                dataKey="value"
-                strokeWidth={0}
-                labelLine={false}
-                label={CustomLabel}
-                animationBegin={0}
-                animationDuration={900}
-                filter="url(#donutGlow)"
-              >
-                {verdictData.map((entry, i) => (
-                  <Cell key={i} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip content={<ChartTooltip />} />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Legend */}
-        <div className="flex flex-col gap-2.5 min-w-0">
-          {verdictData.map((v) => (
-            <div key={v.name} className="flex items-center gap-2.5">
-              <div
-                className="shrink-0 h-2.5 w-2.5 rounded-sm"
-                style={{ background: v.color, boxShadow: `0 0 6px ${v.color}` }}
-              />
-              <span className="capitalize text-xs text-muted-foreground truncate">
-                {v.name.replace(/_/g, ' ')}
-              </span>
-              <span className="ml-auto pl-2 font-semibold tabular-nums text-xs text-foreground shrink-0">
-                {v.value}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════
-   Top Repos  
- ══════════════════════════════════════════════════════════ */
-function TopRepos({ repos }: { repos: StatsPayload['topRepos'] }) {
-  const max = Math.max(...repos.map((r) => r.jobs), 1);
-  return (
-    <div className="chart-card flex flex-col">
-      <div className="chart-card-inner" />
-      <div className="flex items-center gap-2 px-5 pt-5 pb-3">
-        <Terminal size={14} className="text-primary" strokeWidth={2} />
-        <span className="text-sm font-semibold text-foreground">Active repositories</span>
-      </div>
-      <div className="flex flex-col divide-y divide-border px-5 pb-5 flex-1">
-        {repos.map((repo, i) => {
-          const pct = (repo.jobs / max) * 100;
-          return (
-            <div key={i} className="flex flex-col gap-1.5 py-2.5 first:pt-0">
-              <div className="flex items-center justify-between text-xs">
-                <span className="truncate text-foreground font-medium">
-                  {repo.owner}/{repo.repo}
-                </span>
-                <span className="ml-3 shrink-0 font-mono font-semibold text-foreground tabular-nums">
-                  {repo.jobs}
-                </span>
-              </div>
-              <div className="h-1 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-700"
-                  style={{
-                    width: `${pct}%`,
-                    background: `linear-gradient(to right, ${LM}, ${LM_DARK})`,
-                    boxShadow: `0 0 12px ${LM_DARK}90`,
-                  }}
+    <section className="overflow-hidden rounded-lg border border-border bg-card shadow-[var(--shadow-md)]">
+      <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_15rem]">
+        <div>
+          <PanelHeader
+            label="Review flow"
+            detail={`Daily review and comment activity across the last ${days} days`}
+            value={`${fmtNumber(totalReviews)} total`}
+          />
+          <div className="h-[21rem] px-2 pb-4 pt-4 sm:px-4">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              <AreaChart data={stats.trend} margin={{ left: -18, right: 18, top: 12, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="reviewFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={color} stopOpacity={0.28} />
+                    <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+                  </linearGradient>
+                  <linearGradient id="commentFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={CHART.comments} stopOpacity={0.2} />
+                    <stop offset="100%" stopColor={CHART.comments} stopOpacity={0.01} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="day"
+                  {...axisProps}
+                  interval={Math.max(Math.floor(days / 8), 0)}
+                  tickFormatter={formatDay}
                 />
-              </div>
+                <YAxis {...axisProps} />
+                <Tooltip content={<ChartTooltip />} cursor={{ stroke: color, strokeDasharray: '4 4' }} />
+                <Area
+                  type="monotone"
+                  dataKey="jobs"
+                  name="reviews"
+                  stroke={color}
+                  strokeWidth={2.5}
+                  fill="url(#reviewFill)"
+                  dot={false}
+                  activeDot={{ r: 4, fill: color, stroke: 'var(--card)', strokeWidth: 2 }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="comments"
+                  name="comments"
+                  stroke={CHART.comments}
+                  strokeWidth={2}
+                  fill="url(#commentFill)"
+                  dot={false}
+                  activeDot={{ r: 4, fill: CHART.comments, stroke: 'var(--card)', strokeWidth: 2 }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <aside className="border-t border-border bg-secondary/25 p-5 lg:border-l lg:border-t-0">
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+            Peak day
+          </p>
+          <p className="mt-2 text-2xl font-bold tracking-normal text-foreground tabular-nums">
+            {maxDay.jobs}
+          </p>
+          <p className="text-xs text-muted-foreground">{maxDay.day ? formatDay(maxDay.day) : 'No activity'}</p>
+
+          <div className="my-5 h-px bg-border" />
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-medium text-muted-foreground">Daily average</span>
+              <span className="text-sm font-bold tabular-nums text-foreground">
+                {ratio(totalReviews, days)}
+              </span>
             </div>
-          );
-        })}
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-medium text-muted-foreground">Comment rate</span>
+              <span className="text-sm font-bold tabular-nums text-foreground">
+                {ratio(stats.totals.comments, Math.max(totalReviews, 1))}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-medium text-muted-foreground">Active repos</span>
+              <span className="text-sm font-bold tabular-nums text-foreground">
+                {stats.topRepos.length}
+              </span>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+function ReviewFlowSkeleton() {
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-card shadow-[var(--shadow-md)]">
+      <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_15rem]">
+        <div className="p-5">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary ring-1 ring-primary/15">
+              <Activity size={15} strokeWidth={2.2} />
+            </span>
+            <div className="space-y-2">
+              <Skeleton height={16} width={108} />
+              <Skeleton height={12} width={240} />
+            </div>
+          </div>
+          <div className="mt-8 h-72 rounded-md bg-muted/70 skeleton" />
+        </div>
+        <div className="border-t border-border bg-secondary/25 p-5 lg:border-l lg:border-t-0">
+          <Skeleton height={12} width={72} />
+          <Skeleton className="mt-3" height={32} width={48} />
+          <div className="my-5 h-px bg-border" />
+          <div className="space-y-4">
+            <Skeleton height={14} width="100%" />
+            <Skeleton height={14} width="88%" />
+            <Skeleton height={14} width="92%" />
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-
-/* ══════════════════════════════════════════════════════════
-   Main page
- ══════════════════════════════════════════════════════════ */
 export function StatsPage() {
   const [stats, setStats] = useState<StatsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState(30);
-
   const isDark = useIsDarkMode();
 
   const load = async (manual = false) => {
@@ -352,22 +464,12 @@ export function StatsPage() {
 
   usePolling(load, 30_000, [days]);
 
-
-  const verdictData = stats?.verdicts
-    .map((v) => ({
-      name: v.verdict ?? 'none',
-      value: v.count,
-      color: VERDICT_COLORS[v.verdict as keyof typeof VERDICT_COLORS] ?? '#6b7280',
-    }))
-    .filter((v) => v.value > 0) ?? [];
-
   return (
-    <section className="page-enter flex flex-col gap-5">
-
-      <PageHeader 
-        category="Reports" 
+    <section className="page-enter flex flex-col gap-6">
+      <PageHeader
+        category="Reports"
         title="Review metrics"
-        description="Review volume, verdicts, model usage, and active repositories for the selected range."
+        description="Daily review and comment activity for the selected range."
         actions={
           <>
             <TimeRangeSelect value={days} onValueChange={setDays} />
@@ -384,34 +486,17 @@ export function StatsPage() {
           </>
         }
       />
-      
+
       {error && <Alert variant="destructive">{error}</Alert>}
 
-      <OverviewStats stats={stats} days={days} />
-
-      {stats && (
+      {stats ? (
         <>
-          <AreaVolumeChart data={stats.trend} isDark={isDark} days={days} />
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <ModelsBarChart models={stats.models} isDark={isDark} />
-            <VerdictDonut verdictData={verdictData} />
-          </div>
-
-          {stats.topRepos.length > 0 && <TopRepos repos={stats.topRepos} />}
+          <ReviewFlowCard stats={stats} days={days} isDark={isDark} />
+          <GraphCardGallery stats={stats} days={days} isDark={isDark} />
         </>
+      ) : (
+        loading && <ReviewFlowSkeleton />
       )}
-
-      {loading && !stats && (
-        <div className="flex flex-col gap-5">
-          <div className="chart-card h-[200px] animate-pulse" />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="chart-card h-[200px] animate-pulse" />
-            <div className="chart-card h-[200px] animate-pulse" />
-          </div>
-        </div>
-      )}
-
     </section>
   );
 }

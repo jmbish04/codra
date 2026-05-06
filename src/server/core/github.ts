@@ -1,4 +1,3 @@
-import type { ParsedReviewComment } from '@shared/schema';
 import type { AppBindings } from '@server/env';
 import { withTimeout } from '@server/core/timeout';
 import { logger } from '@server/core/logger';

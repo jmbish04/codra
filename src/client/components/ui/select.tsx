@@ -1,5 +1,4 @@
-import * as React from 'react';
-import { ChevronDown, Check } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { cn } from '@client/lib/utils';
 import {
   DropdownMenu,

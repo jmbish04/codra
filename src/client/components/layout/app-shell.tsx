@@ -26,7 +26,6 @@ import {
   DropdownMenuTrigger,
 } from '@client/components/ui/dropdown-menu';
 import codraDark from '@/assets/codra-fullicon-dark.svg';
-import codraLight from '@/assets/codra-fullicon-light.svg';
 import type { AuthSessionUser } from '@shared/api';
 
 const links = [
@@ -153,7 +152,7 @@ export function AppShell() {
             onClick={() => setMobileMenuOpen(false)}
           >
             <img
-              src={theme === 'dark' ? '/icons/codra-icon-light.svg' : '/icons/codra-icon-dark.svg'}
+              src="/icons/codra-icon-dark.svg"
               alt=""
               className={cn(
                 'hidden h-8 w-8 shrink-0 rounded-lg lg:block',
@@ -161,7 +160,7 @@ export function AppShell() {
               )}
             />
             <img
-              src={theme === 'dark' ? codraLight : codraDark}
+              src={codraDark}
               alt="Codra"
               className={cn('h-6 w-auto', sidebarCollapsed && 'lg:hidden')}
             />
@@ -365,7 +364,7 @@ export function AppShell() {
                     <span className="block truncate text-[13px] font-bold leading-tight text-black dark:text-white">
                       {accountName}
                     </span>
-                    <span className="dashboard-sidebar-username mt-0.5 block truncate text-[11px] font-semibold leading-tight text-zinc-200 dark:text-zinc-800">
+                    <span className="dashboard-sidebar-username mt-0.5 block truncate text-[11px] font-semibold leading-tight text-zinc-200">
                       @{sessionUser.login}
                     </span>
                   </span>
