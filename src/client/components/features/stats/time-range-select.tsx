@@ -1,13 +1,6 @@
-import { ChevronDown, Clock } from 'lucide-react';
-import { Button } from '@client/components/ui/button';
+import { Clock } from 'lucide-react';
+import { Select } from '@client/components/ui/select';
 import { cn } from '@client/lib/utils';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@client/components/ui/dropdown-menu';
 
 interface TimeRangeSelectProps {
   value: number;
@@ -26,36 +19,15 @@ export function TimeRangeSelect({ value, onValueChange, className }: TimeRangeSe
   const selectedRange = timeRanges.find((r) => r.value === value) || timeRanges[2];
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className={cn(
-            "w-[160px] justify-between border-border/50 bg-background hover:bg-accent/50 transition-all duration-200",
-            className
-          )}
-        >
-          <div className="flex items-center gap-2">
-            <Clock className="h-3.5 w-3.5 text-primary/70" />
-            <span className="font-medium text-xs truncate">{selectedRange.label}</span>
-          </div>
-          <ChevronDown className="h-3.5 w-3.5 opacity-50" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-[180px]" align="end">
-        <DropdownMenuRadioGroup value={value.toString()} onValueChange={(v: string) => onValueChange(Number(v))}>
-          {timeRanges.map((option) => (
-            <DropdownMenuRadioItem
-              key={option.value}
-              value={option.value.toString()}
-              className="py-1.5 cursor-pointer transition-colors duration-200 text-xs"
-            >
-              {option.label}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Select
+      value={selectedRange.value.toString()}
+      onValueChange={(v) => onValueChange(Number(v))}
+      options={timeRanges.map((range) => ({
+        label: range.label,
+        value: range.value.toString(),
+      }))}
+      leadingIcon={<Clock className="h-3.5 w-3.5" />}
+      triggerClassName={cn('w-[160px]', className)}
+    />
   );
 }

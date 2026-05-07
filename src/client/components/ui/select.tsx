@@ -1,4 +1,5 @@
 import { ChevronDown } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { cn } from '@client/lib/utils';
 import {
   DropdownMenu,
@@ -21,6 +22,7 @@ interface SelectProps {
   label?: string;
   className?: string;
   triggerClassName?: string;
+  leadingIcon?: ReactNode;
 }
 
 export function Select({
@@ -31,6 +33,7 @@ export function Select({
   label,
   className,
   triggerClassName,
+  leadingIcon,
 }: SelectProps) {
   const selectedOption = options.find((opt) => opt.value === value);
 
@@ -46,25 +49,32 @@ export function Select({
           <Button
             variant="outline"
             className={cn(
-              'h-9 w-full justify-between bg-background border-border/50 px-3 py-2 text-sm font-normal transition-all hover:bg-accent/50',
+              'h-9 w-full justify-between border-border/50 bg-background px-3 py-2 text-sm font-normal transition-all hover:bg-accent',
               !selectedOption && 'text-muted-foreground',
               triggerClassName
             )}
           >
-            <span className="truncate">
-              {selectedOption ? selectedOption.label : placeholder}
+            <span className="flex min-w-0 items-center gap-2">
+              {leadingIcon && (
+                <span className="shrink-0 text-primary/70">
+                  {leadingIcon}
+                </span>
+              )}
+              <span className="truncate">
+                {selectedOption ? selectedOption.label : placeholder}
+              </span>
             </span>
             <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="min-w-[var(--radix-dropdown-menu-trigger-width)] p-1">
+        <DropdownMenuContent className="min-w-[var(--radix-dropdown-menu-trigger-width)]">
           {options.map((option) => (
             <DropdownMenuItem
               key={option.value}
               onClick={() => onValueChange(option.value)}
               className={cn(
-                "flex items-center justify-between cursor-pointer py-1.5",
-                value === option.value && "bg-accent font-medium"
+                'cursor-pointer',
+                value === option.value && 'bg-accent font-medium dark:bg-primary/[0.12]'
               )}
             >
               {option.label}

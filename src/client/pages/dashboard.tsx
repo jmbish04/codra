@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api } from '@client/lib/api';
 import type { StatsPayload } from '@shared/schema';
 import type { JobSummary } from '@shared/schema';
-import { History, RefreshCw, ArrowRight } from 'lucide-react';
+import { RefreshCw, ArrowRight } from 'lucide-react';
 import { JobsTable } from '@client/components/shared/jobs-table';
 import { Link } from 'react-router-dom';
 
@@ -79,7 +79,6 @@ export function DashboardPage() {
       <div className="flex flex-col gap-0">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2.5">
-            <History size={14} strokeWidth={1.75} className="text-primary" />
             <h2 className="text-sm font-semibold text-foreground">Recent reviews</h2>
           </div>
           <Link to="/jobs">

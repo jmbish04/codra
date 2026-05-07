@@ -375,38 +375,38 @@ export function AppShell() {
                 align={accountMenuBesideSidebar ? 'end' : 'start'}
                 sideOffset={accountMenuBesideSidebar ? 16 : 12}
                 alignOffset={accountMenuBesideSidebar ? -2 : 0}
-                className="w-60 rounded-xl border-white/10 bg-black p-2 text-white shadow-[0_18px_42px_-24px_oklch(0%_0_0/0.75)] dark:border-black/10 dark:bg-white dark:text-black dark:shadow-[0_18px_42px_-24px_oklch(0%_0_0/0.28)]"
+                className="w-60"
               >
-                <div className="mb-1 flex min-w-0 items-center gap-3 rounded-lg px-2 py-2">
+                <div className="mb-1 flex min-w-0 items-center gap-3 rounded-md px-2 py-2">
                   {sessionUser.avatarUrl ? (
                     <img
                       src={sessionUser.avatarUrl}
                       alt=""
-                      className="h-9 w-9 rounded-full object-cover ring-1 ring-white/20 dark:ring-black/15"
+                      className="h-9 w-9 rounded-full object-cover ring-1 ring-border"
                     />
                   ) : (
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground ring-1 ring-white/20 dark:ring-black/15">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground ring-1 ring-border">
                       {accountInitial}
                     </span>
                   )}
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-bold leading-tight text-white dark:text-black">
+                    <p className="truncate text-sm font-bold leading-tight text-popover-foreground">
                       {accountName}
                     </p>
-                    <p className="mt-0.5 truncate text-xs font-semibold text-zinc-200 dark:text-zinc-800">
+                    <p className="mt-0.5 truncate text-xs font-semibold text-muted-foreground">
                       @{sessionUser.login}
                     </p>
                   </div>
                 </div>
-                <DropdownMenuSeparator className="mx-1 my-1 bg-white/10 dark:bg-black/10" />
-                <DropdownMenuItem asChild className="cursor-pointer rounded-lg px-2 py-2 text-xs font-semibold text-white focus:bg-white/10 focus:text-white dark:text-black dark:focus:bg-black/10 dark:focus:text-black">
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild className="cursor-pointer font-semibold">
                   <a href={githubProfileHref} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between gap-3">
                     <span>GitHub profile</span>
                     <ChevronRight size={13} strokeWidth={2.35} className="opacity-60" />
                   </a>
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  className="cursor-pointer gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-white focus:bg-white/10 focus:text-white dark:text-black dark:focus:bg-black/10 dark:focus:text-black"
+                  className="cursor-pointer gap-2 font-semibold"
                   onClick={async () => {
                     await api.logout();
                     location.href = '/login';
