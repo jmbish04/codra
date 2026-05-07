@@ -1,4 +1,4 @@
-import { defaultRepoConfig, type RepoConfig } from '@shared/schema';
+import { defaultRepoConfig, normalizeRepoModelConfig, type RepoConfig } from '@shared/schema';
 import { REPO_CONFIG_CACHE_VERSION } from '@shared/config';
 import type { AppBindings } from '@server/env';
 import { getRepoConfigRecord, syncRepoConfig } from '@server/db/repo-configs';
@@ -33,7 +33,7 @@ const SERVER_DEFAULT_GLOBAL_CONFIG: RepoConfig['model'] = {
     },
     {
       max_lines: 100,
-      model: '@cf/moonshotai/kimi-k2.5',
+      model: '@cf/moonshotai/kimi-k2.6',
       fallbacks: ['@cf/zai-org/glm-4.7-flash'],
     },
   ],
@@ -49,13 +49,13 @@ function hasRepoModelOverride(existing: Awaited<ReturnType<typeof getRepoConfigR
 
 export async function getGlobalConfig(env: Pick<AppBindings, 'APP_KV'>): Promise<RepoConfig['model']> {
   const cached = await env.APP_KV.get(GLOBAL_CONFIG_KEY, 'json');
-  if (cached) return cached as RepoConfig['model'];
+  if (cached) return normalizeRepoModelConfig(cached as RepoConfig['model']);
 
   return SERVER_DEFAULT_GLOBAL_CONFIG;
 }
 
 export async function updateGlobalConfig(env: Pick<AppBindings, 'APP_KV'>, config: RepoConfig['model']) {
-  await env.APP_KV.put(GLOBAL_CONFIG_KEY, JSON.stringify(config));
+  await env.APP_KV.put(GLOBAL_CONFIG_KEY, JSON.stringify(normalizeRepoModelConfig(config)));
   await invalidateAllRepoConfigCache(env);
 }
 

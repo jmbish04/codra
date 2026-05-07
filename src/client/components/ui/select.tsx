@@ -49,7 +49,7 @@ export function Select({
           <Button
             variant="outline"
             className={cn(
-              'h-9 w-full justify-between border-border/50 bg-background px-3 py-2 text-sm font-normal transition-all hover:bg-accent',
+              'h-9 w-full justify-between border-border/50 bg-background px-3 py-2 text-sm font-normal transition-all hover:bg-accent focus-visible:ring-0 focus-visible:ring-offset-0',
               !selectedOption && 'text-muted-foreground',
               triggerClassName
             )}

@@ -5,8 +5,9 @@ import { fileURLToPath } from 'node:url';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const migrationsDir = path.join(rootDir, 'db', 'migrations');
-const initialMigration = '001_initial.sql';
 const migrationLockId = 93741624;
+const kimiK25Model = '@cf/moonshotai/kimi-k2.5';
+const kimiK26Model = '@cf/moonshotai/kimi-k2.6';
 
 function parseEnvValue(value) {
   const trimmed = value.trim();
@@ -63,7 +64,7 @@ const sql = postgres(databaseUrl, {
   max: 1,
   fetch_types: false,
   prepare: false,
-  onnotice: false,
+  onnotice: () => {},
 });
 
 function query(sqlText, params = []) {
@@ -199,30 +200,16 @@ function splitSqlStatements(sqlText) {
 }
 
 async function ensureMigrationTable() {
+  if (await tableExists('schema_migrations')) {
+    return;
+  }
+
   await query(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
+    CREATE TABLE schema_migrations (
       name       TEXT PRIMARY KEY,
       applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `);
-}
-
-async function bootstrapLegacyDatabase(migrationFiles) {
-  const applied = await appliedMigrations();
-  if (applied.size > 0 || applied.has(initialMigration) || !migrationFiles.includes(initialMigration)) {
-    return;
-  }
-
-  const hasExistingSchema = await tableExists('jobs');
-  if (!hasExistingSchema) {
-    return;
-  }
-
-  await query(
-    'INSERT INTO schema_migrations (name) VALUES ($1) ON CONFLICT (name) DO NOTHING',
-    [initialMigration],
-  );
-  console.log(`Marked ${initialMigration} as applied for existing database.`);
 }
 
 async function runMigration(name) {
@@ -237,6 +224,86 @@ async function runMigration(name) {
   console.log(`Applied ${name}.`);
 }
 
+async function ensureModelCatalog() {
+  if (!(await tableExists('model_configs'))) {
+    return;
+  }
+
+  await query(
+    `
+      INSERT INTO model_configs (model_id, rpm, tpm, rpd, provider)
+      VALUES ($1, 10, 131072, 300, 'cloudflare')
+      ON CONFLICT (model_id) DO UPDATE SET
+        rpm = EXCLUDED.rpm,
+        tpm = EXCLUDED.tpm,
+        rpd = EXCLUDED.rpd,
+        provider = EXCLUDED.provider,
+        updated_at = now()
+    `,
+    [kimiK26Model],
+  );
+
+  await query('DELETE FROM model_configs WHERE model_id = $1', [kimiK25Model]);
+}
+
+async function normalizeRepoConfigs() {
+  if (!(await tableExists('repo_configs'))) {
+    return;
+  }
+
+  await query(`
+    CREATE OR REPLACE FUNCTION pg_temp.replace_deprecated_model(input jsonb, old_value text, new_value text)
+    RETURNS jsonb
+    LANGUAGE sql
+    IMMUTABLE
+    AS $$
+      SELECT CASE jsonb_typeof(input)
+        WHEN 'string' THEN CASE WHEN input #>> '{}' = old_value THEN to_jsonb(new_value) ELSE input END
+        WHEN 'array' THEN COALESCE(
+          (
+            SELECT jsonb_agg(pg_temp.replace_deprecated_model(value, old_value, new_value) ORDER BY ord)
+            FROM jsonb_array_elements(input) WITH ORDINALITY AS item(value, ord)
+          ),
+          '[]'::jsonb
+        )
+        WHEN 'object' THEN COALESCE(
+          (
+            SELECT jsonb_object_agg(key, pg_temp.replace_deprecated_model(value, old_value, new_value))
+            FROM jsonb_each(input)
+          ),
+          '{}'::jsonb
+        )
+        ELSE input
+      END
+    $$
+  `);
+
+  await query(
+    `
+      UPDATE repo_configs
+      SET
+        main_model = CASE WHEN main_model = $1 THEN $2 ELSE main_model END,
+        fallback_models = CASE
+          WHEN fallback_models IS NULL THEN NULL
+          ELSE pg_temp.replace_deprecated_model(fallback_models, $1, $2)
+        END,
+        size_overrides = CASE
+          WHEN size_overrides IS NULL THEN NULL
+          ELSE pg_temp.replace_deprecated_model(size_overrides, $1, $2)
+        END,
+        parsed_json = CASE
+          WHEN parsed_json IS NULL THEN NULL
+          ELSE pg_temp.replace_deprecated_model(parsed_json, $1, $2)
+        END
+      WHERE main_model = $1
+        OR fallback_models::text LIKE '%' || $1 || '%'
+        OR size_overrides::text LIKE '%' || $1 || '%'
+        OR parsed_json::text LIKE '%' || $1 || '%'
+    `,
+    [kimiK25Model, kimiK26Model],
+  );
+}
+
 async function main() {
   await query('SELECT pg_advisory_lock($1)', [migrationLockId]);
   try {
@@ -246,14 +313,15 @@ async function main() {
       .filter((name) => /^\d+_.+\.sql$/.test(name))
       .sort();
 
-    await bootstrapLegacyDatabase(migrationFiles);
-
     const applied = await appliedMigrations();
     for (const migration of migrationFiles) {
       if (!applied.has(migration)) {
         await runMigration(migration);
       }
     }
+
+    await ensureModelCatalog();
+    await normalizeRepoConfigs();
 
     console.log('Database migrations are up to date.');
   } finally {

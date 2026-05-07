@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import { toast } from 'sonner';
 import { api } from '@client/lib/api';
 import { Skeleton } from '@client/components/shared/skeleton';
@@ -8,349 +9,347 @@ import { Alert } from '@client/components/ui/alert';
 import { PageHeader } from '@client/components/layout/page-header';
 import { Switch } from '@client/components/ui/switch';
 import {
-  GitBranch, RefreshCw, Layers, Save, ListPlus, Trash2,
-  ChevronDown, ArrowUpRight, RotateCcw, ExternalLink,
+  GitBranch,
+  RefreshCw,
+  Save,
+  ArrowUpRight,
+  RotateCcw,
+  Settings2,
+  X,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
 import type { RepoConfigRecord } from '@shared/schema';
-import { ModelChain, MODELS } from '@client/components/features/models/model-chain';
+import {
+  describeModelRoute,
+  ModelRouteEditor,
+  type ModelRouteConfig,
+} from '@client/components/features/models/model-chain';
 
+const DEFAULT_GLOBAL_CONFIG: ModelRouteConfig = {
+  main: 'gemma-4-31b-it',
+  fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
+  size_overrides: [
+    {
+      max_lines: 300,
+      model: 'gemma-4-31b-it',
+      fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
+    },
+    {
+      max_lines: 100,
+      model: '@cf/moonshotai/kimi-k2.6',
+      fallbacks: ['@cf/zai-org/glm-4.7-flash'],
+    },
+  ],
+};
 
-
-// ─── RepoItem ─────────────────────────────────────────────────────────────
-interface RepoItemProps {
-  repo: RepoConfigRecord;
-  isExpanded: boolean;
-  onToggle: () => void;
-  onRefresh: () => void;
-  globalConfig: any;
+function repoId(repo: Pick<RepoConfigRecord, 'owner' | 'repo'>) {
+  return `${repo.owner}/${repo.repo}`;
 }
 
-function RepoItem({ repo, isExpanded, onToggle, onRefresh, globalConfig }: RepoItemProps) {
-  const [enabled, setEnabled] = useState(repo.enabled);
-  const [mainModel, setMainModel] = useState<string | null>(repo.mainModel);
-  const [fallbacks, setFallbacks] = useState<string[] | null>(repo.fallbackModels);
-  const [sizeOverrides, setSizeOverrides] = useState<any[] | null>(repo.sizeOverrides);
+function hasStoredModelStrategy(repo: RepoConfigRecord) {
+  return repo.mainModel !== null || repo.fallbackModels !== null || repo.sizeOverrides !== null;
+}
 
-  // Use repo config if it exists, otherwise fall back to global config
-  const defaultMain = globalConfig?.main || 'gemma-4-31b-it';
-  const defaultFallbacks = (globalConfig?.fallbacks && globalConfig.fallbacks.length > 0)
-    ? globalConfig.fallbacks
-    : ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'];
-  const defaultOverrides = (globalConfig?.size_overrides && globalConfig.size_overrides.length > 0)
-    ? globalConfig.size_overrides
-    : [
-        {
-          max_lines: 300,
-          model: 'gemma-4-31b-it',
-          fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
-        },
-        {
-          max_lines: 100,
-          model: '@cf/moonshotai/kimi-k2.5',
-          fallbacks: ['@cf/zai-org/glm-4.7-flash'],
-        },
-      ];
+function normalizeRoute(config: any): ModelRouteConfig {
+  return {
+    main: config?.main || DEFAULT_GLOBAL_CONFIG.main,
+    fallbacks: Array.isArray(config?.fallbacks) ? config.fallbacks : DEFAULT_GLOBAL_CONFIG.fallbacks,
+    size_overrides: Array.isArray(config?.size_overrides)
+      ? config.size_overrides
+      : DEFAULT_GLOBAL_CONFIG.size_overrides,
+  };
+}
 
-  const [saving, setSaving] = useState(false);
+function getGlobalRoute(globalConfig: any): ModelRouteConfig {
+  return normalizeRoute(globalConfig);
+}
+
+function getStoredRepoRoute(repo: RepoConfigRecord): ModelRouteConfig | null {
+  if (!hasStoredModelStrategy(repo)) return null;
+
+  return {
+    main: repo.mainModel ?? DEFAULT_GLOBAL_CONFIG.main,
+    fallbacks: repo.fallbackModels ?? DEFAULT_GLOBAL_CONFIG.fallbacks,
+    size_overrides: Array.isArray(repo.sizeOverrides) ? repo.sizeOverrides : DEFAULT_GLOBAL_CONFIG.size_overrides,
+  };
+}
+
+function routesEqual(a: ModelRouteConfig, b: ModelRouteConfig) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function hasMeaningfulCustomStrategy(repo: RepoConfigRecord, globalConfig: any) {
+  const storedRoute = getStoredRepoRoute(repo);
+  if (!storedRoute) return false;
+
+  return (
+    !routesEqual(storedRoute, getGlobalRoute(globalConfig)) &&
+    !routesEqual(storedRoute, DEFAULT_GLOBAL_CONFIG)
+  );
+}
+
+function getRepoRoute(repo: RepoConfigRecord, globalConfig: any): ModelRouteConfig {
+  if (!hasMeaningfulCustomStrategy(repo, globalConfig)) {
+    return getGlobalRoute(globalConfig);
+  }
+
+  return getStoredRepoRoute(repo) ?? getGlobalRoute(globalConfig);
+}
+
+function formatLastActivity(value: string | Date | null) {
+  if (!value) return null;
+  return new Date(value).toLocaleDateString();
+}
+
+interface RepoRowProps {
+  repo: RepoConfigRecord;
+  globalConfig: any;
+  togglePending: boolean;
+  onToggleEnabled: (repo: RepoConfigRecord, enabled: boolean) => void;
+  onEdit: (repo: RepoConfigRecord) => void;
+}
+
+function RepoRow({
+  repo,
+  globalConfig,
+  togglePending,
+  onToggleEnabled,
+  onEdit,
+}: RepoRowProps) {
+  const route = getRepoRoute(repo, globalConfig);
+  const custom = hasMeaningfulCustomStrategy(repo, globalConfig);
+  const lastActivity = formatLastActivity(repo.lastJobCreatedAt);
+
+  return (
+    <article className="surface surface-static-shadow min-w-0 px-3 py-3 sm:px-4">
+      <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(180px,1.1fr)_minmax(220px,1.4fr)_auto] lg:items-center">
+        <div className="flex min-w-0 items-center gap-3">
+          <span
+            className={cn(
+              'h-2.5 w-2.5 shrink-0 rounded-full',
+              repo.enabled ? 'bg-success' : 'bg-muted-foreground/35',
+            )}
+          />
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold text-foreground">
+              {repo.owner}/{repo.repo}
+            </h2>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <span
+                className={cn(
+                  'rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+                  repo.enabled
+                    ? 'border-success-border bg-success-bg text-success'
+                    : 'border-border bg-muted/40 text-muted-foreground',
+                )}
+              >
+                {repo.enabled ? 'Enabled' : 'Paused'}
+              </span>
+              <span
+                className={cn(
+                  'rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+                  custom
+                    ? 'border-primary/25 bg-primary/10 text-primary'
+                    : 'border-border bg-secondary text-secondary-foreground',
+                )}
+              >
+                {custom ? 'Custom strategy' : 'Global strategy'}
+              </span>
+              {lastActivity && (
+                <span className="text-[11px] text-muted-foreground">
+                  Last {lastActivity}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <p className="min-w-0 truncate text-xs text-muted-foreground lg:px-2">
+          {describeModelRoute(route)}
+        </p>
+
+        <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
+          <div className="flex items-center gap-2 rounded-md border border-border/60 bg-background/60 px-2.5 py-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              Reviews
+            </span>
+            <Switch
+              checked={repo.enabled}
+              disabled={togglePending}
+              aria-label={`${repo.enabled ? 'Pause' : 'Enable'} reviews for ${repo.owner}/${repo.repo}`}
+              onCheckedChange={(nextEnabled) => onToggleEnabled(repo, nextEnabled)}
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onEdit(repo)}
+            className="h-8 shrink-0 gap-1.5"
+          >
+            <Settings2 size={13} />
+            Edit
+          </Button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+interface RepoModelModalProps {
+  repo: RepoConfigRecord | null;
+  globalConfig: any;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onModelApplied: (repo: RepoConfigRecord, route: ModelRouteConfig) => void;
+  onModelReset: (repo: RepoConfigRecord) => void;
+}
+
+function RepoModelModal({
+  repo,
+  globalConfig,
+  open,
+  onOpenChange,
+  onModelApplied,
+  onModelReset,
+}: RepoModelModalProps) {
+  const selectedRepoId = repo ? repoId(repo) : null;
+  const globalRouteKey = useMemo(
+    () => JSON.stringify(getGlobalRoute(globalConfig)),
+    [globalConfig],
+  );
+  const [route, setRoute] = useState<ModelRouteConfig>(DEFAULT_GLOBAL_CONFIG);
+  const [initialRoute, setInitialRoute] = useState<ModelRouteConfig>(DEFAULT_GLOBAL_CONFIG);
+  const [saving, setSaving] = useState<'apply' | 'reset' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Update local state if props change (important for Reset)
   useEffect(() => {
-    setEnabled(repo.enabled);
-    setMainModel(repo.mainModel);
-    setFallbacks(repo.fallbackModels);
-    setSizeOverrides(repo.sizeOverrides);
-  }, [repo]);
-
-  const handleSave = async (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setSaving(true);
+    if (!repo) return;
+    const nextRoute = getRepoRoute(repo, globalConfig);
+    setRoute(nextRoute);
+    setInitialRoute(nextRoute);
+    setSaving(null);
     setError(null);
-    const tid = toast.loading(`Saving config for ${repo.owner}/${repo.repo}…`);
+  }, [selectedRepoId, globalRouteKey]);
+
+  const dirty = useMemo(() => !routesEqual(route, initialRoute), [initialRoute, route]);
+  const hasStoredStrategy = repo ? hasStoredModelStrategy(repo) : false;
+
+  const handleApply = async () => {
+    if (!repo || !dirty) return;
+    setSaving('apply');
+    setError(null);
+    const tid = toast.loading(`Saving model strategy for ${repo.owner}/${repo.repo}...`);
     try {
       await api.updateRepoConfig(repo.owner, repo.repo, {
-        enabled,
         model: {
-          main: mainModel,
-          fallbacks: fallbacks,
-          size_overrides: sizeOverrides,
+          main: route.main,
+          fallbacks: route.fallbacks,
+          size_overrides: route.size_overrides,
         },
       });
-      toast.success('Config saved', {
-        id: tid,
-        description: `${repo.owner}/${repo.repo} updated successfully`,
-      });
-      onRefresh();
+      setInitialRoute(route);
+      onModelApplied(repo, route);
+      toast.success('Model strategy saved', { id: tid });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to save';
+      const msg = err instanceof Error ? err.message : 'Failed to save model strategy.';
       setError(msg);
-      toast.error('Failed to save config', { id: tid, description: msg });
+      toast.error('Save failed', { id: tid, description: msg });
     } finally {
-      setSaving(false);
+      setSaving(null);
     }
   };
 
-  const handleReset = async (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setSaving(true);
-    const tid = toast.loading(`Resetting ${repo.owner}/${repo.repo} to defaults…`);
+  const handleReset = async () => {
+    if (!repo) return;
+    setSaving('reset');
+    setError(null);
+    const tid = toast.loading(`Using global strategy for ${repo.owner}/${repo.repo}...`);
     try {
-      // By sending nulls, we tell the backend to use global defaults
       await api.updateRepoConfig(repo.owner, repo.repo, {
-        enabled,
         model: {
           main: null,
           fallbacks: null,
           size_overrides: null,
         },
       });
-      toast.success('Reset to defaults', {
-        id: tid,
-        description: `${repo.owner}/${repo.repo} now follows global strategy`,
-      });
-      onRefresh();
+      const globalRoute = getGlobalRoute(globalConfig);
+      setRoute(globalRoute);
+      setInitialRoute(globalRoute);
+      onModelReset(repo);
+      toast.success('Repo now uses global strategy', { id: tid });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Reset failed';
+      const msg = err instanceof Error ? err.message : 'Failed to reset model strategy.';
       setError(msg);
       toast.error('Reset failed', { id: tid, description: msg });
     } finally {
-      setSaving(false);
+      setSaving(null);
     }
   };
 
-  const currentSizeOverrides: any[] = sizeOverrides ?? defaultOverrides;
-
-  const addOverride = () =>
-    setSizeOverrides([
-      ...currentSizeOverrides,
-      { max_lines: 300, model: MODELS[0].value, fallbacks: [] },
-    ]);
-
-  const updateOverride = (index: number, primary: string, fbs: string[]) => {
-    const next = [...currentSizeOverrides];
-    next[index] = { ...next[index], model: primary, fallbacks: fbs };
-    setSizeOverrides(next);
-  };
-
-  const updateOverrideThreshold = (index: number, threshold: number) => {
-    const next = [...currentSizeOverrides];
-    next[index] = { ...next[index], max_lines: threshold };
-    setSizeOverrides(next);
-  };
-
-  const removeOverride = (index: number) =>
-    setSizeOverrides(currentSizeOverrides.filter((_: any, i: number) => i !== index));
-
   return (
-    <div
-      className={cn(
-        'surface surface-static-shadow overflow-hidden',
-        isExpanded && 'border-border',
-      )}
-    >
-      {/* ── Row header ───────────────────────────────── */}
-      <div
-        className={cn(
-          'flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 sm:px-5 py-4 cursor-pointer select-none transition-colors relative',
-          isExpanded ? 'bg-primary/[0.02]' : 'hover:bg-muted/30',
-        )}
-        onClick={onToggle}
-      >
-        <div className="flex items-start sm:items-center gap-3 flex-1 min-w-0 pr-6 sm:pr-0">
-          {/* Status dot */}
-          <div
-            className={cn(
-              'shrink-0 w-2 h-2 rounded-full mt-1.5 sm:mt-0',
-              enabled ? 'bg-success' : 'bg-muted-foreground/30',
-            )}
-          />
-
-          {/* Repo name + meta */}
-          <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 mb-0.5">
-              <span className="text-sm font-semibold text-foreground tracking-tight truncate max-w-[200px] sm:max-w-none">
-                {repo.owner}/{repo.repo}
-              </span>
-            {(!repo.mainModel && !repo.fallbackModels && !repo.sizeOverrides) ? (
-              <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-muted text-muted-foreground border border-border">
-                Global Strategy
-              </span>
-            ) : (
-              <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-primary/10 text-primary border border-primary/20">
-                Custom Config
-              </span>
-            )}
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-background/75 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in data-[state=closed]:fade-out" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[92vh] w-[calc(100vw-1.5rem)] max-w-5xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-2xl data-[state=open]:animate-in data-[state=open]:fade-in data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out data-[state=closed]:zoom-out-95">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-6">
+            <div className="min-w-0">
+              <Dialog.Title className="text-base font-semibold text-foreground">
+                Edit model strategy
+              </Dialog.Title>
+              <Dialog.Description className="mt-1 truncate text-sm text-muted-foreground">
+                {repo ? repoId(repo) : 'Repository routing'}
+              </Dialog.Description>
+            </div>
+            <Dialog.Close asChild>
+              <Button variant="ghost" size="icon" aria-label="Close modal" className="h-8 w-8 shrink-0">
+                <X size={15} />
+              </Button>
+            </Dialog.Close>
           </div>
-          <p className="text-xs text-muted-foreground/60 font-mono">
-            Last activity:{' '}
-            {repo.lastJobCreatedAt
-              ? new Date(repo.lastJobCreatedAt).toLocaleDateString()
-              : 'Never'}
-          </p>
-        </div>
-        </div>
 
-        {/* Toggle */}
-        <div className="flex items-center gap-2.5 pl-5 sm:pl-0 mt-2 sm:mt-0 sm:pr-5 sm:border-r border-border/40" onClick={e => e.stopPropagation()}>
-          <span className={cn(
-            'text-[10px] font-bold uppercase tracking-widest transition-colors',
-            enabled ? 'text-success' : 'text-muted-foreground/40',
-          )}>
-            {enabled ? 'On' : 'Off'}
-          </span>
-          <Switch checked={enabled} onCheckedChange={setEnabled} />
-        </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+            {error && <Alert variant="destructive" className="mb-4">{error}</Alert>}
+            <ModelRouteEditor value={route} onChange={setRoute} density="comfortable" />
+          </div>
 
-        <ChevronDown
-          size={15}
-          className={cn(
-            'shrink-0 text-muted-foreground/40 transition-transform duration-300 absolute right-4 top-4 sm:relative sm:top-0 sm:right-0',
-            isExpanded && 'rotate-180',
-          )}
-        />
-      </div>
-
-      {/* ── Expanded config panel ─────────────────────── */}
-      {isExpanded && (
-        <div className="border-t border-border/50 animate-in fade-in slide-in-from-top-2 duration-200">
-          {error && (
-            <div className="px-5 pt-4">
-              <Alert variant="destructive">{error}</Alert>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_200px] divide-y lg:divide-y-0 lg:divide-x divide-border/50">
-            {/* ── Left: Model chains ── */}
-            <div className="px-5 py-5 space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Layers size={13} strokeWidth={1.75} className="text-primary" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                    Model Settings
-                  </span>
-                  <a
-                    href="/settings"
-                    className="text-[10px] font-semibold text-primary/60 hover:text-primary flex items-center gap-0.5 transition-colors"
-                    onClick={e => e.stopPropagation()}
-                  >
-                    Global strategy <ArrowUpRight size={9} />
-                  </a>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={(e) => { e.stopPropagation(); addOverride(); }}
-                  className="h-7 text-[10px] font-semibold gap-1.5"
-                >
-                  <ListPlus size={12} />
-                  Add Tier
-                </Button>
-              </div>
-
-              {/* Baseline */}
-              <div className="relative border border-primary/20 rounded-md px-4 py-4 bg-primary/[0.01]">
-                <span className="absolute -top-2.5 left-3 bg-card px-2 text-[9px] font-bold uppercase tracking-widest text-primary border border-primary/20 rounded">
-                  Baseline{currentSizeOverrides.length > 0 && ` · >${Math.max(...currentSizeOverrides.map((o: any) => o.max_lines))} lines`}
-                </span>
-                <ModelChain
-                  primary={mainModel ?? defaultMain}
-                  fallbacks={fallbacks ?? defaultFallbacks}
-                  onChange={(p, fbs) => { setMainModel(p); setFallbacks(fbs); }}
-                />
-              </div>
-
-              {/* Per-size overrides */}
-              {currentSizeOverrides.map((ov: any, i: number) => (
-                <div key={i} className="relative border border-border rounded-md px-4 py-4 bg-muted/5">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); removeOverride(i); }}
-                    className="absolute top-2 right-2 h-7 w-7 text-muted-foreground/30 hover:text-danger hover:bg-danger/5"
-                  >
-                    <Trash2 size={13} />
-                  </Button>
-
-                  <div className="grid grid-cols-1 md:grid-cols-[160px_1fr] gap-6">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                        Max Lines
-                      </label>
-                      <div className="flex items-center gap-2 h-9 px-3 bg-background border border-border rounded-md focus-within:ring-1 focus-within:ring-ring">
-                        <input
-                          type="number"
-                          value={ov.max_lines}
-                          onChange={e => updateOverrideThreshold(i, parseInt(e.target.value))}
-                          className="flex-1 bg-transparent text-sm font-semibold outline-none"
-                        />
-                        <span className="text-[10px] text-muted-foreground/50 font-mono shrink-0">loc</span>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground/50 leading-relaxed">
-                        Files up to {ov.max_lines} lines.
-                      </p>
-                    </div>
-                    <ModelChain
-                      primary={ov.model}
-                      fallbacks={ov.fallbacks || []}
-                      onChange={(p, fbs) => updateOverride(i, p, fbs)}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* ── Right: Actions ── */}
-            <div className="px-5 py-5 flex flex-col gap-3">
-              <Button
-                onClick={() => handleSave()}
-                disabled={saving}
-                className="w-full gap-2"
-              >
-                {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
-                Apply Changes
+          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border bg-muted/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <Button
+              variant="ghost"
+              onClick={handleReset}
+              disabled={!repo || saving !== null || !hasStoredStrategy}
+              className="gap-2 text-muted-foreground hover:text-foreground"
+            >
+              {saving === 'reset' ? <RefreshCw size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+              Use global
+            </Button>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Dialog.Close asChild>
+                <Button variant="outline" disabled={saving !== null}>Cancel</Button>
+              </Dialog.Close>
+              <Button onClick={handleApply} disabled={!dirty || saving !== null} className="gap-2">
+                {saving === 'apply' ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+                Apply
               </Button>
-
-              <Button
-                variant="ghost"
-                onClick={handleReset}
-                disabled={saving}
-                className="w-full gap-2 text-muted-foreground hover:text-foreground"
-              >
-                <RotateCcw size={13} />
-                Reset to Defaults
-              </Button>
-
-              <div className="mt-auto pt-4 border-t border-border/40">
-                <a
-                  href={`https://github.com/${repo.owner}/${repo.repo}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-between text-xs text-muted-foreground hover:text-foreground transition-colors group"
-                >
-                  <span className="font-medium">View on GitHub</span>
-                  <ExternalLink size={12} className="text-muted-foreground/40 group-hover:text-primary transition-colors" />
-                </a>
-              </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
-// ─── ReposPage ────────────────────────────────────────────────────────────
 export function ReposPage() {
   const [repos, setRepos] = useState<RepoConfigRecord[]>([]);
   const [globalConfig, setGlobalConfig] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingRepoId, setEditingRepoId] = useState<string | null>(null);
+  const [pendingToggles, setPendingToggles] = useState<Set<string>>(() => new Set());
 
-  const loadRepos = (expandedRepoId?: string) => {
+  const editingRepo = repos.find(repo => repoId(repo) === editingRepoId) ?? null;
+
+  const loadRepos = () => {
     setLoading(true);
     Promise.all([
       api.getRepos(),
@@ -359,12 +358,6 @@ export function ReposPage() {
       .then(([reposRes, globalRes]) => {
         setRepos(reposRes.repos);
         setGlobalConfig(globalRes.config);
-
-        if (expandedRepoId) {
-          setExpandedId(expandedRepoId);
-        } else if (reposRes.repos.length > 0 && !expandedId) {
-          setExpandedId(`${reposRes.repos[0].owner}/${reposRes.repos[0].repo}`);
-        }
         setLoading(false);
       })
       .catch(e => {
@@ -375,11 +368,55 @@ export function ReposPage() {
 
   useEffect(() => { loadRepos(); }, []);
 
+  const mergeRepo = (targetId: string, updates: Partial<RepoConfigRecord>) => {
+    setRepos(current =>
+      current.map(repo =>
+        repoId(repo) === targetId ? { ...repo, ...updates } : repo,
+      ),
+    );
+  };
+
+  const handleToggleEnabled = async (repo: RepoConfigRecord, nextEnabled: boolean) => {
+    const targetId = repoId(repo);
+    setPendingToggles(current => new Set(current).add(targetId));
+    const tid = toast.loading(`${nextEnabled ? 'Enabling' : 'Pausing'} ${targetId}...`);
+    try {
+      await api.updateRepoConfig(repo.owner, repo.repo, { enabled: nextEnabled });
+      mergeRepo(targetId, { enabled: nextEnabled });
+      toast.success(nextEnabled ? 'Reviews enabled' : 'Reviews paused', { id: tid, description: targetId });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to update repository.';
+      toast.error('Update failed', { id: tid, description: msg });
+    } finally {
+      setPendingToggles(current => {
+        const next = new Set(current);
+        next.delete(targetId);
+        return next;
+      });
+    }
+  };
+
+  const handleModelApplied = (repo: RepoConfigRecord, route: ModelRouteConfig) => {
+    mergeRepo(repoId(repo), {
+      mainModel: route.main,
+      fallbackModels: route.fallbacks,
+      sizeOverrides: route.size_overrides,
+    });
+  };
+
+  const handleModelReset = (repo: RepoConfigRecord) => {
+    mergeRepo(repoId(repo), {
+      mainModel: null,
+      fallbackModels: null,
+      sizeOverrides: null,
+    });
+  };
+
   const handleSync = async () => {
     if (syncing) return;
     setSyncing(true);
     setError(null);
-    const tid = toast.loading('Syncing repositories from GitHub…');
+    const tid = toast.loading('Syncing repositories from GitHub...');
     try {
       const result = await api.syncRepos();
       const syncedCount = result?.synced?.length ?? 0;
@@ -402,7 +439,7 @@ export function ReposPage() {
       <section className="page-enter flex flex-col gap-6">
         <PageHeader category="Repositories" title="Repository settings" />
         <div className="surface overflow-hidden">
-          {Array.from({ length: 3 }).map((_, i) => (
+          {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="px-5 py-4 border-b border-border/50 last:border-0">
               <Skeleton height={20} />
             </div>
@@ -419,7 +456,7 @@ export function ReposPage() {
         title="Repository settings"
         description={!loading && `${repos.length} ${repos.length === 1 ? 'repository' : 'repositories'} with Codra access`}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -453,22 +490,33 @@ export function ReposPage() {
           description="Sync your GitHub App installation to import repositories."
         />
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex min-w-0 flex-col gap-2.5">
           {repos.map(repo => {
-            const id = `${repo.owner}/${repo.repo}`;
+            const id = repoId(repo);
             return (
-              <RepoItem
+              <RepoRow
                 key={id}
                 repo={repo}
-                isExpanded={expandedId === id}
-                onToggle={() => setExpandedId(expandedId === id ? null : id)}
-                onRefresh={() => loadRepos(id)}
                 globalConfig={globalConfig}
+                togglePending={pendingToggles.has(id)}
+                onToggleEnabled={handleToggleEnabled}
+                onEdit={(nextRepo) => setEditingRepoId(repoId(nextRepo))}
               />
             );
           })}
         </div>
       )}
+
+      <RepoModelModal
+        repo={editingRepo}
+        globalConfig={globalConfig}
+        open={editingRepo !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingRepoId(null);
+        }}
+        onModelApplied={handleModelApplied}
+        onModelReset={handleModelReset}
+      />
     </section>
   );
 }

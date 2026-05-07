@@ -298,6 +298,38 @@ export const statsSchema = z.object({
 export type ParsedReviewComment = z.infer<typeof parsedReviewCommentSchema>;
 export type FileReviewModelOutput = z.infer<typeof fileReviewModelOutputSchema>;
 export type RepoConfig = z.infer<typeof repoConfigSchema>;
+export const KIMI_K2_5_MODEL = '@cf/moonshotai/kimi-k2.5';
+export const KIMI_K2_6_MODEL = '@cf/moonshotai/kimi-k2.6';
+export const DEPRECATED_MODEL_ALIASES: Record<string, string> = {
+  [KIMI_K2_5_MODEL]: KIMI_K2_6_MODEL,
+};
+
+export function normalizeModelId(model: string) {
+  return DEPRECATED_MODEL_ALIASES[model] ?? model;
+}
+
+export function normalizeRepoModelConfig(model: RepoConfig['model']): RepoConfig['model'] {
+  return {
+    ...model,
+    main: model.main === null ? null : normalizeModelId(model.main),
+    fallbacks: model.fallbacks === null ? null : model.fallbacks.map(normalizeModelId),
+    size_overrides: model.size_overrides === null || model.size_overrides === undefined
+      ? model.size_overrides
+      : model.size_overrides.map((tier) => ({
+          ...tier,
+          model: normalizeModelId(tier.model),
+          fallbacks: tier.fallbacks?.map(normalizeModelId),
+        })),
+  };
+}
+
+export function normalizeRepoConfig(config: RepoConfig): RepoConfig {
+  return {
+    ...config,
+    model: normalizeRepoModelConfig(config.model),
+  };
+}
+
 export type ReviewJobMessage = z.infer<typeof reviewJobMessageSchema>;
 export type JobSummary = z.infer<typeof jobSummarySchema>;
 export type FileReviewRecord = z.infer<typeof fileReviewRecordSchema>;

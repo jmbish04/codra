@@ -1,6 +1,6 @@
 import type { AppBindings } from '@server/env';
 import { queryRows } from './client';
-import { modelConfigSchema, type ModelConfig } from '@shared/schema';
+import { KIMI_K2_5_MODEL, modelConfigSchema, type ModelConfig } from '@shared/schema';
 
 type ModelConfigRow = {
   model_id: string;
@@ -25,7 +25,8 @@ function mapModelConfig(row: ModelConfigRow): ModelConfig {
 export async function listModelConfigs(env: Pick<AppBindings, 'HYPERDRIVE'>): Promise<ModelConfig[]> {
   const rows = await queryRows<ModelConfigRow>(
     env,
-    `SELECT model_id, rpm, tpm, rpd, provider, updated_at FROM model_configs ORDER BY model_id ASC`
+    `SELECT model_id, rpm, tpm, rpd, provider, updated_at FROM model_configs WHERE model_id <> $1 ORDER BY model_id ASC`,
+    [KIMI_K2_5_MODEL],
   );
   return rows.map(mapModelConfig);
 }

@@ -1,6 +1,6 @@
 import type { AppBindings } from '@server/env';
 import { parseJsonColumn, queryRows } from './client';
-import { defaultRepoConfig, repoConfigRecordSchema, repoConfigSchema, type RepoConfig } from '@shared/schema';
+import { defaultRepoConfig, normalizeRepoConfig, repoConfigRecordSchema, repoConfigSchema, type RepoConfig } from '@shared/schema';
 import { getOrCreateRepository } from './repositories';
 
 type RepoConfigRow = {
@@ -18,7 +18,7 @@ type RepoConfigRow = {
 };
 
 function mapRepo(row: RepoConfigRow) {
-  const parsedJson = repoConfigSchema.parse(parseJsonColumn(row.parsed_json, defaultRepoConfig));
+  const parsedJson = normalizeRepoConfig(repoConfigSchema.parse(parseJsonColumn(row.parsed_json, defaultRepoConfig)));
   return repoConfigRecordSchema.parse({
     installationId: row.installation_id,
     owner: row.owner,
@@ -50,7 +50,8 @@ export async function upsertRepoConfig(
     repo: input.repo,
   });
 
-  const model = input.parsedJson.model;
+  const parsedJson = normalizeRepoConfig(input.parsedJson);
+  const model = parsedJson.model;
   await queryRows(
     env,
     `
@@ -67,7 +68,7 @@ export async function upsertRepoConfig(
     `,
     [
       repositoryId,
-      JSON.stringify(input.parsedJson),
+      JSON.stringify(parsedJson),
       model?.main ?? null,
       model?.fallbacks ? JSON.stringify(model.fallbacks) : null,
       model?.size_overrides ? JSON.stringify(model.size_overrides) : null,

@@ -8,6 +8,7 @@ import type { RepoConfig } from '@shared/schema';
 import type { TokenTracker } from '../core/token-tracker';
 import type { ModelResponse } from '../models/types';
 import { logger } from '../core/logger';
+import { normalizeModelId } from '@shared/schema';
 
 const DEFAULT_GOOGLE_FALLBACK = 'gemma-4-31b-it';
 const MODEL_ALIASES: Record<string, string> = {
@@ -20,7 +21,7 @@ function isCloudflareModel(model: string) {
 }
 
 function normalizeModel(model: string) {
-  return MODEL_ALIASES[model] ?? model;
+  return normalizeModelId(MODEL_ALIASES[model] ?? model);
 }
 
 function uniqueModels(models: string[]) {

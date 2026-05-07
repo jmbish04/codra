@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@client/lib/api';
 import { PageHeader } from '@client/components/layout/page-header';
@@ -6,14 +6,23 @@ import { Button } from '@client/components/ui/button';
 import { Alert } from '@client/components/ui/alert';
 import { Skeleton } from '@client/components/shared/skeleton';
 import {
-  Cpu, Save, ShieldAlert, Layers, ListPlus, Trash2, RefreshCw,
+  Cpu,
+  Save,
+  ShieldAlert,
+  Layers,
+  RefreshCw,
+  Gauge,
 } from 'lucide-react';
 import type { ModelConfig } from '@shared/schema';
-import { ModelChain, MODELS } from '@client/components/features/models/model-chain';
+import {
+  getModelLabel,
+  getProviderLabel,
+  ModelRouteEditor,
+  type ModelRouteConfig,
+} from '@client/components/features/models/model-chain';
 import { cn } from '@client/lib/utils';
 
-// ─── Default global config matching the expected dashboard defaults ───────────
-const DEFAULT_GLOBAL_CONFIG = {
+const DEFAULT_GLOBAL_CONFIG: ModelRouteConfig = {
   main: 'gemma-4-31b-it',
   fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
   size_overrides: [
@@ -24,19 +33,56 @@ const DEFAULT_GLOBAL_CONFIG = {
     },
     {
       max_lines: 100,
-      model: '@cf/moonshotai/kimi-k2.5',
+      model: '@cf/moonshotai/kimi-k2.6',
       fallbacks: ['@cf/zai-org/glm-4.7-flash'],
     },
   ],
 };
 
-// ─── SettingsPage ────────────────────────────────────────────────────────
+function normalizeGlobalConfig(config: any): ModelRouteConfig {
+  if (!config || !config.main) return DEFAULT_GLOBAL_CONFIG;
+  return {
+    main: config.main,
+    fallbacks: config.fallbacks?.length ? config.fallbacks : DEFAULT_GLOBAL_CONFIG.fallbacks,
+    size_overrides: config.size_overrides ?? DEFAULT_GLOBAL_CONFIG.size_overrides,
+  };
+}
+
+function routeEqual(a: ModelRouteConfig | null, b: ModelRouteConfig | null) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function quotaEqual(a?: ModelConfig, b?: ModelConfig) {
+  return Boolean(a && b && a.rpm === b.rpm && a.rpd === b.rpd && a.tpm === b.tpm);
+}
+
+function quotaPayload(config: ModelConfig) {
+  return {
+    rpm: config.rpm,
+    rpd: config.rpd,
+    tpm: config.tpm,
+    provider: config.provider,
+  };
+}
+
 export function SettingsPage() {
   const [configs, setConfigs] = useState<ModelConfig[]>([]);
-  const [globalConfig, setGlobalConfig] = useState<any>(null);
+  const [savedConfigs, setSavedConfigs] = useState<ModelConfig[]>([]);
+  const [globalConfig, setGlobalConfig] = useState<ModelRouteConfig | null>(null);
+  const [savedGlobalConfig, setSavedGlobalConfig] = useState<ModelRouteConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const globalDirty = useMemo(
+    () => !routeEqual(globalConfig, savedGlobalConfig),
+    [globalConfig, savedGlobalConfig],
+  );
+
+  const dirtyConfigs = useMemo(
+    () => configs.filter(cfg => !quotaEqual(cfg, savedConfigs.find(saved => saved.modelId === cfg.modelId))),
+    [configs, savedConfigs],
+  );
 
   const loadConfigs = async () => {
     try {
@@ -44,23 +90,15 @@ export function SettingsPage() {
         api.getModelConfigs(),
         api.getGlobalConfig(),
       ]);
+      const nextGlobalConfig = normalizeGlobalConfig(globalRes.config);
       setConfigs(modelsRes.configs);
-
-      // If global config has no main model set, seed with defaults
-      const cfg = globalRes.config;
-      if (!cfg || !cfg.main) {
-        setGlobalConfig(DEFAULT_GLOBAL_CONFIG);
-      } else {
-        // Ensure fallbacks array is always populated with defaults if empty
-        setGlobalConfig({
-          ...cfg,
-          fallbacks: cfg.fallbacks?.length ? cfg.fallbacks : DEFAULT_GLOBAL_CONFIG.fallbacks,
-          size_overrides: cfg.size_overrides ?? DEFAULT_GLOBAL_CONFIG.size_overrides,
-        });
-      }
-    } catch (e: any) {
-      setError(e.message);
-      toast.error('Failed to load settings', { description: e.message });
+      setSavedConfigs(modelsRes.configs);
+      setGlobalConfig(nextGlobalConfig);
+      setSavedGlobalConfig(nextGlobalConfig);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load settings';
+      setError(msg);
+      toast.error('Failed to load settings', { description: msg });
     } finally {
       setLoading(false);
     }
@@ -69,14 +107,16 @@ export function SettingsPage() {
   useEffect(() => { loadConfigs(); }, []);
 
   const handleGlobalUpdate = async () => {
+    if (!globalConfig || !globalDirty) return;
     setSaving('global');
     setError(null);
-    const tid = toast.loading('Saving global strategy…');
+    const tid = toast.loading('Saving global strategy...');
     try {
       await api.updateGlobalConfig(globalConfig);
+      setSavedGlobalConfig(globalConfig);
       toast.success('Global strategy saved', {
         id: tid,
-        description: `Primary model: ${MODELS.find(m => m.value === globalConfig.main)?.label ?? globalConfig.main}`,
+        description: `Primary model: ${getModelLabel(globalConfig.main)}`,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Update failed';
@@ -87,18 +127,21 @@ export function SettingsPage() {
     }
   };
 
-  const handleUpdate = async (id: string, updates: Partial<ModelConfig>) => {
+  const markConfigSaved = (id: string, saved: ModelConfig) => {
+    setConfigs(current => current.map(cfg => (cfg.modelId === id ? saved : cfg)));
+    setSavedConfigs(current => current.map(cfg => (cfg.modelId === id ? saved : cfg)));
+  };
+
+  const handleUpdate = async (id: string) => {
+    const current = configs.find(c => c.modelId === id);
+    if (!current) return;
     setSaving(id);
     setError(null);
-    const tid = toast.loading(`Updating ${id}…`);
+    const tid = toast.loading(`Updating ${id}...`);
     try {
-      const current = configs.find(c => c.modelId === id);
-      if (!current) return;
-      const next = { ...current, ...updates };
-      await api.updateModelConfig(id, next);
-      setConfigs(configs.map(c =>
-        c.modelId === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c,
-      ));
+      await api.updateModelConfig(id, quotaPayload(current));
+      const saved = { ...current, updatedAt: new Date().toISOString() };
+      markConfigSaved(id, saved);
       toast.success('Model quota updated', { id: tid, description: id });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Update failed';
@@ -109,29 +152,35 @@ export function SettingsPage() {
     }
   };
 
-  const updateGlobalBaseline = (p: string, fbs: string[]) => {
-    setGlobalConfig({ ...globalConfig, main: p, fallbacks: fbs });
+  const handleSaveAllQuotas = async () => {
+    if (dirtyConfigs.length === 0) return;
+    setSaving('quotas');
+    setError(null);
+    const tid = toast.loading(`Saving ${dirtyConfigs.length} quota ${dirtyConfigs.length === 1 ? 'change' : 'changes'}...`);
+    try {
+      await Promise.all(dirtyConfigs.map(cfg => api.updateModelConfig(cfg.modelId, quotaPayload(cfg))));
+      const now = new Date().toISOString();
+      const dirtyIds = new Set(dirtyConfigs.map(cfg => cfg.modelId));
+      setConfigs(current => current.map(cfg => (dirtyIds.has(cfg.modelId) ? { ...cfg, updatedAt: now } : cfg)));
+      setSavedConfigs(current =>
+        configs.map(cfg => (dirtyIds.has(cfg.modelId) ? { ...cfg, updatedAt: now } : current.find(saved => saved.modelId === cfg.modelId) ?? cfg)),
+      );
+      toast.success('Quotas saved', { id: tid });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Update failed';
+      setError(msg);
+      toast.error('Failed to save quotas', { id: tid, description: msg });
+    } finally {
+      setSaving(null);
+    }
   };
 
-  const addGlobalOverride = () => {
-    setGlobalConfig({
-      ...globalConfig,
-      size_overrides: [
-        ...(globalConfig?.size_overrides || []),
-        { max_lines: 300, model: MODELS[0].value, fallbacks: [] },
-      ],
-    });
-  };
-
-  const updateGlobalOverride = (idx: number, updates: any) => {
-    const next = [...(globalConfig.size_overrides || [])];
-    next[idx] = { ...next[idx], ...updates };
-    setGlobalConfig({ ...globalConfig, size_overrides: next });
-  };
-
-  const removeGlobalOverride = (idx: number) => {
-    const next = (globalConfig.size_overrides || []).filter((_: any, i: number) => i !== idx);
-    setGlobalConfig({ ...globalConfig, size_overrides: next });
+  const updateQuota = (id: string, field: 'rpm' | 'rpd' | 'tpm', value: number) => {
+    setConfigs(current =>
+      current.map(cfg =>
+        cfg.modelId === id ? { ...cfg, [field]: Math.max(1, value) } : cfg,
+      ),
+    );
   };
 
   return (
@@ -149,102 +198,40 @@ export function SettingsPage() {
         </Alert>
       )}
 
-      {/* ── Section 1: Global Model Settings ────── */}
-      <div className="flex flex-col gap-4">
-        {/* Section header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
-          <div className="flex items-center gap-2">
-            <Layers size={13} strokeWidth={1.75} className="text-primary" />
-            <h2 className="text-sm font-semibold text-foreground">Global Model Settings</h2>
-            <span className="text-xs text-muted-foreground">· Account-wide model chains &amp; complexity thresholds</span>
+      <section className="surface min-w-0 overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <Layers size={15} strokeWidth={1.9} />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold text-foreground">Global model strategy</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Account-wide baseline route and file-size tiers.
+              </p>
+            </div>
           </div>
           <Button
-            variant="outline"
             size="sm"
-            onClick={addGlobalOverride}
-            disabled={!globalConfig}
-            className="gap-1.5 h-7 text-[10px] font-semibold"
+            onClick={handleGlobalUpdate}
+            disabled={!globalDirty || saving !== null || !globalConfig}
+            className="h-8 shrink-0 gap-2"
           >
-            <ListPlus size={12} />
-            New Tier
+            {saving === 'global'
+              ? <RefreshCw size={14} className="animate-spin" />
+              : <Save size={14} />}
+            Save strategy
           </Button>
         </div>
 
-        {/* Content card */}
-        <div className="surface overflow-hidden">
+        <div className="min-w-0">
           {!loading && globalConfig ? (
-            <div>
-              {/* Baseline */}
-              <div className="px-5 py-5 border-b border-border/50">
-                <div className="relative border border-primary/20 rounded-md px-4 py-4 bg-primary/[0.01]">
-                  <span className="absolute -top-2.5 left-3 bg-card px-2 text-[9px] font-bold uppercase tracking-widest text-primary border border-primary/20 rounded">
-                    Baseline{globalConfig.size_overrides?.length > 0
-                      ? ` · >${Math.max(...globalConfig.size_overrides.map((o: any) => o.max_lines))} lines`
-                      : ''}
-                  </span>
-                  <ModelChain
-                    primary={globalConfig.main}
-                    fallbacks={globalConfig.fallbacks || []}
-                    onChange={updateGlobalBaseline}
-                  />
-                </div>
-              </div>
-
-              {/* Per-size overrides */}
-              {globalConfig.size_overrides?.map((ov: any, i: number) => (
-                <div key={i} className="px-5 py-5 border-b border-border/50">
-                  <div className="relative border border-border rounded-md px-4 py-4 bg-muted/5">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      type="button"
-                      onClick={(e) => { e.preventDefault(); removeGlobalOverride(i); }}
-                      className="absolute top-2 right-2 h-7 w-7 text-muted-foreground/30 hover:text-danger hover:bg-danger/5"
-                    >
-                      <Trash2 size={13} />
-                    </Button>
-
-                    <div className="grid grid-cols-1 xl:grid-cols-[160px_1fr] gap-6">
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                          Max Lines
-                        </label>
-                        <div className="flex items-center gap-2 h-9 px-3 bg-background border border-border rounded-md focus-within:ring-1 focus-within:ring-ring">
-                          <input
-                            type="number"
-                            value={ov.max_lines}
-                            onChange={e => updateGlobalOverride(i, { max_lines: parseInt(e.target.value) })}
-                            className="flex-1 bg-transparent text-sm font-semibold outline-none"
-                          />
-                          <span className="text-[10px] text-muted-foreground/50 font-mono shrink-0">loc</span>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground/50">
-                          PRs up to {ov.max_lines} lines.
-                        </p>
-                      </div>
-                      <ModelChain
-                        primary={ov.model}
-                        fallbacks={ov.fallbacks || []}
-                        onChange={(p, fbs) => updateGlobalOverride(i, { model: p, fallbacks: fbs })}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              {/* Save row */}
-              <div className="flex justify-end px-5 py-4 bg-muted/10">
-                <Button
-                  onClick={handleGlobalUpdate}
-                  disabled={saving === 'global'}
-                  className="gap-2"
-                >
-                  {saving === 'global'
-                    ? <RefreshCw size={14} className="animate-spin" />
-                    : <Save size={14} />}
-                  Save Global Strategy
-                </Button>
-              </div>
+            <div className="p-4 sm:p-6">
+              <ModelRouteEditor
+                value={globalConfig}
+                onChange={setGlobalConfig}
+                density="comfortable"
+              />
             </div>
           ) : (
             <div className="px-5 py-5 space-y-3">
@@ -253,18 +240,37 @@ export function SettingsPage() {
             </div>
           )}
         </div>
-      </div>
+      </section>
 
-      {/* ── Section 2: Provider Rate Limits ────────────── */}
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center gap-2">
-          <ShieldAlert size={13} strokeWidth={1.75} className="text-warning" />
-          <h2 className="text-sm font-semibold text-foreground">Model Usage Quotas</h2>
-          <span className="text-xs text-muted-foreground">· Provider rate limits and token capacity</span>
+      <section className="surface min-w-0 overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-warning-bg text-warning">
+              <ShieldAlert size={15} strokeWidth={1.9} />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold text-foreground">Model usage quotas</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Provider rate limits and token capacity per model.
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSaveAllQuotas}
+            disabled={dirtyConfigs.length === 0 || saving !== null}
+            className="h-8 shrink-0 gap-2"
+          >
+            {saving === 'quotas'
+              ? <RefreshCw size={14} className="animate-spin" />
+              : <Save size={14} />}
+            Save all quotas
+          </Button>
         </div>
 
         {loading ? (
-          <div className="surface overflow-hidden">
+          <div>
             {[1, 2, 3].map(i => (
               <div key={i} className="px-5 py-4 border-b border-border/50 last:border-0">
                 <Skeleton height={20} />
@@ -272,109 +278,72 @@ export function SettingsPage() {
             ))}
           </div>
         ) : (
-          <div className="surface overflow-x-auto">
-            <div className="min-w-[700px]">
-              {/* Table header */}
-              <div className="grid grid-cols-[1fr_80px_80px_80px_100px_90px] gap-0 border-b border-border bg-muted/40">
-              <div className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Model</div>
-              <div className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground text-center">RPM</div>
-              <div className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground text-center">RPD</div>
-              <div className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground text-center">TPM</div>
-              <div className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Updated</div>
-              <div className="px-4 py-2.5" />
-            </div>
-
-            {configs.map((cfg, i) => (
-              <div
-                key={cfg.modelId}
-                className={cn(
-                  'group grid grid-cols-[1fr_80px_80px_80px_100px_90px] items-center gap-0 transition-colors hover:bg-primary/[0.02]',
-                  i < configs.length - 1 && 'border-b border-border/40',
-                )}
-              >
-                {/* Model name */}
-                <div className="px-4 py-3.5 min-w-0">
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-1 rounded bg-primary/8 text-primary group-hover:bg-primary/15 transition-colors">
-                      <Cpu size={12} />
+          <div className="grid min-w-0 grid-cols-1 gap-3 p-4 xl:grid-cols-2">
+            {configs.map((cfg, i) => {
+              const saved = savedConfigs.find(item => item.modelId === cfg.modelId);
+              const dirty = !quotaEqual(cfg, saved);
+              return (
+                <article
+                  key={cfg.modelId}
+                  className={cn(
+                    'min-w-0 rounded-md border border-border bg-background/55 p-4 transition-colors hover:bg-primary/[0.02]',
+                    dirty && 'border-primary/30 bg-primary/[0.025]',
+                  )}
+                >
+                  <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/8 text-primary">
+                        <Cpu size={14} />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-foreground">{cfg.modelId}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <span className="rounded border border-border bg-muted/35 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                            {getProviderLabel(cfg.provider)}
+                          </span>
+                          <span className="text-[11px] text-muted-foreground">
+                            Updated {new Date(cfg.updatedAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-foreground truncate">{cfg.modelId}</p>
-                      <p className="text-[10px] font-mono text-muted-foreground/50 uppercase tracking-wide">{cfg.provider}</p>
-                    </div>
+                    <Button
+                      size="sm"
+                      variant={dirty ? 'outline' : 'ghost'}
+                      disabled={!dirty || saving !== null}
+                      onClick={() => handleUpdate(cfg.modelId)}
+                      className="h-8 shrink-0 gap-1.5 text-xs"
+                    >
+                      {saving === cfg.modelId
+                        ? <RefreshCw size={11} className="animate-spin" />
+                        : <Save size={11} />}
+                      Apply
+                    </Button>
                   </div>
-                </div>
 
-                {/* RPM */}
-                <div className="px-3 py-3.5">
-                  <input
-                    type="number"
-                    value={cfg.rpm}
-                    onChange={e =>
-                      setConfigs(configs.map(c =>
-                        c.modelId === cfg.modelId ? { ...c, rpm: parseInt(e.target.value) } : c,
-                      ))
-                    }
-                    className="w-full bg-transparent text-sm font-mono font-semibold text-center text-muted-foreground focus:text-foreground focus:bg-muted/30 rounded px-1.5 py-1 outline-none transition-colors focus:ring-1 focus:ring-ring border border-transparent focus:border-border"
-                  />
-                </div>
-
-                {/* RPD */}
-                <div className="px-3 py-3.5">
-                  <input
-                    type="number"
-                    value={cfg.rpd}
-                    onChange={e =>
-                      setConfigs(configs.map(c =>
-                        c.modelId === cfg.modelId ? { ...c, rpd: parseInt(e.target.value) } : c,
-                      ))
-                    }
-                    className="w-full bg-transparent text-sm font-mono font-semibold text-center text-muted-foreground focus:text-foreground focus:bg-muted/30 rounded px-1.5 py-1 outline-none transition-colors focus:ring-1 focus:ring-ring border border-transparent focus:border-border"
-                  />
-                </div>
-
-                {/* TPM */}
-                <div className="px-3 py-3.5">
-                  <input
-                    type="number"
-                    value={cfg.tpm}
-                    onChange={e =>
-                      setConfigs(configs.map(c =>
-                        c.modelId === cfg.modelId ? { ...c, tpm: parseInt(e.target.value) } : c,
-                      ))
-                    }
-                    className="w-full bg-transparent text-sm font-mono font-semibold text-center text-muted-foreground focus:text-foreground focus:bg-muted/30 rounded px-1.5 py-1 outline-none transition-colors focus:ring-1 focus:ring-ring border border-transparent focus:border-border"
-                  />
-                </div>
-
-                {/* Updated */}
-                <div className="px-3 py-3.5">
-                  <span className="text-[11px] font-mono text-muted-foreground/50">
-                    {new Date(cfg.updatedAt).toLocaleDateString()}
-                  </span>
-                </div>
-
-                {/* Save */}
-                <div className="px-4 py-3.5 flex justify-end">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={saving === cfg.modelId}
-                    onClick={() => handleUpdate(cfg.modelId, cfg)}
-                    className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    {saving === cfg.modelId
-                      ? <RefreshCw size={11} className="animate-spin" />
-                      : <Save size={11} />}
-                    {saving === cfg.modelId ? 'Saving…' : 'Apply'}
-                  </Button>
-                </div>
-                </div>
-              ))}
-            </div>
+                  <div className="mt-4 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
+                    {(['rpm', 'rpd', 'tpm'] as const).map(field => (
+                    <label key={field} className="min-w-0 rounded-md border border-border bg-card/60 px-3 py-2.5">
+                      <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                        <Gauge size={11} />
+                        {field.toUpperCase()}
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={cfg[field]}
+                        onChange={e => updateQuota(cfg.modelId, field, Number(e.target.value) || 0)}
+                        className="mt-2 h-8 min-w-0 w-full bg-transparent text-left text-lg font-semibold text-foreground outline-none"
+                      />
+                    </label>
+                    ))}
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
-      </div>
+      </section>
     </section>
   );
 }
