@@ -8,14 +8,10 @@
 
   <p>
     <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg"></a>
-    <a href="https://github.com/devarshishimpi/codra/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/devarshishimpi/codra?style=flat&logo=github"></a>
     <a href="https://workers.cloudflare.com/"><img alt="Cloudflare Workers" src="https://img.shields.io/badge/runtime-Cloudflare%20Workers-f38020?logo=cloudflare"></a>
     <a href="https://react.dev/"><img alt="Built with React" src="https://img.shields.io/badge/dashboard-React-61dafb?logo=react&logoColor=111"></a>
     <a href="https://www.typescriptlang.org/"><img alt="TypeScript" src="https://img.shields.io/badge/language-TypeScript-3178c6?logo=typescript&logoColor=fff"></a>
   </p>
-
-  <br/>
-  <br/>
 
   <p>
     <a href="https://codra.run">Website</a>
@@ -85,7 +81,7 @@ The full setup and operations guides live at [codra.run/docs](https://codra.run/
 
 ## Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Codra uses a Contributor License Agreement for contributions.
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request against `dev`. Codra uses a Contributor License Agreement for contributions.
 
 ## License
 

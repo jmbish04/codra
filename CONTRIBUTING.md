@@ -9,7 +9,6 @@ Thank you for your interest in contributing to Codra! We are building a high-per
 Before we can merge your pull request, you must sign our Contributor License Agreement. This is a quick process that takes about 10 seconds and ensures that your contributions can be included under our dual-licensing model (AGPL-3.0 for the core).
 
 - **How to sign:** Visit [codra.run/cla](https://codra.run/cla) or follow the link provided by the automated GitHub check on your PR.
-- **Why?** It protects the project's ability to remain sustainable while staying open source.
 
 ---
 
@@ -51,24 +50,6 @@ npm run dev
 
 ---
 
-## 📐 Design & Coding Standards
-
-We aim for a **"Precise, Understated, Dependable"** aesthetic. Please refer to [`.impeccable.md`](.impeccable.md) for full design context.
-
-### Design Principles
-1.  **Clarity over cleverness**: Information should be immediately legible.
-2.  **Restraint is a feature**: Use our signature lime (`oklch(94% 0.23 115)`) sparingly for meaning.
-3.  **Trust through density**: Developer tools should pack information confidently without clutter.
-4.  **Typography**: Use **Figtree** for UI and **JetBrains Mono** for code.
-
-### Tech Stack Standards
-- **TypeScript**: Strict mode is enabled. Avoid `any` at all costs.
-- **Styling**: Tailwind CSS 4.0. Use OKLCH for colors to maintain perceptual uniformity.
-- **Validation**: Use **Zod** for all schema validation (API requests, Queue messages).
-- **Icons**: Use **Lucide React**.
-
----
-
 ## 🧪 Testing
 
 We use **Vitest** for unit and integration testing. `npm test` runs the non-database tests by default and automatically enables DB integration tests when `TEST_DATABASE_URL` points at a disposable Postgres database.
@@ -88,11 +69,12 @@ npm run typecheck
 
 ## 🚀 Pull Request Process
 
-1.  **Fork & Branch**: Create a feature branch from `main`.
+1.  **Fork & Branch**: Create a feature branch from `dev`.
 2.  **Atomic Commits**: Keep your commits focused and descriptive.
-3.  **Sync**: Ensure your branch is up to date with `main`.
-4.  **PR Description**: Use the provided template (if available) or clearly explain the *what* and *why* of your changes.
-5.  **CLA Check**: Once you open the PR, an automated check will verify your CLA status. If you haven't signed yet, follow the link in the check output.
+3.  **Sync**: Ensure your branch is up to date with `dev`.
+4.  **Target Branch**: Open pull requests against `dev`.
+5.  **PR Description**: Use the provided template (if available) or clearly explain the *what* and *why* of your changes.
+6.  **CLA Check**: Once you open the PR, an automated check will verify your CLA status. If you haven't signed yet, follow the link in the check output.
 
 ---
 
