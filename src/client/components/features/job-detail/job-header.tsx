@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ChevronRight, ExternalLink, RotateCcw, Terminal } from 'lucide-react';
 import { Button } from '@client/components/ui/button';
+import { UpdatesEmailPrompt } from '@client/components/features/dashboard/updates-email-prompt';
 import type { JobDetail } from '@shared/schema';
 
 interface JobHeaderProps {
@@ -11,7 +12,8 @@ interface JobHeaderProps {
 
 export function JobHeader({ job, isRetrying, onRetry }: JobHeaderProps) {
   return (
-    <header className="flex flex-col sm:flex-row items-start justify-between gap-4">
+    <>
+      <header className="flex flex-col sm:flex-row items-start justify-between gap-4">
       <div className="min-w-0 w-full">
         <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
           <Link to="/jobs" className="hover:text-foreground transition-colors">Jobs</Link>
@@ -58,6 +60,8 @@ export function JobHeader({ job, isRetrying, onRetry }: JobHeaderProps) {
           {isRetrying ? 'Starting…' : job.status === 'failed' ? 'Retry job' : 'Re-run job'}
         </Button>
       </div>
-    </header>
+      </header>
+      <UpdatesEmailPrompt />
+    </>
   );
 }

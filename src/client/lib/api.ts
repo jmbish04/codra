@@ -9,6 +9,7 @@ import type {
   RetryJobResponse,
   StatsResponse,
   SyncReposResponse,
+  UpdatesEmailResponse,
 } from '@shared/api';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -57,6 +58,15 @@ export const api = {
   logout() {
     return request<{ ok: boolean }>('/auth/logout', {
       method: 'POST',
+    });
+  },
+  getUpdatesEmailStatus() {
+    return request<UpdatesEmailResponse>('/api/auth/updates-email');
+  },
+  subscribeUpdates(email: string) {
+    return request<UpdatesEmailResponse>('/api/auth/updates-email', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
     });
   },
   getJobs(params: Record<string, any> = {}) {

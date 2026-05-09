@@ -22,6 +22,14 @@ export type AuthSessionResponse = {
   user: AuthSessionUser;
 };
 
+export type UpdatesEmailStatus = 'pending' | 'subscribed';
+
+export type UpdatesEmailResponse = {
+  status: UpdatesEmailStatus;
+  email: string | null;
+  updatedAt: string | null;
+};
+
 export type JobDetailResponse = {
   job: JobDetail;
 };
