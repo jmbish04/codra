@@ -1,5 +1,5 @@
 import { runReviewJob } from '@server/core/review';
-import { createTestEnv, generateMockDiff, hasConfiguredTestDatabaseUrl } from './helpers';
+import { createTestEnv, generateMockDiff } from './helpers';
 import { vi } from 'vitest';
 import { findExistingJobForHead, getJobForProcessing, insertJob } from '@server/db/jobs';
 import { defaultRepoConfig } from '@shared/schema';
@@ -68,9 +68,7 @@ vi.mock('@server/services/model', () => {
     return { ModelService: MockModelService };
 });
 
-const dbDescribe = hasConfiguredTestDatabaseUrl() ? describe : describe.skip;
-
-dbDescribe('Review Flow Lifecycle', () => {
+describe('Review Flow Lifecycle', () => {
   const env = createTestEnv();
 
   it('completes a full review from pending job to finished', async () => {

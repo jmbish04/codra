@@ -1,8 +1,6 @@
 import { createApp } from '@server/app';
-import { createMockPRWebhook, createTestEnv, hasConfiguredTestDatabaseUrl } from './helpers';
+import { createMockPRWebhook, createTestEnv } from './helpers';
 import { vi } from 'vitest';
-
-const dbIt = hasConfiguredTestDatabaseUrl() ? it : it.skip;
 
 // Mock GitHubClient to avoid real JWT signing and network calls
 vi.mock('@server/core/github', async (importOriginal) => {
@@ -80,7 +78,7 @@ describe('Webhook Handling Suite', () => {
     expect(response.status).toBe(400);
   });
 
-  dbIt('accepts valid pull_request.opened and queues a job', async () => {
+  it('accepts valid pull_request.opened and queues a job', async () => {
     const repoName = `repo-${Date.now()}`;
     const rawPayload = createMockPRWebhook({
         action: 'opened',
@@ -120,7 +118,7 @@ describe('Webhook Handling Suite', () => {
     expect(queue.sent[0].payload).toBeUndefined();
   });
 
-  dbIt('acknowledges unsupported GitHub events without queueing review work', async () => {
+  it('acknowledges unsupported GitHub events without queueing review work', async () => {
     const rawPayload = createMockPRWebhook({
       action: 'opened',
       repository: { name: `repo-${Date.now()}-check-suite`, owner: { login: 'test-owner' } },
@@ -153,7 +151,7 @@ describe('Webhook Handling Suite', () => {
     expect(queue.sent).toHaveLength(0);
   });
 
-  dbIt('ignores webhooks for draft PRs', async () => {
+  it('ignores webhooks for draft PRs', async () => {
       const draftPayload = createMockPRWebhook({ 
           action: 'opened',
           pull_request: { draft: true, number: 99, head: { sha: 'abc' }, base: { sha: 'def' }, user: { login: 'a' } }

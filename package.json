@@ -22,7 +22,7 @@
     "dev:worker": "wrangler dev --local",
     "start": "npm run dev",
     "migrate": "node scripts/migrate.mjs",
-    "test": "vitest run",
+    "test": "node scripts/test.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },

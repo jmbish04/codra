@@ -52,10 +52,12 @@ npm run dev
 
 ## 🧪 Testing
 
-We use **Vitest** for unit and integration testing. `npm test` runs the non-database tests by default and automatically enables DB integration tests when `TEST_DATABASE_URL` points at a disposable Postgres database.
+We use **Vitest** for unit and integration testing. `npm test` requires a disposable Postgres database, runs migrations against it, and then runs the full test suite.
+
+The test runner loads `.env.test`, `.env.local`, `.env`, `.dev.vars`, and then `.env.test.example`. Override `TEST_DATABASE_URL` in one of the private env files when your local test database does not match the example URL.
 
 ```bash
-# Run all tests
+# Run the full test suite
 npm test
 
 # Run tests in watch mode
