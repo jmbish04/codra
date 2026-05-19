@@ -1,5 +1,5 @@
 import { runReviewJob } from '@server/core/review';
-import { createTestEnv, generateMockDiff, hasConfiguredTestDatabaseUrl } from './helpers';
+import { createTestEnv, generateMockDiff } from './helpers';
 import { vi } from 'vitest';
 import { findExistingJobForHead, getJobForProcessing, insertJob } from '@server/db/jobs';
 import { defaultRepoConfig } from '@shared/schema';

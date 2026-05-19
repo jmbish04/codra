@@ -54,33 +54,24 @@ export class MockQueue {
   }
 }
 
-// A valid PKCS#8 dummy private key (2048-bit RSA)
-export const DUMMY_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
-MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCuG/W/29qB8S3q
-/U4+4M1v8XJ/U0zZ5y8/Y+Y/W9J/4M1v8XJ/U0zZ5y8/Y+Y/W9J/4M1v8XJ/U0zZ
-5y8/Y+Y/W9J/4M1v8XJ/U0zZ5y8/Y+Y/W9J/4M1v8XJ/U0zZ5y8/Y+Y/W9J/4M1v
-8XJ/U0zZ5y8/Y+Y/W9J/4M1v8XJ/U0zZ5y8/Y+Y/W9J/4M1v8XJ/U0zZ5y8/Y+Y/
-W9J/4M1v8XJ/U0zZ5y8/Y+Y/W9J/4M1v8XJ/U0zZ5y8/Y+Y/W9J/4M1v8XJ/U0zZ
-5y8/Y+Y/W9J/4M1v8XJ/U0zZ5y8/Y+Y/W9J/4M1v8XJ/U0zZ5y8/Y+Y/W9J/4M1v
-8XJ/U0zZ5y8/Y+Y/W9J/4M1v8XJ/U0zZ5y8/Y+Y/W9J/4M1v8XJ/U0zZ5y8/Y+Y/
-W9J/AgMBAAECggEAIl77HjE=
------END PRIVATE KEY-----`;
-
-export const TEST_DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:5432/codra_test';
-
 function usableEnvValue(value: string | undefined) {
   return value && value !== 'undefined' && value !== 'null' ? value : null;
 }
 
-export function getTestDatabaseUrl() {
-  return (
-    usableEnvValue(process.env.TEST_DATABASE_URL) ??
-    TEST_DATABASE_URL
-  );
+function requiredEnv(key: keyof NodeJS.ProcessEnv) {
+  const value = usableEnvValue(process.env[key]);
+  if (!value) {
+    throw new Error(`Missing required test environment variable: ${key}`);
+  }
+  return value;
 }
 
-export function hasConfiguredTestDatabaseUrl() {
-  return Boolean(usableEnvValue(process.env.TEST_DATABASE_URL));
+function unusedEnv(key: string): string {
+  throw new Error(`${key} is not required by the current test suite. Add it to the test env only when a test exercises that path.`);
+}
+
+export function getTestDatabaseUrl() {
+  return requiredEnv('TEST_DATABASE_URL');
 }
 
 export function createTestEnv(overrides: Partial<AppBindings> = {}): AppBindings {
@@ -96,21 +87,21 @@ export function createTestEnv(overrides: Partial<AppBindings> = {}): AppBindings
     HYPERDRIVE: {
       connectionString: getTestDatabaseUrl(),
     },
-    APP_PRIVATE_KEY: DUMMY_PRIVATE_KEY,
-    GITHUB_APP_ID: '123',
-    GITHUB_APP_SLUG: 'codra-app',
-    GITHUB_APP_WEBHOOK_SECRET: 'topsecret',
-    GITHUB_CLIENT_ID: 'dashboard-client-id',
-    GITHUB_CLIENT_SECRET: 'dashboard-client-secret',
-    AUTH_CALLBACK_URL: 'https://codra.test/auth/github/callback',
-    APP_URL: 'https://codra.test',
-    DASHBOARD_ALLOWED_USERS: 'devarshishimpi',
-    GEMINI_API_KEY: 'gemini-key',
-    BOT_USERNAME: 'codra-app',
-    ENVIRONMENT: 'test',
-    CF_API_TOKEN: 'cf-api-token',
-    CF_ACCOUNT_ID: 'cf-account-id',
-    CF_DLQ_ID: 'cf-dlq-id',
+    get APP_PRIVATE_KEY() { return unusedEnv('APP_PRIVATE_KEY'); },
+    get GITHUB_APP_ID() { return unusedEnv('GITHUB_APP_ID'); },
+    GITHUB_APP_SLUG: requiredEnv('GITHUB_APP_SLUG'),
+    GITHUB_APP_WEBHOOK_SECRET: requiredEnv('GITHUB_APP_WEBHOOK_SECRET'),
+    GITHUB_CLIENT_ID: requiredEnv('GITHUB_CLIENT_ID'),
+    GITHUB_CLIENT_SECRET: requiredEnv('GITHUB_CLIENT_SECRET'),
+    AUTH_CALLBACK_URL: requiredEnv('AUTH_CALLBACK_URL'),
+    APP_URL: requiredEnv('APP_URL'),
+    DASHBOARD_ALLOWED_USERS: requiredEnv('DASHBOARD_ALLOWED_USERS'),
+    get GEMINI_API_KEY() { return unusedEnv('GEMINI_API_KEY'); },
+    BOT_USERNAME: requiredEnv('BOT_USERNAME'),
+    get ENVIRONMENT() { return unusedEnv('ENVIRONMENT'); },
+    get CF_API_TOKEN() { return unusedEnv('CF_API_TOKEN'); },
+    get CF_ACCOUNT_ID() { return unusedEnv('CF_ACCOUNT_ID'); },
+    get CF_DLQ_ID() { return unusedEnv('CF_DLQ_ID'); },
     ...overrides,
   };
 }

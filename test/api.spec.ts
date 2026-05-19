@@ -14,10 +14,8 @@ import type {
   StatsResponse,
   UpdatesEmailResponse,
 } from '@shared/api';
-import { createTestEnv, hasConfiguredTestDatabaseUrl } from './helpers';
+import { createTestEnv } from './helpers';
 import { vi } from 'vitest';
-
-const dbIt = hasConfiguredTestDatabaseUrl() ? it : it.skip;
 
 function mockGitHubProfile(login = 'devarshishimpi') {
   return {
@@ -117,7 +115,7 @@ describe('Dashboard API Suite', () => {
     expect(response.headers.get('location')).toBe('/login?error=not_allowed');
   });
 
-  dbIt('allows access to /api/jobs with a valid GitHub session', async () => {
+  it('allows access to /api/jobs with a valid GitHub session', async () => {
     const env = createTestEnv();
     const token = await getAuthCookie(env);
     const response = await app.request('/api/jobs', {
@@ -264,7 +262,7 @@ describe('Dashboard API Suite', () => {
     expect(response.status).toBe(404);
   });
 
-  dbIt('fetches job details accurately', async () => {
+  it('fetches job details accurately', async () => {
     const env = createTestEnv();
     const token = await getAuthCookie(env);
 
@@ -295,7 +293,7 @@ describe('Dashboard API Suite', () => {
     expect(data.job.files).toBeDefined();
   });
 
-  dbIt('fetches job details when stored comments have null code suggestions', async () => {
+  it('fetches job details when stored comments have null code suggestions', async () => {
     const env = createTestEnv();
     const token = await getAuthCookie(env);
 
@@ -349,7 +347,7 @@ describe('Dashboard API Suite', () => {
     expect(data.job.files[0].parsedComments[0].codeSuggestion).toBeNull();
   });
 
-  dbIt('returns stats successfully', async () => {
+  it('returns stats successfully', async () => {
     const env = createTestEnv();
     const token = await getAuthCookie(env);
 
@@ -428,7 +426,7 @@ describe('Dashboard API Suite', () => {
     expect(response.status).toBe(400);
   });
 
-  dbIt('returns repository list', async () => {
+  it('returns repository list', async () => {
     const env = createTestEnv();
     const token = await getAuthCookie(env);
 
@@ -453,7 +451,7 @@ describe('Dashboard API Suite', () => {
     expect(response.headers.get('location')).toBe('https://github.com/apps/my-codra-install/installations/new');
   });
 
-  dbIt('rejects invalid repository config patches', async () => {
+  it('rejects invalid repository config patches', async () => {
     const env = createTestEnv();
     const token = await getAuthCookie(env);
     const repo = `invalid-config-${Date.now()}`;
@@ -481,7 +479,7 @@ describe('Dashboard API Suite', () => {
     expect(response.status).toBe(400);
   });
 
-  dbIt('rejects string booleans in repository config patches', async () => {
+  it('rejects string booleans in repository config patches', async () => {
     const env = createTestEnv();
     const token = await getAuthCookie(env);
     const repo = `invalid-enabled-${Date.now()}`;
@@ -530,7 +528,7 @@ describe('Dashboard API Suite', () => {
     expect(requestedUrl).toBe('https://api.github.com/repos/owner/repo/contents/src/path%20with%20spaces/app.ts');
   });
 
-  dbIt('keeps repo model settings inherited when loading global strategy', async () => {
+  it('keeps repo model settings inherited when loading global strategy', async () => {
     const env = createTestEnv();
     const repo = `global-inherit-${Date.now()}`;
 
