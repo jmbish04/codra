@@ -3,8 +3,9 @@ import type { AppBindings } from '@server/env';
 import { withTimeout } from '@server/core/timeout';
 import type { ModelResponse } from './types';
 
-/** Max wall-clock time allowed for a single Google AI Studio call (120 s). */
-const GOOGLE_TIMEOUT_MS = 120_000;
+/** Max wall-clock time allowed for a single Google AI Studio call. */
+const GOOGLE_TIMEOUT_MS = 45_000;
+const GOOGLE_MAX_RETRIES = 1;
 
 export async function reviewWithGoogle(
   env: Pick<AppBindings, 'GEMINI_API_KEY'>,
@@ -15,7 +16,7 @@ export async function reviewWithGoogle(
   logger.info(`Calling Google AI model: ${model}`);
   const startTime = Date.now();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
-  const maxRetries = 2;
+  const maxRetries = GOOGLE_MAX_RETRIES;
   let lastError: any;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {

@@ -2,19 +2,54 @@ import { logger } from './logger';
 import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHubWebhookPayload, type IssueCommentWebhookPayload, type PullRequestWebhookPayload } from '@shared/github';
 import { defaultRepoConfig, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import type { AppBindings } from '@server/env';
-import { getFileReviewsForJobs } from '@server/db/file-reviews';
-import { completeJob, failJob, findExistingJobForHead, getJobForProcessing, insertJob, mapJob, startJobProcessing, completePreparationStep, supersedeOlderJobs, updateJobCheckRun, updateJobStep } from '@server/db/jobs';
+import { getFileReviewsForJobs, upsertFileReview } from '@server/db/file-reviews';
+import { claimJobLease, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStep } from '@server/db/jobs';
 import { filterReviewableFiles, parseUnifiedDiff } from './diff';
 
 import { GitHubService } from '../services/github';
 import { GitHubClient } from './github';
-import { ModelService } from '../services/model';
+import { isRetryableModelError, ModelService } from '../services/model';
 import { FormatterService } from '../services/formatter';
 import { TokenTracker } from './token-tracker';
 import { loadRepoConfig } from './config';
 import { getWebhookDelivery } from '@server/db/webhook-deliveries';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
+
+export type ReviewJobRunResult = { action: 'ack' } | { action: 'retry'; delaySeconds: number };
+
+const REVIEW_CHUNK_FILE_LIMIT = 2;
+const REVIEW_CHUNK_WALL_CLOCK_MS = 8 * 60 * 1000;
+const JOB_LEASE_SECONDS = 10 * 60;
+const BUSY_RETRY_SECONDS = 60;
+
+function isRetryableFileReviewErrorMessage(message: string | null | undefined) {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('all configured review models failed') ||
+    lower.includes('retrying later') ||
+    lower.includes('google request failed with 5') ||
+    lower.includes('cloudflare') ||
+    lower.includes('timeout') ||
+    lower.includes('timed out') ||
+    lower.includes('internal error') ||
+    lower.includes('unavailable') ||
+    lower.includes('high demand') ||
+    lower.includes('temporary') ||
+    lower.includes('[redacted]') ||
+    lower.includes('returned no review content') ||
+    lower.includes('empty response')
+  );
+}
+
+function shouldRetryExistingFileReview(review: { file_status: string; error_msg: string | null }) {
+  return review.file_status === 'failed' && isRetryableFileReviewErrorMessage(review.error_msg);
+}
+
+function countsAsHandledFileReview(review: { file_status: string; error_msg: string | null }) {
+  return !shouldRetryExistingFileReview(review);
+}
 
 function shouldTriggerFromPullRequest(action: PullRequestWebhookPayload['action'], config: RepoConfig['review']) {
   return (config.on as string[]).includes(action);
@@ -94,481 +129,556 @@ export function extractReviewRequest(input: {
   return null;
 }
 
-export async function runReviewJob(env: AppBindings, message: ReviewJobMessage) {
-  let job: PersistedReviewJob;
-
-  if (message.jobId) {
-    const row = await getJobForProcessing(env, message.jobId);
-    if (!row) {
-      logger.warn(`Job not found for processing: ${message.jobId}`);
-      return;
-    }
-
-    job = mapJob(row);
-    if (job.status === 'superseded') {
-      logger.info(`Job ${job.id} is superseded, skipping processing.`);
-      return;
-    }
-    if (job.status === 'running') {
-      logger.info(`Job ${job.id} is already running, skipping duplicate queue delivery.`);
-      return;
-    }
-  } else {
-    if (!message.eventName) {
-      logger.warn('Queue message ignored: missing eventName');
-      return;
-    }
-
-    let eventName = message.eventName;
-    let payload = message.payload as GitHubWebhookPayload | undefined;
-
-    if (payload === undefined) {
-      const delivery = await getWebhookDelivery(env, message.deliveryId);
-      if (!delivery) {
-        logger.warn(`Queue message ignored: webhook delivery not found: ${message.deliveryId}`);
-        return;
-      }
-
-      eventName = delivery.event_name;
-      payload = delivery.payload as GitHubWebhookPayload;
-    }
-
-    if (!isSupportedGitHubWebhookEvent(eventName)) {
-      logger.info(`Queue message ignored: unsupported GitHub event ${eventName}`);
-      return;
-    }
-
-    const installationId = String(payload.installation?.id ?? '');
-    if (!installationId || !('repository' in payload) || !payload.repository) {
-      logger.info('Queue message ignored: missing installation or repository info');
-      return;
-    }
-
-    // 1. Load Repo Config
-    const repoConfig = await loadRepoConfig(env, {
-      installationId,
-      owner: payload.repository.owner.login,
-      repo: payload.repository.name,
-    });
-
-    if (repoConfig.enabled === false) {
-      logger.info(`Job ignored: repository ${payload.repository.owner.login}/${payload.repository.name} is disabled`);
-      return;
-    }
-
-    // 2. Extract Review Request
-    const extracted = extractReviewRequest({
-      eventName,
-      payload,
-      botUsername: env.BOT_USERNAME,
-      config: repoConfig.parsedJson,
-    });
-
-    if (!extracted) {
-      // Handle specific PR closed events if needed (cleanup)
-      if (eventName === 'pull_request') {
-        const prPayload = payload as PullRequestWebhookPayload;
-        if (prPayload.action === 'closed' && repoConfig.parsedJson.review.labels !== false) {
-          const labels = repoConfig.parsedJson.review.labels;
-          const gh = new GitHubClient(env, installationId);
-          await gh.removeIssueLabel(prPayload.repository.owner.login, prPayload.repository.name, prPayload.pull_request.number, labels.p1);
-          await gh.removeIssueLabel(prPayload.repository.owner.login, prPayload.repository.name, prPayload.pull_request.number, labels.p2);
-          await gh.removeIssueLabel(prPayload.repository.owner.login, prPayload.repository.name, prPayload.pull_request.number, labels.p3);
-        }
-      }
-      return;
-    }
-
-    // 3. Resolve full PR info for mentions
-    let resolved = extracted;
-    const githubClient = new GitHubClient(env, installationId);
-    if (eventName === 'issue_comment') {
-      const pr = await githubClient.getPullRequest(extracted.owner, extracted.repo, extracted.prNumber);
-      resolved = {
-        ...extracted,
-        prTitle: pr.title,
-        prAuthor: pr.user.login,
-        commitSha: pr.head.sha,
-        baseSha: pr.base.sha,
-        headRef: pr.head.ref,
-        baseRef: pr.base.ref,
-      };
-    }
-
-    // 4. Duplicate Check
-    const duplicateJob = await findExistingJobForHead(env, {
-      owner: resolved.owner,
-      repo: resolved.repo,
-      prNumber: resolved.prNumber,
-      commitSha: resolved.commitSha,
-      trigger: resolved.trigger,
-    });
-    if (duplicateJob) {
-      if (duplicateJob.status === 'running') {
-        logger.info(`Duplicate in-flight job ${duplicateJob.id} is already running for ${resolved.owner}/${resolved.repo} PR #${resolved.prNumber}.`);
-        return;
-      }
-      if (duplicateJob.status === 'queued') {
-        logger.info(`Resuming duplicate in-flight job ${duplicateJob.id} for ${resolved.owner}/${resolved.repo} PR #${resolved.prNumber}.`);
-        job = duplicateJob;
-      } else {
-        logger.info(`Duplicate terminal job found for ${resolved.owner}/${resolved.repo} PR #${resolved.prNumber}, skipping.`);
-        return;
-      }
-    } else {
-      // 5. Insert Job
-      job = await insertJob(env, {
-        installationId: resolved.installationId,
-        owner: resolved.owner,
-        repo: resolved.repo,
-        prNumber: resolved.prNumber,
-        prTitle: resolved.prTitle,
-        prAuthor: resolved.prAuthor,
-        commitSha: resolved.commitSha,
-        baseSha: resolved.baseSha,
-        trigger: resolved.trigger,
-        headRef: resolved.headRef,
-        baseRef: resolved.baseRef,
-        configSnapshot: repoConfig.parsedJson,
-      });
-
-      // 6. Supersede older jobs
-      await supersedeOlderJobs(env, {
-        installationId: resolved.installationId,
-        owner: resolved.owner,
-        repo: resolved.repo,
-        prNumber: resolved.prNumber,
-        newJobId: job.id,
-      });
-    }
+export async function runReviewJob(env: AppBindings, message: ReviewJobMessage): Promise<ReviewJobRunResult> {
+  const resolved = await resolveQueuedJob(env, message);
+  if (!resolved) {
+    return { action: 'ack' };
   }
 
+  const leaseOwner = crypto.randomUUID();
+  const claim = await claimJobLease(env, resolved.job.id, leaseOwner, JOB_LEASE_SECONDS);
+  if (claim.status === 'missing') {
+    logger.warn(`Job not found for processing: ${resolved.job.id}`);
+    return { action: 'ack' };
+  }
+  if (claim.status === 'terminal') {
+    logger.info(`Job ${resolved.job.id} is already terminal (${claim.row.status}), acking queue delivery.`);
+    return { action: 'ack' };
+  }
+  if (claim.status === 'busy') {
+    logger.info(`Job ${resolved.job.id} has a fresh lease; retrying queue delivery later.`);
+    return { action: 'retry', delaySeconds: Math.min(BUSY_RETRY_SECONDS, claim.retryAfterSeconds) };
+  }
+
+  const job = mapJob(claim.row);
+  const phase = resolved.phase;
   const tracker = new TokenTracker();
   const github = new GitHubService(env, job.installationId, tracker);
   const model = new ModelService(env, tracker);
   const formatter = new FormatterService(env.APP_URL);
 
-  let checkRunId = job.checkRunId;
-
   try {
-    tracker.incrementSubrequests(1);
-    const claimed = await startJobProcessing(env, job.id, 'Preparation');
-    if (!claimed) {
-      logger.info(`Job ${job.id} was already claimed or no longer queued, skipping duplicate queue delivery.`);
-      return;
+    if (phase === 'prepare') {
+      await runPreparePhase(env, job, leaseOwner, github);
+    } else if (phase === 'finalize') {
+      await runFinalizePhase(env, job, leaseOwner, github, model, formatter);
+    } else {
+      await runReviewPhase(env, job, leaseOwner, github, model);
     }
 
-    const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
-    const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
+    await releaseJobLease(env, job.id, leaseOwner);
+    return { action: 'ack' };
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : 'Unknown review failure';
+    if (messageText === 'JOB_SUPERSEDED') {
+      logger.info(`Job ${job.id} was superseded during execution, stopping.`);
+      await releaseJobLease(env, job.id, leaseOwner);
+      return { action: 'ack' };
+    }
 
-    if (!checkRunId) {
-      const checkRun = await github.createCheckRun(job.owner, job.repo, {
-        headSha: pr.head.sha,
-        title: 'Review queued',
-        summary: 'Codra has started reviewing this pull request.',
+    if (isRetryableModelError(error)) {
+      logger.warn(`Review job hit transient model/provider failure; retrying queue delivery: ${job.owner}/${job.repo} PR #${job.prNumber}`, {
+        error: messageText,
       });
-      checkRunId = checkRun.id;
-
-      tracker.incrementSubrequests(1);
-      await updateJobCheckRun(env, job.id, checkRun.id);
+      await releaseJobLease(env, job.id, leaseOwner);
+      return { action: 'retry', delaySeconds: 120 };
     }
 
-    const rawDiff = await github.getPullRequestDiff(job.owner, job.repo, job.prNumber);
-    const files = filterReviewableFiles(parseUnifiedDiff(rawDiff), config.review);
+    logger.error(`Review job failed: ${job.owner}/${job.repo} PR #${job.prNumber}`, error);
+    await failJobAndCheckRun(env, job, github, messageText);
+    return { action: 'ack' };
+  }
+}
 
-    tracker.incrementSubrequests(1);
-    await completePreparationStep(env, job.id, files.length);
+async function resolveQueuedJob(
+  env: AppBindings,
+  message: ReviewJobMessage,
+): Promise<{ job: PersistedReviewJob; phase: 'prepare' | 'review' | 'finalize' } | null> {
+  if (message.jobId) {
+    const row = await getJobForProcessing(env, message.jobId);
+    return row ? { job: mapJob(row), phase: message.phase ?? 'review' } : null;
+  }
 
-    tracker.incrementSubrequests(1);
-    const preparedJob = await getJobForProcessing(env, job.id);
-    if (preparedJob?.status === 'superseded') {
-      throw new Error('JOB_SUPERSEDED');
+  if (!message.eventName) {
+    logger.warn('Queue message ignored: missing eventName');
+    return null;
+  }
+
+  let eventName = message.eventName;
+  let payload = message.payload as GitHubWebhookPayload | undefined;
+
+  if (payload === undefined) {
+    const delivery = await getWebhookDelivery(env, message.deliveryId);
+    if (!delivery) {
+      logger.warn(`Queue message ignored: webhook delivery not found: ${message.deliveryId}`);
+      return null;
     }
 
-    tracker.incrementSubrequests(1);
-    await updateJobStep(env, job.id, 'Reviewing Files', { status: 'running' });
-    const reviewedComments: ParsedReviewComment[] = [];
-    const fileSummaries: Array<{ path: string; summary: string; verdict: string }> = [];
-    const newReviewsToInsert: any[] = [];
-    let stoppedBeforeAllFiles = false;
+    eventName = delivery.event_name;
+    payload = delivery.payload as GitHubWebhookPayload;
+  }
 
-    const jobIdsToQuery = [job.id];
-    if (job.retryOfJobId) jobIdsToQuery.push(job.retryOfJobId);
-    const allExistingReviews = await getFileReviewsForJobs(env, jobIdsToQuery);
+  if (!isSupportedGitHubWebhookEvent(eventName)) {
+    logger.info(`Queue message ignored: unsupported GitHub event ${eventName}`);
+    return null;
+  }
 
-    const currentJobReviews = allExistingReviews.filter(r => r.job_id === job.id);
-    const existingReviews = [...currentJobReviews];
-    for (const r of allExistingReviews) {
-      if (r.job_id !== job.id && !existingReviews.some(er => er.file_path === r.file_path)) {
-        existingReviews.push(r);
+  const installationId = String(payload.installation?.id ?? '');
+  if (!installationId || !('repository' in payload) || !payload.repository) {
+    logger.info('Queue message ignored: missing installation or repository info');
+    return null;
+  }
+
+  const repoConfig = await loadRepoConfig(env, {
+    installationId,
+    owner: payload.repository.owner.login,
+    repo: payload.repository.name,
+  });
+
+  if (repoConfig.enabled === false) {
+    logger.info(`Job ignored: repository ${payload.repository.owner.login}/${payload.repository.name} is disabled`);
+    return null;
+  }
+
+  const extracted = extractReviewRequest({
+    eventName,
+    payload,
+    botUsername: env.BOT_USERNAME,
+    config: repoConfig.parsedJson,
+  });
+
+  if (!extracted) {
+    if (eventName === 'pull_request') {
+      const prPayload = payload as PullRequestWebhookPayload;
+      if (prPayload.action === 'closed' && repoConfig.parsedJson.review.labels !== false) {
+        const labels = repoConfig.parsedJson.review.labels;
+        const gh = new GitHubClient(env, installationId);
+        await gh.removeIssueLabel(prPayload.repository.owner.login, prPayload.repository.name, prPayload.pull_request.number, labels.p1);
+        await gh.removeIssueLabel(prPayload.repository.owner.login, prPayload.repository.name, prPayload.pull_request.number, labels.p2);
+        await gh.removeIssueLabel(prPayload.repository.owner.login, prPayload.repository.name, prPayload.pull_request.number, labels.p3);
       }
     }
+    return null;
+  }
 
-    const totalLineCount = files.reduce((sum, f) => sum + f.lineCount, 0);
-    for (const [index, file] of files.entries()) {
-      // Safety break to avoid hitting Cloudflare 50-subrequest limit
-      if (!tracker.hasRemainingSubrequests(5)) {
-        logger.warn(`Approaching subrequest limit (${tracker.getSubrequestCount()}), stopping review loop at file ${index + 1}/${files.length}`);
-        stoppedBeforeAllFiles = true;
-        break;
-      }
-
-      // Periodic check for supersession (every 50 files - reduced frequency to save subrequests)
-      if (index % 50 === 0 && index > 0) {
-        tracker.incrementSubrequests(1);
-        const currentJob = await getJobForProcessing(env, job.id);
-        if (currentJob?.status === 'superseded') {
-          throw new Error('JOB_SUPERSEDED');
-        }
-      }
-
-      const existing = existingReviews.find((r) => r.file_path === file.path && r.file_status === 'done');
-
-      if (existing) {
-        reviewedComments.push(...(existing.parsed_comments as ParsedReviewComment[]));
-        fileSummaries.push({
-          path: file.path,
-          summary: existing.file_summary ?? '',
-          verdict: existing.verdict ?? 'comment',
-        });
-
-        if (existing.model_used && (existing.input_tokens || existing.output_tokens)) {
-          tracker.record(existing.model_used, existing.input_tokens ?? 0, existing.output_tokens ?? 0);
-        }
-
-        // If this review was from a parent job, we'll include it in our batch insert for the current job
-        if (!currentJobReviews.some((r) => r.file_path === file.path)) {
-          newReviewsToInsert.push({
-            filePath: file.path,
-            fileStatus: 'done',
-            modelUsed: existing.model_used,
-            modelProvider: (existing as any).model_provider,
-            diffLineCount: existing.diff_line_count,
-            diffInput: existing.diff_input,
-            rawAiOutput: existing.raw_ai_output,
-            parsedComments: existing.parsed_comments as ParsedReviewComment[],
-            inputTokens: existing.input_tokens,
-            outputTokens: existing.output_tokens,
-            durationMs: existing.duration_ms,
-            verdict: existing.verdict,
-            fileSummary: existing.file_summary,
-            overallCorrectness: existing.overall_correctness,
-            confidenceScore: existing.confidence_score,
-            errorMessage: null,
-          });
-        }
-        continue;
-      }
-
-      // Update check run less frequently (every 50 files)
-      if ((index > 0 && index % 50 === 0) || index === files.length - 1) {
-        await github.updateCheckRun(job.owner, job.repo, checkRunId, {
-          title: `Reviewing (${index + 1}/${files.length})`,
-          summary: `Analyzing ${file.path}`,
-        });
-      }
-
-      const startedAt = Date.now();
-      try {
-        // AI call (ModelService handles its own subrequest incrementing)
-        const response = await model.reviewFile({
-          file,
-          prTitle: pr.title ?? null,
-          prDescription: pr.body ?? null,
-          config: config,
-          totalLineCount,
-        });
-
-        reviewedComments.push(...response.parsed.comments);
-        fileSummaries.push({
-          path: file.path,
-          summary: response.parsed.fileSummary,
-          verdict: response.parsed.verdict,
-        });
-
-        newReviewsToInsert.push({
-          filePath: file.path,
-          fileStatus: 'done',
-          modelUsed: response.modelUsed,
-          modelProvider: response.provider,
-          diffLineCount: file.lineCount,
-          diffInput: response.userPrompt,
-          rawAiOutput: response.rawText,
-          parsedComments: response.parsed.comments,
-          inputTokens: response.inputTokens,
-          outputTokens: response.outputTokens,
-          durationMs: Date.now() - startedAt,
-          verdict: response.parsed.verdict,
-          fileSummary: response.parsed.fileSummary,
-          overallCorrectness: response.parsed.overallCorrectness,
-          confidenceScore: response.parsed.confidenceScore,
-          errorMessage: null,
-        });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown file review error';
-        logger.error(`File review failed for ${file.path}`, { error });
-
-        // If we hit a hard limit (subrequests or neuron quota), STOP EVERYTHING.
-        const isHardLimit =
-          errorMessage.toLowerCase().includes('subrequest') ||
-          errorMessage.includes('4006') ||
-          errorMessage.toLowerCase().includes('allocation');
-
-        if (isHardLimit) {
-          throw error;
-        }
-
-        fileSummaries.push({
-          path: file.path,
-          summary: `Review failed: ${errorMessage}`,
-          verdict: 'failed',
-        });
-
-        newReviewsToInsert.push({
-          filePath: file.path,
-          fileStatus: 'failed',
-          modelUsed: config.model?.main ?? 'gemma-4-31b-it',
-          modelProvider: (config.model?.main ?? 'gemma-4-31b-it').startsWith('@cf/') ? 'cloudflare' : 'google',
-          diffLineCount: file.lineCount,
-          diffInput: '',
-          rawAiOutput: null,
-          parsedComments: [],
-          inputTokens: null,
-          outputTokens: null,
-          durationMs: Date.now() - startedAt,
-          verdict: null,
-          fileSummary: null,
-          errorMessage,
-        });
-      }
-    }
-
-    // Batch insert all NEW or parent-inherited reviews at once (1 subrequest for reviews, 1 for comments)
-    if (newReviewsToInsert.length > 0) {
-      const { batchInsertFileReviews } = await import('@server/db/file-reviews');
-      tracker.incrementSubrequests(2); // 1 for reviews, 1 for comments
-      await batchInsertFileReviews(env, job.id, newReviewsToInsert);
-    }
-
-    if (stoppedBeforeAllFiles) {
-      tracker.incrementSubrequests(1);
-      await updateJobStep(env, job.id, 'Reviewing Files', {
-        status: 'failed',
-        error: 'Review stopped before all files were analyzed due to subrequest limits.',
-      });
-      throw new Error('Review stopped before all files were analyzed due to subrequest limits.');
-    }
-
-    if (fileSummaries.length > 0 && fileSummaries.every((f) => f.verdict === 'failed')) {
-      tracker.incrementSubrequests(1);
-      await updateJobStep(env, job.id, 'Reviewing Files', { status: 'failed', error: 'All files failed to review' });
-      throw new Error('All files failed to review');
-    }
-
-    tracker.incrementSubrequests(1);
-    await updateJobStep(env, job.id, 'Reviewing Files', { status: 'done' });
-
-    tracker.incrementSubrequests(1);
-    await updateJobStep(env, job.id, 'Generating Summary', { status: 'running' });
-    const hasFailures = fileSummaries.some((f) => f.verdict === 'failed');
-    const verdictSummary = formatter.summarizeVerdict(reviewedComments, hasFailures);
-
-    // Final check before generating summary and posting review
-    const finalJobCheck = await getJobForProcessing(env, job.id);
-    if (finalJobCheck?.status === 'superseded') {
-      throw new Error('JOB_SUPERSEDED');
-    }
-
-    const summaryResponse = await model.generateSummary({
-      prTitle: pr.title ?? null,
-      verdict: verdictSummary.verdict,
-      fileSummaries,
-      config,
-    });
-
-    await updateJobStep(env, job.id, 'Generating Summary', { status: 'done' });
-
-    const formattedSummary = formatter.formatReviewOverview(pr.head.sha, env.BOT_USERNAME);
-
-    await updateJobStep(env, job.id, 'Completing', { status: 'running' });
-    const review = await github.createReview(job.owner, job.repo, job.prNumber, {
+  let resolved = extracted;
+  const githubClient = new GitHubClient(env, installationId);
+  if (eventName === 'issue_comment') {
+    const pr = await githubClient.getPullRequest(extracted.owner, extracted.repo, extracted.prNumber);
+    resolved = {
+      ...extracted,
+      prTitle: pr.title,
+      prAuthor: pr.user.login,
       commitSha: pr.head.sha,
-      event: formatter.toReviewEvent(verdictSummary.verdict),
-      body: formattedSummary,
-      comments: reviewedComments.map(c => ({
-        path: c.path,
-        position: c.position ?? undefined,
-        body: formatter.formatInlineComment(c)
-      })),
-    });
+      baseSha: pr.base.sha,
+      headRef: pr.head.ref,
+      baseRef: pr.base.ref,
+    };
+  }
 
-    if (config.review.labels !== false) {
-      const labels = config.review.labels;
-      const labelMap = {
-        comment: { name: labels.p1, color: 'f79009' },
-        approve: { name: labels.p2, color: '027a48' },
-      } as const;
-      const label = labelMap[verdictSummary.verdict];
-
-      // Remove other verdict labels if they exist
-      const allPotentialLabels = [labels.p1, labels.p2, labels.p3];
-      for (const l of allPotentialLabels) {
-        if (l !== label.name) {
-          await github.removeIssueLabel(job.owner, job.repo, job.prNumber, l);
-        }
-      }
-
-      await github.ensureLabel(job.owner, job.repo, label.name, label.color);
-      await github.addIssueLabels(job.owner, job.repo, job.prNumber, [label.name]);
+  const duplicateJob = await findExistingJobForHead(env, {
+    owner: resolved.owner,
+    repo: resolved.repo,
+    prNumber: resolved.prNumber,
+    commitSha: resolved.commitSha,
+    trigger: resolved.trigger,
+  });
+  if (duplicateJob) {
+    if (duplicateJob.status === 'queued' || duplicateJob.status === 'running') {
+      logger.info(`Resuming duplicate in-flight job ${duplicateJob.id} for ${resolved.owner}/${resolved.repo} PR #${resolved.prNumber}.`);
+      return { job: duplicateJob, phase: message.phase ?? 'prepare' };
     }
 
+    logger.info(`Duplicate terminal job found for ${resolved.owner}/${resolved.repo} PR #${resolved.prNumber}, skipping.`);
+    return null;
+  }
+
+  const job = await insertJob(env, {
+    installationId: resolved.installationId,
+    owner: resolved.owner,
+    repo: resolved.repo,
+    prNumber: resolved.prNumber,
+    prTitle: resolved.prTitle,
+    prAuthor: resolved.prAuthor,
+    commitSha: resolved.commitSha,
+    baseSha: resolved.baseSha,
+    trigger: resolved.trigger,
+    headRef: resolved.headRef,
+    baseRef: resolved.baseRef,
+    configSnapshot: repoConfig.parsedJson,
+  });
+
+  await supersedeOlderJobs(env, {
+    installationId: resolved.installationId,
+    owner: resolved.owner,
+    repo: resolved.repo,
+    prNumber: resolved.prNumber,
+    newJobId: job.id,
+  });
+
+  return { job, phase: 'prepare' };
+}
+
+async function runPreparePhase(
+  env: AppBindings,
+  job: PersistedReviewJob,
+  leaseOwner: string,
+  github: GitHubService,
+) {
+  await updateJobStep(env, job.id, 'Preparation', { status: 'running' });
+  const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
+  const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
+
+  let checkRunId = job.checkRunId;
+  if (!checkRunId) {
+    const checkRun = await github.createCheckRun(job.owner, job.repo, {
+      headSha: pr.head.sha,
+      title: 'Review queued',
+      summary: 'Codra has started reviewing this pull request.',
+    });
+    checkRunId = checkRun.id;
+    await updateJobCheckRun(env, job.id, checkRun.id);
+  }
+
+  const rawDiff = await github.getPullRequestDiff(job.owner, job.repo, job.prNumber);
+  const files = filterReviewableFiles(parseUnifiedDiff(rawDiff), config.review);
+  await completePreparationStep(env, job.id, files.length);
+  await heartbeatJobLease(env, job.id, leaseOwner, JOB_LEASE_SECONDS);
+
+  if (files.length === 0) {
+    await updateJobStep(env, job.id, 'Reviewing Files', { status: 'done' });
+    await enqueueJobPhase(env, job.id, 'finalize');
+    return;
+  }
+
+  if (checkRunId) {
     await github.updateCheckRun(job.owner, job.repo, checkRunId, {
+      title: `Reviewing (0/${files.length})`,
+      summary: 'Codra is analyzing changed files.',
+    });
+  }
+  await enqueueJobPhase(env, job.id, 'review');
+}
+
+async function runReviewPhase(
+  env: AppBindings,
+  job: PersistedReviewJob,
+  leaseOwner: string,
+  github: GitHubService,
+  model: ModelService,
+) {
+  if (!hasCompletedStep(job, 'Preparation')) {
+    await runPreparePhase(env, job, leaseOwner, github);
+    return;
+  }
+
+  await updateJobStep(env, job.id, 'Reviewing Files', { status: 'running' });
+
+  const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
+  const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
+  const rawDiff = await github.getPullRequestDiff(job.owner, job.repo, job.prNumber);
+  const files = filterReviewableFiles(parseUnifiedDiff(rawDiff), config.review);
+  const totalLineCount = files.reduce((sum, file) => sum + file.lineCount, 0);
+  const startedAt = Date.now();
+  let processedThisChunk = 0;
+
+  const jobIdsToQuery = [job.id];
+  if (job.retryOfJobId) jobIdsToQuery.push(job.retryOfJobId);
+  const allExistingReviews = await getFileReviewsForJobs(env, jobIdsToQuery);
+  const currentReviews = new Map(allExistingReviews.filter((review) => review.job_id === job.id).map((review) => [review.file_path, review]));
+  const parentReviews = new Map(allExistingReviews.filter((review) => review.job_id !== job.id && review.file_status === 'done').map((review) => [review.file_path, review]));
+
+  for (const file of files) {
+    const existingReview = currentReviews.get(file.path);
+    if (existingReview && countsAsHandledFileReview(existingReview)) {
+      continue;
+    }
+
+    const inherited = parentReviews.get(file.path);
+    if (inherited) {
+      await upsertFileReview(env, job.id, {
+        filePath: file.path,
+        fileStatus: 'done',
+        modelUsed: inherited.model_used,
+        modelProvider: inherited.model_provider,
+        diffLineCount: inherited.diff_line_count,
+        diffInput: inherited.diff_input,
+        rawAiOutput: inherited.raw_ai_output,
+        parsedComments: inherited.parsed_comments as ParsedReviewComment[],
+        inputTokens: inherited.input_tokens,
+        outputTokens: inherited.output_tokens,
+        durationMs: inherited.duration_ms,
+        verdict: inherited.verdict,
+        fileSummary: inherited.file_summary,
+        overallCorrectness: inherited.overall_correctness,
+        confidenceScore: inherited.confidence_score,
+        errorMessage: null,
+      });
+      currentReviews.set(file.path, inherited);
+      processedThisChunk += 1;
+      await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
+    } else {
+      await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model);
+      currentReviews.set(file.path, true as any);
+      processedThisChunk += 1;
+      await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
+    }
+
+    if (processedThisChunk >= REVIEW_CHUNK_FILE_LIMIT || Date.now() - startedAt >= REVIEW_CHUNK_WALL_CLOCK_MS) {
+      break;
+    }
+  }
+
+  const latestReviews = await getFileReviewsForJobs(env, [job.id]);
+  const reviewedPaths = new Set(latestReviews.filter(countsAsHandledFileReview).map((review) => review.file_path));
+  const completedCount = files.filter((file) => reviewedPaths.has(file.path)).length;
+
+  if (completedCount >= files.length) {
+    await updateJobStep(env, job.id, 'Reviewing Files', { status: 'done' });
+    await enqueueJobPhase(env, job.id, 'finalize');
+    return;
+  }
+
+  if (job.checkRunId) {
+    await github.updateCheckRun(job.owner, job.repo, job.checkRunId, {
+      title: `Reviewing (${completedCount}/${files.length})`,
+      summary: 'Codra is continuing this review in the next queue chunk.',
+    });
+  }
+  await enqueueJobPhase(env, job.id, 'review');
+}
+
+async function reviewAndPersistFile(
+  env: AppBindings,
+  job: PersistedReviewJob,
+  file: ReturnType<typeof parseUnifiedDiff>[number],
+  pr: Awaited<ReturnType<GitHubService['getPullRequest']>>,
+  config: RepoConfig,
+  totalLineCount: number,
+  model: ModelService,
+) {
+  const startedAt = Date.now();
+  try {
+    const response = await model.reviewFile({
+      file,
+      prTitle: pr.title ?? null,
+      prDescription: pr.body ?? null,
+      config,
+      totalLineCount,
+    });
+
+    await upsertFileReview(env, job.id, {
+      filePath: file.path,
+      fileStatus: 'done',
+      modelUsed: response.modelUsed,
+      modelProvider: response.provider,
+      diffLineCount: file.lineCount,
+      diffInput: response.userPrompt,
+      rawAiOutput: response.rawText,
+      parsedComments: response.parsed.comments,
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
+      durationMs: Date.now() - startedAt,
+      verdict: response.parsed.verdict,
+      fileSummary: response.parsed.fileSummary,
+      overallCorrectness: response.parsed.overallCorrectness,
+      confidenceScore: response.parsed.confidenceScore,
+      errorMessage: null,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown file review error';
+
+    if (isRetryableModelError(error)) {
+      logger.warn(`File review deferred for ${file.path}; transient model/provider failure will retry later`, {
+        error: errorMessage,
+      });
+      throw error;
+    }
+
+    logger.error(`File review failed for ${file.path}`, { error });
+
+    const isHardLimit =
+      errorMessage.toLowerCase().includes('subrequest') ||
+      errorMessage.includes('4006') ||
+      errorMessage.toLowerCase().includes('allocation');
+
+    if (isHardLimit) {
+      throw error;
+    }
+
+    const modelId = config.model?.main ?? 'gemma-4-31b-it';
+    await upsertFileReview(env, job.id, {
+      filePath: file.path,
+      fileStatus: 'failed',
+      modelUsed: modelId,
+      modelProvider: modelId.startsWith('@cf/') ? 'cloudflare' : 'google',
+      diffLineCount: file.lineCount,
+      diffInput: '',
+      rawAiOutput: null,
+      parsedComments: [],
+      inputTokens: null,
+      outputTokens: null,
+      durationMs: Date.now() - startedAt,
+      verdict: null,
+      fileSummary: null,
+      errorMessage,
+    });
+  }
+}
+
+async function runFinalizePhase(
+  env: AppBindings,
+  job: PersistedReviewJob,
+  leaseOwner: string,
+  github: GitHubService,
+  model: ModelService,
+  formatter: FormatterService,
+) {
+  await updateJobStep(env, job.id, 'Generating Summary', { status: 'running' });
+
+  const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
+  const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
+  const rawDiff = await github.getPullRequestDiff(job.owner, job.repo, job.prNumber);
+  const files = filterReviewableFiles(parseUnifiedDiff(rawDiff), config.review);
+  const reviews = await getFileReviewsForJobs(env, [job.id]);
+
+  if (reviews.length < files.length) {
+    await updateJobStep(env, job.id, 'Reviewing Files', { status: 'running' });
+    await enqueueJobPhase(env, job.id, 'review');
+    return;
+  }
+
+  const reviewedComments = reviews.flatMap((review) => review.parsed_comments as ParsedReviewComment[]);
+  const fileSummaries = reviews.map((review) => ({
+    path: review.file_path,
+    summary: review.file_status === 'failed'
+      ? `Review failed: ${review.error_msg ?? 'Unknown file review error'}`
+      : (review.file_summary ?? ''),
+    verdict: review.file_status === 'failed' ? 'failed' : (review.verdict ?? 'comment'),
+  }));
+
+  if (fileSummaries.length > 0 && fileSummaries.every((file) => file.verdict === 'failed')) {
+    await updateJobStep(env, job.id, 'Generating Summary', { status: 'failed', error: 'All files failed to review' });
+    throw new Error('All files failed to review');
+  }
+
+  const hasFailures = fileSummaries.some((file) => file.verdict === 'failed');
+  const verdictSummary = formatter.summarizeVerdict(reviewedComments, hasFailures);
+  const summaryResponse = await model.generateSummary({
+    prTitle: pr.title ?? null,
+    verdict: verdictSummary.verdict,
+    fileSummaries,
+    config,
+  });
+  await updateJobStep(env, job.id, 'Generating Summary', { status: 'done' });
+  await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
+
+  const formattedSummary = formatter.formatReviewOverview(pr.head.sha, env.BOT_USERNAME);
+
+  await updateJobStep(env, job.id, 'Completing', { status: 'running' });
+  const review = await github.createReview(job.owner, job.repo, job.prNumber, {
+    commitSha: pr.head.sha,
+    event: formatter.toReviewEvent(verdictSummary.verdict),
+    body: formattedSummary,
+    comments: reviewedComments.map(comment => ({
+      path: comment.path,
+      position: comment.position ?? undefined,
+      body: formatter.formatInlineComment(comment),
+    })),
+  });
+
+  if (config.review.labels !== false) {
+    const labels = config.review.labels;
+    const labelMap = {
+      comment: { name: labels.p1, color: 'f79009' },
+      approve: { name: labels.p2, color: '027a48' },
+    } as const;
+    const label = labelMap[verdictSummary.verdict];
+
+    for (const possibleLabel of [labels.p1, labels.p2, labels.p3]) {
+      if (possibleLabel !== label.name) {
+        await github.removeIssueLabel(job.owner, job.repo, job.prNumber, possibleLabel);
+      }
+    }
+
+    await github.ensureLabel(job.owner, job.repo, label.name, label.color);
+    await github.addIssueLabels(job.owner, job.repo, job.prNumber, [label.name]);
+  }
+
+  if (job.checkRunId) {
+    await github.updateCheckRun(job.owner, job.repo, job.checkRunId, {
       status: 'completed',
       conclusion: hasFailures ? 'failure' : (verdictSummary.verdict === 'approve' ? 'success' : 'neutral'),
       title: hasFailures ? 'Review partially failed' : (verdictSummary.verdict === 'approve' ? 'LGTM' : 'Comments posted'),
       summary: `${reviewedComments.length} inline comments across ${files.length} files.${hasFailures ? ' Some files failed to parse.' : ''}`,
     });
+  }
 
-    const finalUsage = tracker.getTotalUsage();
-    logger.info(`Final token usage for job ${job.id}:`, {
-      total: finalUsage,
-      breakdown: tracker.getBreakdown()
-    });
+  const fileInputTokens = reviews.reduce((sum, review) => sum + (review.input_tokens ?? 0), 0);
+  const fileOutputTokens = reviews.reduce((sum, review) => sum + (review.output_tokens ?? 0), 0);
+  await completeJob(env, job.id, {
+    verdict: verdictSummary.verdict,
+    fileCount: files.length,
+    commentCount: reviewedComments.length,
+    totalInputTokens: fileInputTokens + (summaryResponse.inputTokens ?? 0),
+    totalOutputTokens: fileOutputTokens + (summaryResponse.outputTokens ?? 0),
+    summaryMarkdown: formattedSummary,
+    reviewId: review.id,
+    summaryModel: summaryResponse.modelUsed,
+  });
+  await updateJobStep(env, job.id, 'Completing', { status: 'done' });
+  logger.info(`Review job completed: ${job.owner}/${job.repo} PR #${job.prNumber}`);
+}
 
-    await completeJob(env, job.id, {
-      verdict: verdictSummary.verdict,
-      fileCount: files.length,
-      commentCount: reviewedComments.length,
-      totalInputTokens: finalUsage.input,
-      totalOutputTokens: finalUsage.output,
-      summaryMarkdown: formattedSummary,
-      reviewId: review.id,
-      summaryModel: summaryResponse.modelUsed,
-    });
-    await updateJobStep(env, job.id, 'Completing', { status: 'done' });
-    logger.info(`Review job completed: ${job.owner}/${job.repo} PR #${job.prNumber}`);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown review failure';
-    if (message === 'JOB_SUPERSEDED') {
-      logger.info(`Job ${job.id} was superseded during execution, stopping.`);
-      return;
+async function heartbeatAndCheckSuperseded(env: AppBindings, jobId: string, leaseOwner: string) {
+  await heartbeatJobLease(env, jobId, leaseOwner, JOB_LEASE_SECONDS);
+  const currentJob = await getJobForProcessing(env, jobId);
+  if (currentJob?.status === 'superseded') {
+    throw new Error('JOB_SUPERSEDED');
+  }
+}
+
+async function enqueueJobPhase(
+  env: AppBindings,
+  jobId: string,
+  phase: 'prepare' | 'review' | 'finalize',
+  delaySeconds = 0,
+) {
+  await markJobContinuationQueued(env, jobId);
+  await env.REVIEW_QUEUE.send(
+    {
+      jobId,
+      deliveryId: crypto.randomUUID(),
+      phase,
+    },
+    delaySeconds > 0 ? { delaySeconds } : undefined,
+  );
+}
+
+function hasCompletedStep(job: PersistedReviewJob, stepName: string) {
+  return job.steps.some((step) => step.name === stepName && step.status === 'done');
+}
+
+async function failJobAndCheckRun(
+  env: AppBindings,
+  job: PersistedReviewJob,
+  github: GitHubService,
+  message: string,
+) {
+  try {
+    await failJob(env, job.id, message);
+    const latest = await getJobForProcessing(env, job.id);
+    const checkRunId = latest?.check_run_id ?? job.checkRunId;
+    if (checkRunId) {
+      await github.updateCheckRun(job.owner, job.repo, checkRunId, {
+        status: 'completed',
+        conclusion: 'failure',
+        title: 'Review failed',
+        summary: message,
+      });
+      await markJobCheckRunCompleted(env, job.id);
     }
-
-    logger.error(`Review job failed: ${job.owner}/${job.repo} PR #${job.prNumber}`, error);
-
-    // Attempt to record failure, but don't crash if we are out of subrequests
-    try {
-      await failJob(env, job.id, message);
-      if (checkRunId) {
-        await github.updateCheckRun(job.owner, job.repo, checkRunId, {
-          status: 'completed',
-          conclusion: 'failure',
-          title: 'Review failed',
-          summary: message,
-        });
-      }
-    } catch (innerError) {
-      logger.error('Failed to record job failure in DB/GitHub (likely subrequest limit reached)', innerError);
-    }
+  } catch (innerError) {
+    logger.error('Failed to record job failure in DB/GitHub', innerError);
   }
 }

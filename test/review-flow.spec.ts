@@ -3,6 +3,7 @@ import { createTestEnv, generateMockDiff, hasConfiguredTestDatabaseUrl } from '.
 import { vi } from 'vitest';
 import { findExistingJobForHead, getJobForProcessing, insertJob } from '@server/db/jobs';
 import { defaultRepoConfig } from '@shared/schema';
+import { runWithDb } from '@server/db/client';
 
 const sha = (char: string) => char.repeat(40);
 
@@ -65,20 +66,36 @@ vi.mock('@server/services/model', () => {
             };
         }
     }
-    return { ModelService: MockModelService };
+    return {
+        ModelService: MockModelService,
+        isRetryableModelError: (error: unknown) => Boolean(error && typeof error === 'object' && (error as any).retryable === true),
+    };
 });
 
 const dbDescribe = hasConfiguredTestDatabaseUrl() ? describe : describe.skip;
+const REVIEW_FLOW_TIMEOUT_MS = 60_000;
 
 dbDescribe('Review Flow Lifecycle', () => {
   const env = createTestEnv();
+
+  async function runAndDrain(message: Parameters<typeof runReviewJob>[1]) {
+    await runWithDb(env, async () => {
+      (env.REVIEW_QUEUE as any).sent.length = 0;
+      await runReviewJob(env, message);
+      const queue = env.REVIEW_QUEUE as any;
+      while (queue.sent.length > 0) {
+        const next = queue.sent.shift();
+        await runReviewJob(env, next);
+      }
+    });
+  }
 
   it('completes a full review from pending job to finished', async () => {
     const repo = `test-repo-${Date.now()}-full`;
     const headSha = sha('a');
     const baseSha = sha('b');
 
-    await runReviewJob(env, {
+    await runAndDrain({
       deliveryId: 'delivery-123',
       eventName: 'pull_request',
       payload: {
@@ -104,7 +121,7 @@ dbDescribe('Review Flow Lifecycle', () => {
       trigger: 'auto',
     });
     expect(finalJob?.status).toBe('done');
-  });
+  }, REVIEW_FLOW_TIMEOUT_MS);
 
   it('stops processing if the job is superseded mid-way', async () => {
       const { GitHubService } = await import('@server/services/github');
@@ -133,7 +150,7 @@ dbDescribe('Review Flow Lifecycle', () => {
           return generateMockDiff([{ path: 'test.ts', content: 'a' }]);
       });
 
-      await runReviewJob(env, {
+      await runAndDrain({
         deliveryId: 'delivery-456',
         eventName: 'pull_request',
         payload: {
@@ -160,7 +177,7 @@ dbDescribe('Review Flow Lifecycle', () => {
       });
       expect(finalJob?.status).toBe('superseded');
       expect(finalJob?.verdict).toBeNull();
-  });
+  }, REVIEW_FLOW_TIMEOUT_MS);
 
   it('processes a pre-created retry job from a queue message', async () => {
     const repo = `test-repo-${Date.now()}-retry`;
@@ -199,14 +216,14 @@ dbDescribe('Review Flow Lifecycle', () => {
       retryOfJobId: source.id,
     });
 
-    await runReviewJob(env, {
+    await runAndDrain({
       jobId: retry.id,
       deliveryId: 'delivery-retry',
     });
 
     const finalJob = await getJobForProcessing(env, retry.id);
     expect(finalJob?.status).toBe('done');
-  });
+  }, REVIEW_FLOW_TIMEOUT_MS);
 
   it('resumes an existing queued duplicate job instead of stranding it', async () => {
     const repo = `test-repo-${Date.now()}-duplicate`;
@@ -228,7 +245,7 @@ dbDescribe('Review Flow Lifecycle', () => {
       configSnapshot: defaultRepoConfig,
     });
 
-    await runReviewJob(env, {
+    await runAndDrain({
       deliveryId: 'delivery-duplicate',
       eventName: 'pull_request',
       payload: {
@@ -248,5 +265,5 @@ dbDescribe('Review Flow Lifecycle', () => {
 
     const finalJob = await getJobForProcessing(env, existing.id);
     expect(finalJob?.status).toBe('done');
-  });
+  }, REVIEW_FLOW_TIMEOUT_MS);
 });

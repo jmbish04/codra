@@ -3,8 +3,51 @@ import type { AppBindings } from '@server/env';
 import { TimeoutError } from '@server/core/timeout';
 import type { ModelResponse } from './types';
 
-/** Max wall-clock time allowed for a single Workers-AI call (600 s). */
-const CLOUDFLARE_TIMEOUT_MS = 600_000;
+/** Max wall-clock time allowed for a single Workers-AI call. */
+const CLOUDFLARE_TIMEOUT_MS = 45_000;
+const CLOUDFLARE_MAX_RETRIES = 1;
+
+function isText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function extractMessageContent(content: unknown): string | null {
+  if (isText(content)) return content.trim();
+
+  if (Array.isArray(content)) {
+    const text = content
+      .map((part) => {
+        if (isText(part)) return part;
+        if (part && typeof part === 'object' && isText((part as any).text)) return (part as any).text;
+        return '';
+      })
+      .join('')
+      .trim();
+    return text || null;
+  }
+
+  return null;
+}
+
+function extractCloudflareText(result: any, model: string): string {
+  if (isText(result)) return result.trim();
+  if (isText(result?.response)) return result.response.trim();
+  if (isText(result?.result?.response)) return result.result.response.trim();
+
+  const choice = result?.choices?.[0];
+  const content = extractMessageContent(choice?.message?.content);
+  if (content) return content;
+
+  const finishReason = choice?.finish_reason ?? choice?.stop_reason;
+  if (finishReason) {
+    throw new Error(`Cloudflare model ${model} returned no review content (finish_reason=${finishReason}).`);
+  }
+  if (isText(choice?.message?.reasoning) || isText(choice?.message?.reasoning_content)) {
+    throw new Error(`Cloudflare model ${model} returned reasoning without review content.`);
+  }
+
+  throw new Error(`Cloudflare model ${model} returned an empty response.`);
+}
 
 export async function reviewWithCloudflare(
   env: Pick<AppBindings, 'AI'>,
@@ -12,7 +55,7 @@ export async function reviewWithCloudflare(
   input: { systemPrompt: string; userPrompt: string },
   tracker?: { incrementSubrequests(count?: number): void },
 ): Promise<ModelResponse> {
-  const maxRetries = 2;
+  const maxRetries = CLOUDFLARE_MAX_RETRIES;
   let lastError: any;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -39,17 +82,14 @@ export async function reviewWithCloudflare(
             { role: 'user', content: input.userPrompt },
           ],
           max_completion_tokens: 4096,
+          temperature: 0,
         }),
         timeoutPromise,
       ]);
       const durationMs = Date.now() - startTime;
       logger.info(`AI model ${model} responded in ${durationMs}ms`);
 
-      const rawText =
-        result?.response ??
-        result?.result?.response ??
-        result?.choices?.[0]?.message?.content ??
-        (typeof result === 'string' ? result : JSON.stringify(result));
+      const rawText = extractCloudflareText(result, model);
 
       return {
         rawText,

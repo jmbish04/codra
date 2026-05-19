@@ -3,7 +3,7 @@ import { parseJsonColumn, queryRows } from './client';
 import { defaultRepoConfig, jobDetailSchema, jobSummarySchema, repoConfigSchema, type RepoConfig } from '@shared/schema';
 import { getOrCreateRepository } from './repositories';
 
-type JobRow = {
+export type JobRow = {
   id: string;
   installation_id: string;
   owner: string;
@@ -17,9 +17,15 @@ type JobRow = {
   status: 'queued' | 'running' | 'done' | 'failed' | 'superseded';
   config_snapshot: { review?: RepoConfig['review']; model?: RepoConfig['model'] } | string | null;
   check_run_id: number | null;
+  check_run_completed_at: string | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  heartbeat_at: string | null;
+  recovery_count: number | null;
+  last_queue_message_at: string | null;
   total_input_tokens: number | null;
   total_output_tokens: number | null;
   verdict: 'approve' | 'comment' | null;
@@ -49,6 +55,12 @@ type JobDetailRow = JobRow & {
 };
 
 type ByteaValue = ArrayBuffer | ArrayBufferView | string;
+
+export type JobLeaseClaim =
+  | { status: 'claimed'; row: JobRow }
+  | { status: 'busy'; row: JobRow; retryAfterSeconds: number }
+  | { status: 'terminal'; row: JobRow }
+  | { status: 'missing' };
 
 function hexToBytes(hex: string) {
   const bytes = new Uint8Array(hex.length / 2);
@@ -366,6 +378,108 @@ export async function startJobProcessing(env: Pick<AppBindings, 'HYPERDRIVE'>, j
   return rows.length > 0;
 }
 
+export async function claimJobLease(
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  jobId: string,
+  leaseOwner: string,
+  leaseSeconds: number,
+): Promise<JobLeaseClaim> {
+  const [claimed] = await queryRows<JobRow>(
+    env,
+    `
+      WITH claimed AS (
+        UPDATE jobs
+        SET status = CASE WHEN status = 'queued' THEN 'running' ELSE status END,
+            started_at = COALESCE(started_at, now()),
+            lease_owner = $2,
+            lease_expires_at = now() + ($3 || ' seconds')::interval,
+            heartbeat_at = now(),
+            last_queue_message_at = now()
+        WHERE id = $1
+          AND status IN ('queued', 'running')
+          AND (
+            lease_expires_at IS NULL
+            OR lease_expires_at < now()
+            OR lease_owner = $2
+          )
+        RETURNING *
+      )
+      SELECT c.*, r.owner, r.repo, r.installation_id
+      FROM claimed c
+      JOIN repositories r ON c.repository_id = r.id
+    `,
+    [jobId, leaseOwner, String(leaseSeconds)],
+  );
+
+  if (claimed) {
+    return { status: 'claimed', row: claimed };
+  }
+
+  const row = await getJobForProcessing(env, jobId);
+  if (!row) {
+    return { status: 'missing' };
+  }
+
+  if (!['queued', 'running'].includes(row.status)) {
+    return { status: 'terminal', row };
+  }
+
+  const expiresAt = row.lease_expires_at ? new Date(row.lease_expires_at).getTime() : 0;
+  const secondsUntilExpiry = Math.ceil((expiresAt - Date.now()) / 1000);
+  return {
+    status: 'busy',
+    row,
+    retryAfterSeconds: Math.max(15, Math.min(60, Number.isFinite(secondsUntilExpiry) ? secondsUntilExpiry : 60)),
+  };
+}
+
+export async function heartbeatJobLease(
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  jobId: string,
+  leaseOwner: string,
+  leaseSeconds: number,
+) {
+  await queryRows(
+    env,
+    `
+      UPDATE jobs
+      SET heartbeat_at = now(),
+          lease_expires_at = now() + ($3 || ' seconds')::interval
+      WHERE id = $1
+        AND lease_owner = $2
+        AND status = 'running'
+    `,
+    [jobId, leaseOwner, String(leaseSeconds)],
+  );
+}
+
+export async function releaseJobLease(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string, leaseOwner: string) {
+  await queryRows(
+    env,
+    `
+      UPDATE jobs
+      SET lease_owner = NULL,
+          lease_expires_at = NULL
+      WHERE id = $1
+        AND lease_owner = $2
+    `,
+    [jobId, leaseOwner],
+  );
+}
+
+export async function markJobContinuationQueued(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string) {
+  await queryRows(
+    env,
+    `
+      UPDATE jobs
+      SET last_queue_message_at = now()
+      WHERE id = $1
+        AND status = 'running'
+    `,
+    [jobId],
+  );
+}
+
 export async function updateJobCheckRun(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string, checkRunId: number) {
   await queryRows(
     env,
@@ -399,6 +513,9 @@ export async function completeJob(
       UPDATE jobs
       SET status = 'done',
           finished_at = now(),
+          check_run_completed_at = now(),
+          lease_owner = NULL,
+          lease_expires_at = NULL,
           verdict = $2,
           file_count = $3,
           comment_count = $4,
@@ -433,6 +550,8 @@ export async function failJob(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: strin
       UPDATE jobs
       SET status = 'failed',
           finished_at = now(),
+          lease_owner = NULL,
+          lease_expires_at = NULL,
           error_msg = $2,
           steps = CASE
             WHEN steps IS NOT NULL THEN (
@@ -449,6 +568,18 @@ export async function failJob(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: strin
       WHERE id = $1
     `,
     [jobId, errorMessage],
+  );
+}
+
+export async function markJobCheckRunCompleted(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string) {
+  await queryRows(
+    env,
+    `
+      UPDATE jobs
+      SET check_run_completed_at = now()
+      WHERE id = $1
+    `,
+    [jobId],
   );
 }
 
@@ -580,6 +711,126 @@ export async function recoverStaleJobs(
   return rows.length;
 }
 
+export async function recoverExpiredJobLeases(
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  maxRecoveryCount = 3,
+  unleasedGraceSeconds = 120,
+) {
+  const requeued = await queryRows<{ id: string }>(
+    env,
+    `
+      WITH expired AS (
+        SELECT id
+        FROM jobs
+        WHERE status = 'running'
+          AND (
+            (
+              lease_expires_at IS NOT NULL
+              AND lease_expires_at < now()
+            )
+            OR (
+              lease_expires_at IS NULL
+              AND COALESCE(last_queue_message_at, heartbeat_at, started_at, created_at) < now() - ($2 || ' seconds')::interval
+            )
+          )
+          AND recovery_count < $1
+        ORDER BY COALESCE(lease_expires_at, last_queue_message_at, heartbeat_at, started_at, created_at) ASC
+        LIMIT 25
+        FOR UPDATE SKIP LOCKED
+      )
+      UPDATE jobs j
+      SET lease_owner = NULL,
+          lease_expires_at = NULL,
+          heartbeat_at = NULL,
+          recovery_count = recovery_count + 1,
+          last_queue_message_at = now(),
+          error_msg = NULL
+      FROM expired
+      WHERE j.id = expired.id
+      RETURNING j.id
+    `,
+    [maxRecoveryCount, String(unleasedGraceSeconds)],
+  );
+
+  const failed = await queryRows<JobRow>(
+    env,
+    `
+      WITH expired AS (
+        SELECT id
+        FROM jobs
+        WHERE status = 'running'
+          AND (
+            (
+              lease_expires_at IS NOT NULL
+              AND lease_expires_at < now()
+            )
+            OR (
+              lease_expires_at IS NULL
+              AND COALESCE(last_queue_message_at, heartbeat_at, started_at, created_at) < now() - ($2 || ' seconds')::interval
+            )
+          )
+          AND recovery_count >= $1
+        ORDER BY COALESCE(lease_expires_at, last_queue_message_at, heartbeat_at, started_at, created_at) ASC
+        LIMIT 25
+        FOR UPDATE SKIP LOCKED
+      ),
+      updated AS (
+        UPDATE jobs j
+        SET status = 'failed',
+            finished_at = now(),
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            heartbeat_at = NULL,
+            error_msg = 'Job timed out: worker crashed or was evicted.',
+            steps = CASE
+              WHEN steps IS NOT NULL THEN (
+                SELECT jsonb_agg(
+                  CASE
+                    WHEN s->>'status' = 'running'
+                    THEN s || jsonb_build_object('status', 'failed', 'finishedAt', now(), 'error', 'Job timed out: worker crashed or was evicted.')
+                    ELSE s
+                  END
+                ) FROM jsonb_array_elements(steps) s
+              )
+              ELSE steps
+            END
+        FROM expired
+        WHERE j.id = expired.id
+        RETURNING j.*
+      )
+      SELECT u.*, r.owner, r.repo, r.installation_id
+      FROM updated u
+      JOIN repositories r ON u.repository_id = r.id
+    `,
+    [maxRecoveryCount, String(unleasedGraceSeconds)],
+  );
+
+  return {
+    requeuedJobIds: requeued.map((row) => row.id),
+    failedJobs: failed,
+  };
+}
+
+export async function getTerminalJobsNeedingCheckRunCompletion(
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  limit = 25,
+) {
+  return queryRows<JobRow>(
+    env,
+    `
+      SELECT j.*, r.owner, r.repo, r.installation_id
+      FROM jobs j
+      JOIN repositories r ON j.repository_id = r.id
+      WHERE j.status IN ('failed', 'superseded')
+        AND j.check_run_id IS NOT NULL
+        AND j.check_run_completed_at IS NULL
+      ORDER BY COALESCE(j.finished_at, j.started_at, j.created_at) ASC
+      LIMIT $1
+    `,
+    [limit],
+  );
+}
+
 export async function supersedeOlderJobs(
   env: Pick<AppBindings, 'HYPERDRIVE'>,
   input: {
@@ -596,6 +847,8 @@ export async function supersedeOlderJobs(
       UPDATE jobs j
       SET status = 'superseded',
           finished_at = now(),
+          lease_owner = NULL,
+          lease_expires_at = NULL,
           error_msg = 'Superseded by a newer commit or job.'
       FROM repositories r
       WHERE j.repository_id = r.id

@@ -16,6 +16,22 @@ const MODEL_ALIASES: Record<string, string> = {
   'gemma-4-26b': 'gemma-4-26b-a4b-it',
 };
 
+export class RetryableModelError extends Error {
+  readonly retryable = true;
+
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = 'RetryableModelError';
+    if (cause !== undefined) {
+      (this as any).cause = cause;
+    }
+  }
+}
+
+export function isRetryableModelError(error: unknown) {
+  return Boolean(error && typeof error === 'object' && (error as any).retryable === true);
+}
+
 function isCloudflareModel(model: string) {
   return model.startsWith('@cf/');
 }
@@ -36,6 +52,29 @@ function isCloudflareAllocationError(error: unknown) {
 function isGoogleRateLimitError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes('429') || message.includes('RESOURCE_EXHAUSTED') || message.toLowerCase().includes('quota exceeded');
+}
+
+function isTransientModelFailure(error: unknown) {
+  if (isRetryableModelError(error)) return true;
+  if (isCloudflareAllocationError(error)) return false;
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+
+  return (
+    isGoogleRateLimitError(error) ||
+    /\b50[0-9]\b/.test(message) ||
+    lower.includes('internal error') ||
+    lower.includes('unavailable') ||
+    lower.includes('high demand') ||
+    lower.includes('timeout') ||
+    lower.includes('timed out') ||
+    lower.includes('fetch failed') ||
+    lower.includes('network') ||
+    lower.includes('temporar') ||
+    lower.includes('returned no review content') ||
+    lower.includes('empty response') ||
+    lower.includes('[redacted]')
+  );
 }
 
 export class ModelService {
@@ -110,6 +149,7 @@ export class ModelService {
     const modelsToTry = [primary, ...fallbacks];
 
     let lastError: any;
+    let sawTransientFailure = false;
     const unavailableProviders = new Set<string>();
     for (const currentModel of modelsToTry) {
       if (isCloudflareModel(currentModel) && unavailableProviders.has('cloudflare')) {
@@ -136,6 +176,9 @@ export class ModelService {
           };
         } catch (error: any) {
           lastError = error;
+          if (isTransientModelFailure(error)) {
+            sawTransientFailure = true;
+          }
           attempts++;
           if (isCloudflareModel(currentModel) && isCloudflareAllocationError(error)) {
             unavailableProviders.add('cloudflare');
@@ -157,6 +200,14 @@ export class ModelService {
           break; // Move to next model in fallbacks
         }
       }
+    }
+
+    if (sawTransientFailure) {
+      const lastMessage = lastError instanceof Error ? lastError.message : String(lastError ?? 'Unknown model error');
+      throw new RetryableModelError(
+        `All configured review models failed for ${params.file.path}; retrying later. Last error: ${lastMessage}`,
+        lastError,
+      );
     }
 
     throw lastError;

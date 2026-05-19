@@ -49,8 +49,8 @@ export class MockAssets {
 export class MockQueue {
   public readonly sent: any[] = [];
 
-  async send(message: any) {
-    this.sent.push(message);
+  async send(message: any, options?: { delaySeconds?: number }) {
+    this.sent.push({ ...message, options });
   }
 }
 

@@ -145,6 +145,7 @@ export const repoConfigSchema = z.object({
 export const reviewJobMessageSchema = z.object({
   jobId: z.string().uuid().optional(),
   deliveryId: z.string().min(1),
+  phase: z.enum(['prepare', 'review', 'finalize']).optional(),
   eventName: z.string().min(1).optional(),
   payload: z.any().optional(),
   installationId: z.string().min(1).optional(),

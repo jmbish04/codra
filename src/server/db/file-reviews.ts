@@ -93,6 +93,113 @@ export async function insertFileReview(
   }
 }
 
+export async function upsertFileReview(
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  jobId: string,
+  input: {
+    filePath: string;
+    fileStatus: 'pending' | 'done' | 'skipped' | 'failed';
+    modelUsed: string;
+    modelProvider?: string | null;
+    diffLineCount: number;
+    diffInput: string | null;
+    rawAiOutput: string | null;
+    parsedComments: ParsedReviewComment[];
+    inputTokens: number | null;
+    outputTokens: number | null;
+    durationMs: number | null;
+    verdict: 'approve' | 'comment' | null;
+    fileSummary: string | null;
+    overallCorrectness?: string | null;
+    confidenceScore?: number | null;
+    errorMessage: string | null;
+  },
+) {
+  const [review] = await queryRows<{ id: string }>(
+    env,
+    `
+      INSERT INTO file_reviews (
+        job_id,
+        file_path,
+        file_status,
+        model_used,
+        diff_line_count,
+        diff_input,
+        raw_ai_output,
+        input_tokens,
+        output_tokens,
+        duration_ms,
+        verdict,
+        file_summary,
+        overall_correctness,
+        confidence_score,
+        error_msg,
+        model_provider
+      )
+      VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      ON CONFLICT (job_id, file_path) DO UPDATE SET
+        file_status = EXCLUDED.file_status,
+        model_used = EXCLUDED.model_used,
+        diff_line_count = EXCLUDED.diff_line_count,
+        diff_input = EXCLUDED.diff_input,
+        raw_ai_output = EXCLUDED.raw_ai_output,
+        input_tokens = EXCLUDED.input_tokens,
+        output_tokens = EXCLUDED.output_tokens,
+        duration_ms = EXCLUDED.duration_ms,
+        verdict = EXCLUDED.verdict,
+        file_summary = EXCLUDED.file_summary,
+        overall_correctness = EXCLUDED.overall_correctness,
+        confidence_score = EXCLUDED.confidence_score,
+        error_msg = EXCLUDED.error_msg,
+        model_provider = EXCLUDED.model_provider
+      RETURNING id
+    `,
+    [
+      jobId,
+      input.filePath,
+      input.fileStatus,
+      input.modelUsed,
+      input.diffLineCount,
+      input.diffInput,
+      input.rawAiOutput,
+      input.inputTokens,
+      input.outputTokens,
+      input.durationMs,
+      input.verdict,
+      input.fileSummary,
+      input.overallCorrectness ?? null,
+      input.confidenceScore ?? null,
+      input.errorMessage,
+      input.modelProvider ?? null,
+    ],
+  );
+
+  await queryRows(env, 'DELETE FROM review_comments WHERE file_review_id = $1::uuid', [review.id]);
+
+  if (input.parsedComments.length > 0) {
+    await queryRows(
+      env,
+      `
+        INSERT INTO review_comments (
+          file_review_id, path, line, position, severity, category, title, body, code_suggestion
+        )
+        SELECT $1::uuid, * FROM UNNEST($2::text[], $3::int[], $4::int[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[])
+      `,
+      [
+        review.id,
+        input.parsedComments.map(c => c.path),
+        input.parsedComments.map(c => c.line ?? null),
+        input.parsedComments.map(c => c.position ?? null),
+        input.parsedComments.map(c => c.severity),
+        input.parsedComments.map(c => c.category),
+        input.parsedComments.map(c => c.title),
+        input.parsedComments.map(c => c.body),
+        input.parsedComments.map(c => c.codeSuggestion ?? null),
+      ],
+    );
+  }
+}
+
 export async function getModelUsageStats(env: Pick<AppBindings, 'HYPERDRIVE'>) {
   return queryRows<{
     model_used: string;

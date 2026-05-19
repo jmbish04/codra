@@ -116,6 +116,7 @@ describe('Webhook Handling Suite', () => {
     expect(queue.sent).toHaveLength(1);
     expect(queue.sent[0].jobId).toBe(json.job.id);
     expect(queue.sent[0].deliveryId).toBeDefined();
+    expect(queue.sent[0].phase).toBe('prepare');
     expect(queue.sent[0].eventName).toBeUndefined();
     expect(queue.sent[0].payload).toBeUndefined();
   });

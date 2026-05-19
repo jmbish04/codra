@@ -13,13 +13,13 @@ function createDbClient(env: DbEnv): DbClient {
   const sql = postgres(env.HYPERDRIVE.connectionString, {
     max: 5,
     fetch_types: false,
-    prepare: true,
+    prepare: false,
     onnotice: () => {},
   });
 
   return {
     async query<T>(sqlText: string, params: unknown[] = []) {
-      return (await sql.unsafe(sqlText, params.map(normalizeParam) as any[], { prepare: true })) as T[];
+      return (await sql.unsafe(sqlText, params.map(normalizeParam) as any[], { prepare: false })) as T[];
     },
   };
 }

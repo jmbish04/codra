@@ -5,7 +5,7 @@ export interface WorkersAiBinding {
 }
 
 export interface QueueProducer<T> {
-  send(message: T): Promise<void>;
+  send(message: T, options?: { delaySeconds?: number }): Promise<void>;
 }
 
 export interface AssetsBinding {

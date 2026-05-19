@@ -115,6 +115,7 @@ export function createWebhookRouter() {
       await c.env.REVIEW_QUEUE.send({
         jobId: job.id,
         deliveryId,
+        phase: 'prepare',
         requestId: c.get('requestId'),
       });
 
