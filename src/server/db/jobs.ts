@@ -714,7 +714,7 @@ export async function recoverStaleJobs(
 export async function recoverExpiredJobLeases(
   env: Pick<AppBindings, 'HYPERDRIVE'>,
   maxRecoveryCount = 3,
-  unleasedGraceSeconds = 120,
+  unleasedGraceSeconds = 300,
 ) {
   const requeued = await queryRows<{ id: string }>(
     env,

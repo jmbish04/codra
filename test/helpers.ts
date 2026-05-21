@@ -74,6 +74,10 @@ export function getTestDatabaseUrl() {
   return requiredEnv('TEST_DATABASE_URL');
 }
 
+export function hasConfiguredTestDatabaseUrl() {
+  return Boolean(usableEnvValue(process.env.TEST_DATABASE_URL));
+}
+
 export function createTestEnv(overrides: Partial<AppBindings> = {}): AppBindings {
   return {
     AI: {

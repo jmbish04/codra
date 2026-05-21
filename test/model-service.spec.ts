@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { isRetryableModelError, ModelService } from '@server/services/model';
 import { reviewWithCloudflare } from '@server/models/cloudflare';
 import { createTestEnv } from './helpers';
+import { defaultRepoConfig } from '@shared/schema';
 
 describe('ModelService', () => {
   it('routes legacy Kimi K2.5 ids to Kimi K2.6 for new Cloudflare requests', async () => {
@@ -23,6 +24,26 @@ describe('ModelService', () => {
 
     expect(requestedModel).toBe('@cf/moonshotai/kimi-k2.6');
     expect(response.modelUsed).toBe('@cf/moonshotai/kimi-k2.6');
+  });
+
+  it('preserves an explicitly empty fallback chain', () => {
+    const service = new ModelService(createTestEnv());
+    const selected = (service as any).selectModel({
+      totalLineCount: 500,
+      config: {
+        ...defaultRepoConfig,
+        model: {
+          main: 'gemma-4-31b-it',
+          fallbacks: [],
+          size_overrides: [],
+        },
+      },
+    });
+
+    expect(selected).toEqual({
+      primary: 'gemma-4-31b-it',
+      fallbacks: [],
+    });
   });
 
   it('rejects Cloudflare reasoning-only responses instead of trying to parse the response envelope', async () => {

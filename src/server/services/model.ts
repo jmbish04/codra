@@ -158,7 +158,7 @@ export class ModelService {
       }
 
       let attempts = 0;
-      const maxAttempts = 2;
+      const maxAttempts = 1;
 
       while (attempts < maxAttempts) {
         try {
@@ -223,6 +223,7 @@ export class ModelService {
     const modelsToTry = [primary, ...fallbacks];
 
     let lastError: any;
+    let sawTransientFailure = false;
     const unavailableProviders = new Set<string>();
     for (const currentModel of modelsToTry) {
       if (isCloudflareModel(currentModel) && unavailableProviders.has('cloudflare')) {
@@ -243,11 +244,22 @@ export class ModelService {
         return response;
       } catch (error: any) {
         lastError = error;
+        if (isTransientModelFailure(error)) {
+          sawTransientFailure = true;
+        }
         if (isCloudflareModel(currentModel) && isCloudflareAllocationError(error)) {
           unavailableProviders.add('cloudflare');
         }
         logger.warn(`Summary model ${currentModel} failed`, { error: error.message || error });
       }
+    }
+
+    if (sawTransientFailure) {
+      const lastMessage = lastError instanceof Error ? lastError.message : String(lastError ?? 'Unknown model error');
+      throw new RetryableModelError(
+        `All configured summary models failed; retrying later. Last error: ${lastMessage}`,
+        lastError,
+      );
     }
 
     throw lastError;

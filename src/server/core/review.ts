@@ -1,8 +1,8 @@
 import { logger } from './logger';
 import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHubWebhookPayload, type IssueCommentWebhookPayload, type PullRequestWebhookPayload } from '@shared/github';
-import { defaultRepoConfig, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
+import { defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import type { AppBindings } from '@server/env';
-import { getFileReviewsForJobs, upsertFileReview } from '@server/db/file-reviews';
+import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview } from '@server/db/file-reviews';
 import { claimJobLease, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStep } from '@server/db/jobs';
 import { filterReviewableFiles, parseUnifiedDiff } from './diff';
 
@@ -22,6 +22,8 @@ const REVIEW_CHUNK_FILE_LIMIT = 2;
 const REVIEW_CHUNK_WALL_CLOCK_MS = 8 * 60 * 1000;
 const JOB_LEASE_SECONDS = 10 * 60;
 const BUSY_RETRY_SECONDS = 60;
+const RETRYABLE_MODEL_FAILURE_RETRY_SECONDS = 60;
+const MAX_RETRYABLE_FILE_REVIEW_FAILURES = 3;
 
 function isRetryableFileReviewErrorMessage(message: string | null | undefined) {
   if (!message) return false;
@@ -49,6 +51,30 @@ function shouldRetryExistingFileReview(review: { file_status: string; error_msg:
 
 function countsAsHandledFileReview(review: { file_status: string; error_msg: string | null }) {
   return !shouldRetryExistingFileReview(review);
+}
+
+function configuredModelSet(config: RepoConfig) {
+  const models = new Set<string>();
+  const addModel = (model: string | null | undefined) => {
+    if (model) models.add(normalizeModelId(model));
+  };
+
+  addModel(config.model?.main ?? 'gemma-4-31b-it');
+  for (const fallback of config.model?.fallbacks ?? []) {
+    addModel(fallback);
+  }
+  for (const tier of config.model?.size_overrides ?? []) {
+    addModel(tier.model);
+    for (const fallback of tier.fallbacks ?? []) {
+      addModel(fallback);
+    }
+  }
+
+  return models;
+}
+
+function canInheritParentFileReview(config: RepoConfig, review: { model_used: string }) {
+  return configuredModelSet(config).has(normalizeModelId(review.model_used));
 }
 
 function shouldTriggerFromPullRequest(action: PullRequestWebhookPayload['action'], config: RepoConfig['review']) {
@@ -177,11 +203,14 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage):
     }
 
     if (isRetryableModelError(error)) {
-      logger.warn(`Review job hit transient model/provider failure; retrying queue delivery: ${job.owner}/${job.repo} PR #${job.prNumber}`, {
+      logger.warn(`Review job hit transient model/provider failure; scheduling delayed continuation: ${job.owner}/${job.repo} PR #${job.prNumber}`, {
         error: messageText,
+        phase,
+        delaySeconds: RETRYABLE_MODEL_FAILURE_RETRY_SECONDS,
       });
+      await enqueueJobPhase(env, job.id, phase, RETRYABLE_MODEL_FAILURE_RETRY_SECONDS);
       await releaseJobLease(env, job.id, leaseOwner);
-      return { action: 'retry', delaySeconds: 120 };
+      return { action: 'ack' };
     }
 
     logger.error(`Review job failed: ${job.owner}/${job.repo} PR #${job.prNumber}`, error);
@@ -396,27 +425,35 @@ async function runReviewPhase(
 
     const inherited = parentReviews.get(file.path);
     if (inherited) {
-      await upsertFileReview(env, job.id, {
-        filePath: file.path,
-        fileStatus: 'done',
-        modelUsed: inherited.model_used,
-        modelProvider: inherited.model_provider,
-        diffLineCount: inherited.diff_line_count,
-        diffInput: inherited.diff_input,
-        rawAiOutput: inherited.raw_ai_output,
-        parsedComments: inherited.parsed_comments as ParsedReviewComment[],
-        inputTokens: inherited.input_tokens,
-        outputTokens: inherited.output_tokens,
-        durationMs: inherited.duration_ms,
-        verdict: inherited.verdict,
-        fileSummary: inherited.file_summary,
-        overallCorrectness: inherited.overall_correctness,
-        confidenceScore: inherited.confidence_score,
-        errorMessage: null,
-      });
-      currentReviews.set(file.path, inherited);
-      processedThisChunk += 1;
-      await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
+      if (!canInheritParentFileReview(config, inherited)) {
+        logger.info(`Ignoring inherited review for ${file.path}; parent model ${inherited.model_used} is not in the current model strategy`);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model);
+        currentReviews.set(file.path, true as any);
+        processedThisChunk += 1;
+        await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
+      } else {
+        await upsertFileReview(env, job.id, {
+          filePath: file.path,
+          fileStatus: 'done',
+          modelUsed: inherited.model_used,
+          modelProvider: inherited.model_provider,
+          diffLineCount: inherited.diff_line_count,
+          diffInput: inherited.diff_input,
+          rawAiOutput: inherited.raw_ai_output,
+          parsedComments: inherited.parsed_comments as ParsedReviewComment[],
+          inputTokens: inherited.input_tokens,
+          outputTokens: inherited.output_tokens,
+          durationMs: inherited.duration_ms,
+          verdict: inherited.verdict,
+          fileSummary: inherited.file_summary,
+          overallCorrectness: inherited.overall_correctness,
+          confidenceScore: inherited.confidence_score,
+          errorMessage: null,
+        });
+        currentReviews.set(file.path, inherited);
+        processedThisChunk += 1;
+        await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
+      }
     } else {
       await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model);
       currentReviews.set(file.path, true as any);
@@ -489,8 +526,45 @@ async function reviewAndPersistFile(
     const errorMessage = error instanceof Error ? error.message : 'Unknown file review error';
 
     if (isRetryableModelError(error)) {
+      const modelId = config.model?.main ?? 'gemma-4-31b-it';
+      const failureCount = await recordRetryableFileReviewFailure(env, job.id, {
+        filePath: file.path,
+        modelUsed: modelId,
+        modelProvider: modelId.startsWith('@cf/') ? 'cloudflare' : 'google',
+        diffLineCount: file.lineCount,
+        diffInput: '',
+        durationMs: Date.now() - startedAt,
+        errorMessage,
+      });
+
+      if (failureCount >= MAX_RETRYABLE_FILE_REVIEW_FAILURES) {
+        const finalError = `Review skipped after ${failureCount} repeated model provider outages.`;
+        await upsertFileReview(env, job.id, {
+          filePath: file.path,
+          fileStatus: 'failed',
+          modelUsed: modelId,
+          modelProvider: modelId.startsWith('@cf/') ? 'cloudflare' : 'google',
+          diffLineCount: file.lineCount,
+          diffInput: '',
+          rawAiOutput: null,
+          parsedComments: [],
+          inputTokens: null,
+          outputTokens: null,
+          durationMs: Date.now() - startedAt,
+          verdict: null,
+          fileSummary: null,
+          errorMessage: finalError,
+        });
+        logger.error(`File review failed permanently for ${file.path} after transient retries`, {
+          attempts: failureCount,
+          error: errorMessage,
+        });
+        return;
+      }
+
       logger.warn(`File review deferred for ${file.path}; transient model/provider failure will retry later`, {
         error: errorMessage,
+        attempts: failureCount,
       });
       throw error;
     }

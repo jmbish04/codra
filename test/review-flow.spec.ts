@@ -1,7 +1,8 @@
 import { runReviewJob } from '@server/core/review';
-import { createTestEnv, generateMockDiff } from './helpers';
+import { createTestEnv, generateMockDiff, hasConfiguredTestDatabaseUrl } from './helpers';
 import { vi } from 'vitest';
-import { findExistingJobForHead, getJobForProcessing, insertJob } from '@server/db/jobs';
+import { findExistingJobForHead, getJobForProcessing, insertJob, updateJobFileCount, updateJobStep } from '@server/db/jobs';
+import { getFileReviewsForJobs, upsertFileReview } from '@server/db/file-reviews';
 import { defaultRepoConfig } from '@shared/schema';
 import { runWithDb } from '@server/db/client';
 
@@ -225,6 +226,87 @@ dbDescribe('Review Flow Lifecycle', () => {
     expect(finalJob?.status).toBe('done');
   }, REVIEW_FLOW_TIMEOUT_MS);
 
+  it('does not inherit parent file reviews from models outside the current retry strategy', async () => {
+    const { ModelService } = await import('@server/services/model');
+    const reviewSpy = vi.spyOn(ModelService.prototype, 'reviewFile');
+    const repo = `test-repo-${Date.now()}-retry-model-filter`;
+    const sourceHeadSha = sha('8');
+    const retryHeadSha = sha('9');
+    const baseSha = sha('0');
+
+    const source = await insertJob(env, {
+      installationId: '123',
+      owner: 'test-owner',
+      repo,
+      prNumber: 6,
+      prTitle: 'Retry Model Filter',
+      prAuthor: 'author',
+      commitSha: sourceHeadSha,
+      baseSha,
+      trigger: 'auto',
+      headRef: 'feature',
+      baseRef: 'main',
+      configSnapshot: {
+        ...defaultRepoConfig,
+        model: {
+          main: 'gemma-4-31b-it',
+          fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
+          size_overrides: [],
+        },
+      },
+    });
+
+    await upsertFileReview(env, source.id, {
+      filePath: 'src/app.ts',
+      fileStatus: 'done',
+      modelUsed: '@cf/zai-org/glm-4.7-flash',
+      modelProvider: 'cloudflare',
+      diffLineCount: 1,
+      diffInput: 'old diff',
+      rawAiOutput: '{}',
+      parsedComments: [],
+      inputTokens: 1,
+      outputTokens: 1,
+      durationMs: 1,
+      verdict: 'approve',
+      fileSummary: 'old',
+      errorMessage: null,
+    });
+
+    const retry = await insertJob(env, {
+      installationId: '123',
+      owner: 'test-owner',
+      repo,
+      prNumber: 6,
+      prTitle: 'Retry Model Filter',
+      prAuthor: 'author',
+      commitSha: retryHeadSha,
+      baseSha,
+      trigger: 'retry',
+      headRef: 'feature',
+      baseRef: 'main',
+      configSnapshot: {
+        ...defaultRepoConfig,
+        model: {
+          main: 'gemma-4-31b-it',
+          fallbacks: ['gemma-4-26b-a4b-it'],
+          size_overrides: [],
+        },
+      },
+      retryOfJobId: source.id,
+    });
+
+    await runAndDrain({
+      jobId: retry.id,
+      deliveryId: 'delivery-retry-model-filter',
+    });
+
+    expect(reviewSpy).toHaveBeenCalled();
+    const reviews = await getFileReviewsForJobs(env, [retry.id]);
+    expect(reviews.find((review) => review.file_path === 'src/app.ts')?.model_used).toBe('test-model');
+    reviewSpy.mockRestore();
+  }, REVIEW_FLOW_TIMEOUT_MS);
+
   it('resumes an existing queued duplicate job instead of stranding it', async () => {
     const repo = `test-repo-${Date.now()}-duplicate`;
     const headSha = sha('4');
@@ -265,5 +347,55 @@ dbDescribe('Review Flow Lifecycle', () => {
 
     const finalJob = await getJobForProcessing(env, existing.id);
     expect(finalJob?.status).toBe('done');
+  }, REVIEW_FLOW_TIMEOUT_MS);
+
+  it('schedules a delayed continuation instead of spending queue retries on transient model failures', async () => {
+    const { ModelService } = await import('@server/services/model');
+    const retryableError = Object.assign(new Error('Google API timed out after 45000ms'), { retryable: true });
+    const reviewSpy = vi.spyOn(ModelService.prototype, 'reviewFile').mockRejectedValue(retryableError);
+    const repo = `test-repo-${Date.now()}-transient`;
+    const headSha = sha('6');
+    const baseSha = sha('7');
+
+    const job = await insertJob(env, {
+      installationId: '123',
+      owner: 'test-owner',
+      repo,
+      prNumber: 5,
+      prTitle: 'Transient Test',
+      prAuthor: 'author',
+      commitSha: headSha,
+      baseSha,
+      trigger: 'auto',
+      headRef: 'feature',
+      baseRef: 'main',
+      configSnapshot: defaultRepoConfig,
+    });
+    await updateJobFileCount(env, job.id, 1);
+    await updateJobStep(env, job.id, 'Preparation', { status: 'done' });
+
+    await runWithDb(env, async () => {
+      (env.REVIEW_QUEUE as any).sent.length = 0;
+      const result = await runReviewJob(env, {
+        jobId: job.id,
+        deliveryId: 'delivery-transient',
+        phase: 'review',
+      });
+
+      expect(result).toEqual({ action: 'ack' });
+      expect(reviewSpy).toHaveBeenCalled();
+      expect((env.REVIEW_QUEUE as any).sent).toHaveLength(1);
+      expect((env.REVIEW_QUEUE as any).sent[0]).toMatchObject({
+        jobId: job.id,
+        phase: 'review',
+        options: { delaySeconds: 60 },
+      });
+    });
+
+    const finalJob = await getJobForProcessing(env, job.id);
+    expect(finalJob?.status).toBe('running');
+    expect(finalJob?.lease_owner).toBeNull();
+
+    reviewSpy.mockRestore();
   }, REVIEW_FLOW_TIMEOUT_MS);
 });

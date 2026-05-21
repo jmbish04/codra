@@ -1,5 +1,5 @@
 import { createApp } from '@server/app';
-import { insertJob } from '@server/db/jobs';
+import { getJobForProcessing, insertJob } from '@server/db/jobs';
 import { insertFileReview } from '@server/db/file-reviews';
 import { getRepoConfigRecord } from '@server/db/repo-configs';
 import { loadRepoConfig, updateGlobalConfig } from '@server/core/config';
@@ -545,6 +545,7 @@ describe('Dashboard API Suite', () => {
     });
 
     expect(loaded.parsedJson.model.main).toBe('@cf/zai-org/glm-4.7-flash');
+    expect(loaded.parsedJson.model.fallbacks).toEqual([]);
 
     const record = await getRepoConfigRecord(env, 'api-test-owner', repo);
     expect(record?.mainModel).toBeNull();
@@ -564,6 +565,73 @@ describe('Dashboard API Suite', () => {
     });
 
     expect(reloaded.parsedJson.model.main).toBe('gemma-4-26b-a4b-it');
+  });
+
+  it('uses the current global model strategy when retrying an older job', async () => {
+    const env = createTestEnv();
+    const token = await getAuthCookie(env);
+    const repo = `retry-current-config-${Date.now()}`;
+
+    const source = await insertJob(env, {
+      installationId: '123',
+      owner: 'api-test-owner',
+      repo,
+      prNumber: 12,
+      prTitle: 'Retry Current Config',
+      prAuthor: 'author',
+      commitSha: 'a'.repeat(40),
+      baseSha: 'b'.repeat(40),
+      trigger: 'auto',
+      headRef: 'feature',
+      baseRef: 'main',
+      configSnapshot: {
+        ...defaultRepoConfig,
+        model: {
+          main: 'gemma-4-31b-it',
+          fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
+          size_overrides: [],
+        },
+      },
+    });
+
+    await updateGlobalConfig(env, {
+      main: 'gemma-4-31b-it',
+      fallbacks: ['gemma-4-26b-a4b-it'],
+      size_overrides: [
+        {
+          max_lines: 300,
+          model: 'gemma-4-31b-it',
+          fallbacks: ['gemma-4-26b-a4b-it'],
+        },
+      ],
+    });
+
+    const response = await app.request(`/api/jobs/${source.id}/retry`, {
+      method: 'POST',
+      headers: {
+        Cookie: `codra_session=${token}`,
+        'x-requested-with': 'XMLHttpRequest',
+      },
+    }, env);
+
+    expect(response.status).toBe(202);
+    const body = await response.json() as { job: { id: string } };
+    const retry = await getJobForProcessing(env, body.job.id);
+    const snapshot = typeof retry?.config_snapshot === 'string'
+      ? JSON.parse(retry.config_snapshot)
+      : retry?.config_snapshot;
+
+    expect(snapshot.model).toEqual({
+      main: 'gemma-4-31b-it',
+      fallbacks: ['gemma-4-26b-a4b-it'],
+      size_overrides: [
+        {
+          max_lines: 300,
+          model: 'gemma-4-31b-it',
+          fallbacks: ['gemma-4-26b-a4b-it'],
+        },
+      ],
+    });
   });
 
   it('accepts legacy jobId-only queue messages during schema transition', () => {

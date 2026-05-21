@@ -1,6 +1,6 @@
 import worker from '@server/index';
-import { claimJobLease, getJobForProcessing, insertJob, recoverExpiredJobLeases } from '@server/db/jobs';
-import { upsertFileReview, getFileReviewsForJobs } from '@server/db/file-reviews';
+import { claimJobLease, getJobForProcessing, insertJob, markJobContinuationQueued, recoverExpiredJobLeases, releaseJobLease } from '@server/db/jobs';
+import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview } from '@server/db/file-reviews';
 import { getDb } from '@server/db/client';
 import { createTestEnv, hasConfiguredTestDatabaseUrl } from './helpers';
 
@@ -146,6 +146,44 @@ dbDescribe('resumable queue primitives', () => {
     expect(row?.error_msg).toBeNull();
   });
 
+  it('does not recover an unleased job that just scheduled a retry continuation', async () => {
+    const job = await insertJob(env, {
+      installationId: '123',
+      owner: 'test-owner',
+      repo: `retry-handoff-${Date.now()}`,
+      prNumber: 1,
+      prTitle: 'Retry Handoff Test',
+      prAuthor: 'author',
+      commitSha: sha('7'),
+      baseSha: sha('8'),
+      trigger: 'auto',
+      headRef: 'feature',
+      baseRef: 'main',
+    });
+
+    await claimJobLease(env, job.id, 'lease-a', 600);
+    await getDb(env).query(
+      `
+        UPDATE jobs
+        SET heartbeat_at = now() - interval '10 minutes',
+            last_queue_message_at = now() - interval '10 minutes'
+        WHERE id = $1
+      `,
+      [job.id],
+    );
+
+    await markJobContinuationQueued(env, job.id);
+    await releaseJobLease(env, job.id, 'lease-a');
+
+    const recovered = await recoverExpiredJobLeases(env, 3, 120);
+    expect(recovered.requeuedJobIds).not.toContain(job.id);
+
+    const row = await getJobForProcessing(env, job.id);
+    expect(row?.status).toBe('running');
+    expect(row?.lease_owner).toBeNull();
+    expect(row?.recovery_count).toBe(0);
+  });
+
   it('upserts file reviews without duplicating the same file', async () => {
     const job = await insertJob(env, {
       installationId: '123',
@@ -184,6 +222,57 @@ dbDescribe('resumable queue primitives', () => {
     const reviews = await getFileReviewsForJobs(env, [job.id]);
     expect(reviews).toHaveLength(1);
     expect(reviews[0].file_summary).toBe('updated');
+  });
+
+  it('tracks retryable file review failures and resets the count after success', async () => {
+    const job = await insertJob(env, {
+      installationId: '123',
+      owner: 'test-owner',
+      repo: `transient-file-${Date.now()}`,
+      prNumber: 1,
+      prTitle: 'Transient File Test',
+      prAuthor: 'author',
+      commitSha: sha('9'),
+      baseSha: sha('0'),
+      trigger: 'auto',
+      headRef: 'feature',
+      baseRef: 'main',
+    });
+
+    const failureInput = {
+      filePath: 'src/app.ts',
+      modelUsed: 'gemma-4-31b-it',
+      modelProvider: 'google',
+      diffLineCount: 1,
+      diffInput: 'diff',
+      durationMs: 1,
+      errorMessage: 'All configured review models failed; retrying later.',
+    };
+
+    await expect(recordRetryableFileReviewFailure(env, job.id, failureInput)).resolves.toBe(1);
+    await expect(recordRetryableFileReviewFailure(env, job.id, failureInput)).resolves.toBe(2);
+
+    await upsertFileReview(env, job.id, {
+      filePath: 'src/app.ts',
+      fileStatus: 'done',
+      modelUsed: 'gemma-4-31b-it',
+      modelProvider: 'google',
+      diffLineCount: 1,
+      diffInput: 'diff',
+      rawAiOutput: '{}',
+      parsedComments: [],
+      inputTokens: 1,
+      outputTokens: 1,
+      durationMs: 1,
+      verdict: 'approve',
+      fileSummary: 'ok',
+      errorMessage: null,
+    });
+
+    const reviews = await getFileReviewsForJobs(env, [job.id]);
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0].file_status).toBe('done');
+    expect(reviews[0].transient_error_count).toBe(0);
   });
 });
 

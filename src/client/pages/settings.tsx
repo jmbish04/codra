@@ -39,12 +39,12 @@ const DEFAULT_GLOBAL_CONFIG: ModelRouteConfig = {
   ],
 };
 
-function normalizeGlobalConfig(config: any): ModelRouteConfig {
+export function normalizeGlobalConfig(config: any): ModelRouteConfig {
   if (!config || !config.main) return DEFAULT_GLOBAL_CONFIG;
   return {
     main: config.main,
-    fallbacks: config.fallbacks?.length ? config.fallbacks : DEFAULT_GLOBAL_CONFIG.fallbacks,
-    size_overrides: config.size_overrides ?? DEFAULT_GLOBAL_CONFIG.size_overrides,
+    fallbacks: Array.isArray(config.fallbacks) ? config.fallbacks : DEFAULT_GLOBAL_CONFIG.fallbacks,
+    size_overrides: Array.isArray(config.size_overrides) ? config.size_overrides : DEFAULT_GLOBAL_CONFIG.size_overrides,
   };
 }
 

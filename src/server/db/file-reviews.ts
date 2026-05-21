@@ -151,7 +151,8 @@ export async function upsertFileReview(
         overall_correctness = EXCLUDED.overall_correctness,
         confidence_score = EXCLUDED.confidence_score,
         error_msg = EXCLUDED.error_msg,
-        model_provider = EXCLUDED.model_provider
+        model_provider = EXCLUDED.model_provider,
+        transient_error_count = 0
       RETURNING id
     `,
     [
@@ -198,6 +199,76 @@ export async function upsertFileReview(
       ],
     );
   }
+}
+
+export async function recordRetryableFileReviewFailure(
+  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  jobId: string,
+  input: {
+    filePath: string;
+    modelUsed: string;
+    modelProvider?: string | null;
+    diffLineCount: number;
+    diffInput: string | null;
+    durationMs: number | null;
+    errorMessage: string;
+  },
+) {
+  const [review] = await queryRows<{ id: string; transient_error_count: number }>(
+    env,
+    `
+      INSERT INTO file_reviews (
+        job_id,
+        file_path,
+        file_status,
+        model_used,
+        model_provider,
+        diff_line_count,
+        diff_input,
+        raw_ai_output,
+        input_tokens,
+        output_tokens,
+        duration_ms,
+        verdict,
+        file_summary,
+        overall_correctness,
+        confidence_score,
+        error_msg,
+        transient_error_count
+      )
+      VALUES ($1::uuid, $2, 'failed', $3, $4, $5, $6, NULL, NULL, NULL, $7, NULL, NULL, NULL, NULL, $8, 1)
+      ON CONFLICT (job_id, file_path) DO UPDATE SET
+        file_status = 'failed',
+        model_used = EXCLUDED.model_used,
+        model_provider = EXCLUDED.model_provider,
+        diff_line_count = EXCLUDED.diff_line_count,
+        diff_input = EXCLUDED.diff_input,
+        raw_ai_output = NULL,
+        input_tokens = NULL,
+        output_tokens = NULL,
+        duration_ms = EXCLUDED.duration_ms,
+        verdict = NULL,
+        file_summary = NULL,
+        overall_correctness = NULL,
+        confidence_score = NULL,
+        error_msg = EXCLUDED.error_msg,
+        transient_error_count = file_reviews.transient_error_count + 1
+      RETURNING id, transient_error_count
+    `,
+    [
+      jobId,
+      input.filePath,
+      input.modelUsed,
+      input.modelProvider ?? null,
+      input.diffLineCount,
+      input.diffInput,
+      input.durationMs,
+      input.errorMessage,
+    ],
+  );
+
+  await queryRows(env, 'DELETE FROM review_comments WHERE file_review_id = $1::uuid', [review.id]);
+  return review.transient_error_count;
 }
 
 export async function getModelUsageStats(env: Pick<AppBindings, 'HYPERDRIVE'>) {
@@ -369,6 +440,7 @@ export async function getFileReviewsForJobs(env: Pick<AppBindings, 'HYPERDRIVE'>
     confidence_score: number | null;
     error_msg: string | null;
     model_provider: string | null;
+    transient_error_count: number;
   }>(
     env,
     `
