@@ -58,6 +58,14 @@ function StatusBadge({ label, job }: { label: string; job?: JobSummary }) {
     return <LiveReviewStepper job={job} />;
   }
 
+  if (job && label === 'done' && job.errorMessage) {
+    return (
+      <Badge variant="warning" className="capitalize">
+        partial
+      </Badge>
+    );
+  }
+
   return (
     <Badge variant={getTone(label)} className="capitalize">
       {label.replace(/_/g, ' ')}

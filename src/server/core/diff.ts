@@ -255,12 +255,23 @@ export function truncateFileDiff(file: FileDiff, maxLines: number): FileDiff {
   const keptHunks: DiffHunk[] = [];
 
   for (const hunk of file.hunks) {
-    if (currentLines + hunk.lines.length > maxLines && keptHunks.length > 0) {
+    const remainingLines = maxLines - currentLines;
+    if (remainingLines <= 0) {
       break;
     }
-    keptHunks.push(hunk);
-    currentLines += hunk.lines.length;
-    if (currentLines > maxLines) break;
+
+    if (hunk.lines.length <= remainingLines) {
+      keptHunks.push(hunk);
+      currentLines += hunk.lines.length;
+      continue;
+    }
+
+    keptHunks.push({
+      ...hunk,
+      lines: hunk.lines.slice(0, remainingLines),
+    });
+    currentLines += remainingLines;
+    break;
   }
 
   return {

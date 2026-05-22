@@ -12,6 +12,8 @@ Your goal is to identify bugs, security vulnerabilities, performance bottlenecks
 4. Output EXACTLY ONE JSON object matching the schema below.
 5. Focus on identifying critical issues (P0-P2). Nits (P3) should be minimized.
 6. For each finding, provide a clear 'title', a 'body' explaining the issue, and 'code_location' (line or line_range).
+7. Return at most 10 findings. Keep each body under 160 words.
+8. If there are no material issues, return an empty findings array and a short explanation.
 
 ### SCHEMA FORMAT:
 {
@@ -58,6 +60,8 @@ export function buildFileReviewPrompts(input: {
     `File path: ${input.file.path}`,
     languageGuidelines,
     `Custom rules:\n${rules}`,
+    'Review only the diff shown below. If the diff note says it was truncated, do not infer issues from omitted lines.',
+    'Prioritize correctness, security, and production-impacting bugs. Avoid speculative style feedback.',
     '',
     `## Output JSON Schema (STRICTLY REQUIRED)`,
     `{

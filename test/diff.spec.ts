@@ -106,8 +106,29 @@ Binary files a/image.png and b/image.png differ
 
       const truncated = truncateFileDiff(largeFile, 60);
       expect(truncated.isTruncated).toBe(true);
-      expect(truncated.hunks).toHaveLength(1); // Second hunk exceeds limit
-      expect(truncated.lineCount).toBe(50);
+      expect(truncated.hunks).toHaveLength(2);
+      expect(truncated.hunks[1].lines).toHaveLength(10);
+      expect(truncated.lineCount).toBe(60);
+    });
+
+    it('slices a single oversized hunk to the line limit', () => {
+      const largeFile = {
+        path: 'large.ts',
+        previousPath: null,
+        isNew: false,
+        isDeleted: false,
+        isBinary: false,
+        lineCount: 500,
+        hunks: [
+          { header: '@@ -1,500 +1,500 @@', lines: Array(500).fill({ kind: 'add', content: 'line', position: 1 }) },
+        ],
+      } as any;
+
+      const truncated = truncateFileDiff(largeFile, 300);
+      expect(truncated.isTruncated).toBe(true);
+      expect(truncated.hunks).toHaveLength(1);
+      expect(truncated.hunks[0].lines).toHaveLength(300);
+      expect(truncated.lineCount).toBe(300);
     });
   });
 

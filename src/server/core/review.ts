@@ -180,7 +180,7 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage):
   const phase = resolved.phase;
   const tracker = new TokenTracker();
   const github = new GitHubService(env, job.installationId, tracker);
-  const model = new ModelService(env, tracker);
+  const model = new ModelService(env, tracker, { jobId: job.id });
   const formatter = new FormatterService(env.APP_URL);
 
   try {
@@ -427,8 +427,7 @@ async function runReviewPhase(
     if (inherited) {
       if (!canInheritParentFileReview(config, inherited)) {
         logger.info(`Ignoring inherited review for ${file.path}; parent model ${inherited.model_used} is not in the current model strategy`);
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model);
-        currentReviews.set(file.path, true as any);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, existingReview);
         processedThisChunk += 1;
         await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
       } else {
@@ -455,8 +454,7 @@ async function runReviewPhase(
         await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
       }
     } else {
-      await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model);
-      currentReviews.set(file.path, true as any);
+      await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, existingReview);
       processedThisChunk += 1;
       await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
     }
@@ -493,8 +491,10 @@ async function reviewAndPersistFile(
   config: RepoConfig,
   totalLineCount: number,
   model: ModelService,
+  previousReview?: { transient_error_count: number },
 ) {
   const startedAt = Date.now();
+  const compactPrompt = (previousReview?.transient_error_count ?? 0) > 0;
   try {
     const response = await model.reviewFile({
       file,
@@ -502,6 +502,7 @@ async function reviewAndPersistFile(
       prDescription: pr.body ?? null,
       config,
       totalLineCount,
+      compactPrompt,
     });
 
     await upsertFileReview(env, job.id, {
@@ -637,6 +638,7 @@ async function runFinalizePhase(
   }
 
   const hasFailures = fileSummaries.some((file) => file.verdict === 'failed');
+  const failedFileCount = fileSummaries.filter((file) => file.verdict === 'failed').length;
   const verdictSummary = formatter.summarizeVerdict(reviewedComments, hasFailures);
   const summaryResponse = await model.generateSummary({
     prTitle: pr.title ?? null,
@@ -684,12 +686,15 @@ async function runFinalizePhase(
       status: 'completed',
       conclusion: hasFailures ? 'failure' : (verdictSummary.verdict === 'approve' ? 'success' : 'neutral'),
       title: hasFailures ? 'Review partially failed' : (verdictSummary.verdict === 'approve' ? 'LGTM' : 'Comments posted'),
-      summary: `${reviewedComments.length} inline comments across ${files.length} files.${hasFailures ? ' Some files failed to parse.' : ''}`,
+      summary: `${reviewedComments.length} inline comments across ${files.length} files.${hasFailures ? ` ${failedFileCount} file${failedFileCount === 1 ? '' : 's'} could not be reviewed after repeated provider outages.` : ''}`,
     });
   }
 
   const fileInputTokens = reviews.reduce((sum, review) => sum + (review.input_tokens ?? 0), 0);
   const fileOutputTokens = reviews.reduce((sum, review) => sum + (review.output_tokens ?? 0), 0);
+  const partialErrorMessage = hasFailures
+    ? `Partial review: ${failedFileCount} of ${files.length} file${files.length === 1 ? '' : 's'} could not be reviewed after repeated model/provider outages.`
+    : null;
   await completeJob(env, job.id, {
     verdict: verdictSummary.verdict,
     fileCount: files.length,
@@ -699,6 +704,7 @@ async function runFinalizePhase(
     summaryMarkdown: formattedSummary,
     reviewId: review.id,
     summaryModel: summaryResponse.modelUsed,
+    errorMessage: partialErrorMessage,
   });
   await updateJobStep(env, job.id, 'Completing', { status: 'done' });
   logger.info(`Review job completed: ${job.owner}/${job.repo} PR #${job.prNumber}`);

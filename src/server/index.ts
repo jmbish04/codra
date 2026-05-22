@@ -4,7 +4,7 @@ import type { AppBindings } from './env';
 import { reviewJobMessageSchema } from '@shared/schema';
 import { logger } from '@server/core/logger';
 import { runWithDb } from '@server/db/client';
-import { runOpportunisticJobMaintenance } from '@server/core/job-recovery';
+import { runBestEffortJobMaintenance } from '@server/core/job-recovery';
 
 const app = createApp();
 
@@ -15,7 +15,7 @@ export default {
 
   async queue(batch: MessageBatch<unknown>, env: AppBindings, _ctx: ExecutionContext) {
     return runWithDb(env, async () => {
-      await runOpportunisticJobMaintenance(env);
+      await runBestEffortJobMaintenance(env);
 
       for (const message of batch.messages) {
         const parseResult = reviewJobMessageSchema.safeParse(message.body);
@@ -42,7 +42,7 @@ export default {
         }
       }
 
-      await runOpportunisticJobMaintenance(env);
+      await runBestEffortJobMaintenance(env);
     });
   },
 } satisfies ExportedHandler<AppBindings>;

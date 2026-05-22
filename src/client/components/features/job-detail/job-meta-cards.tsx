@@ -9,6 +9,8 @@ interface JobMetaCardsProps {
 }
 
 export function JobMetaCards({ job }: JobMetaCardsProps) {
+  const isPartialReview = job.status === 'done' && job.errorMessage?.startsWith('Partial review:');
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {/* Details */}
@@ -75,10 +77,16 @@ export function JobMetaCards({ job }: JobMetaCardsProps) {
           {job.errorMessage && (
             <div
               className="mt-4 rounded-md border p-3"
-              style={{ background: 'var(--danger-bg)', borderColor: 'var(--danger-border)', color: 'var(--danger)' }}
+              style={{
+                background: isPartialReview ? 'var(--warning-bg)' : 'var(--danger-bg)',
+                borderColor: isPartialReview ? 'var(--warning-border)' : 'var(--danger-border)',
+                color: isPartialReview ? 'var(--warning)' : 'var(--danger)',
+              }}
             >
-              <p className="mb-1 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--danger)' }}>Error</p>
-              <p className="text-sm" style={{ color: 'var(--danger)' }}>{job.errorMessage}</p>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wider" style={{ color: isPartialReview ? 'var(--warning)' : 'var(--danger)' }}>
+                {isPartialReview ? 'Partial review' : 'Error'}
+              </p>
+              <p className="text-sm" style={{ color: isPartialReview ? 'var(--warning)' : 'var(--danger)' }}>{job.errorMessage}</p>
             </div>
           )}
         </CardContent>

@@ -51,3 +51,11 @@ export async function runOpportunisticJobMaintenance(env: AppBindings) {
   await recoverJobs(env);
   await completeTerminalCheckRuns(env);
 }
+
+export async function runBestEffortJobMaintenance(env: AppBindings) {
+  try {
+    await runOpportunisticJobMaintenance(env);
+  } catch (error) {
+    logger.error('Opportunistic job maintenance failed', error instanceof Error ? error : new Error(String(error)));
+  }
+}

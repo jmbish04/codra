@@ -505,6 +505,7 @@ export async function completeJob(
     reviewId: number | null;
     summaryModel: string | null;
     overallConfidenceScore?: number | null;
+    errorMessage?: string | null;
   },
 ) {
   await queryRows(
@@ -525,7 +526,7 @@ export async function completeJob(
           review_id = $8,
           summary_model = $9,
           overall_confidence_score = $10,
-          error_msg = NULL
+          error_msg = $11
       WHERE id = $1
     `,
     [
@@ -538,7 +539,8 @@ export async function completeJob(
       input.summaryMarkdown,
       input.reviewId,
       input.summaryModel,
-      input.overallConfidenceScore ?? null
+      input.overallConfidenceScore ?? null,
+      input.errorMessage ?? null
     ],
   );
 }

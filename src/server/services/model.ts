@@ -4,6 +4,7 @@ import { reviewWithCloudflare } from '../models/cloudflare';
 import { buildFileReviewPrompts } from '../prompts/file-review';
 import { buildSummaryPrompt, SUMMARY_SYSTEM_PROMPT } from '../prompts/summary';
 import { parseFileReviewResponse } from '../core/model-output';
+import { truncateFileDiff } from '../core/diff';
 import type { RepoConfig } from '@shared/schema';
 import type { TokenTracker } from '../core/token-tracker';
 import type { ModelResponse } from '../models/types';
@@ -11,10 +12,13 @@ import { logger } from '../core/logger';
 import { normalizeModelId } from '@shared/schema';
 
 const DEFAULT_GOOGLE_FALLBACK = 'gemma-4-31b-it';
+const PROVIDER_UNAVAILABLE_TTL_SECONDS = 24 * 60 * 60;
+const COMPACT_REVIEW_PROMPT_LINE_CAP = 400;
 const MODEL_ALIASES: Record<string, string> = {
   'gemma-4-31b': 'gemma-4-31b-it',
   'gemma-4-26b': 'gemma-4-26b-a4b-it',
 };
+type ModelProvider = 'cloudflare';
 
 export class RetryableModelError extends Error {
   readonly retryable = true;
@@ -23,13 +27,17 @@ export class RetryableModelError extends Error {
     super(message);
     this.name = 'RetryableModelError';
     if (cause !== undefined) {
-      (this as any).cause = cause;
+      Object.defineProperty(this, 'cause', {
+        value: cause,
+        writable: true,
+        configurable: true,
+      });
     }
   }
 }
 
 export function isRetryableModelError(error: unknown) {
-  return Boolean(error && typeof error === 'object' && (error as any).retryable === true);
+  return Boolean(error && typeof error === 'object' && 'retryable' in error && error.retryable === true);
 }
 
 function isCloudflareModel(model: string) {
@@ -78,7 +86,49 @@ function isTransientModelFailure(error: unknown) {
 }
 
 export class ModelService {
-  constructor(private env: AppBindings, private tracker?: TokenTracker) {}
+  constructor(
+    private env: AppBindings,
+    private tracker?: TokenTracker,
+    private options: { jobId?: string } = {},
+  ) {}
+
+  private providerUnavailableKey(provider: ModelProvider) {
+    return this.options.jobId ? `jobs:${this.options.jobId}:provider-unavailable:${provider}` : null;
+  }
+
+  private async isProviderUnavailable(provider: ModelProvider) {
+    const key = this.providerUnavailableKey(provider);
+    if (!key) return false;
+
+    try {
+      return (await this.env.APP_KV.get(key)) !== null;
+    } catch (error) {
+      logger.warn(`Failed to read unavailable provider marker for ${provider}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  private async markProviderUnavailable(provider: ModelProvider, reason: string) {
+    const key = this.providerUnavailableKey(provider);
+    if (!key) return;
+
+    try {
+      await this.env.APP_KV.put(
+        key,
+        JSON.stringify({
+          reason,
+          markedAt: new Date().toISOString(),
+        }),
+        { expirationTtl: PROVIDER_UNAVAILABLE_TTL_SECONDS },
+      );
+    } catch (error) {
+      logger.warn(`Failed to write unavailable provider marker for ${provider}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   private selectModel(params: {
     totalLineCount: number;
@@ -136,9 +186,16 @@ export class ModelService {
     prDescription: string | null;
     config: RepoConfig;
     totalLineCount: number;
+    compactPrompt?: boolean;
   }) {
+    const configuredLineCap = params.config.review.max_diff_lines_per_file;
+    const modelLineCap = params.compactPrompt
+      ? Math.min(configuredLineCap, COMPACT_REVIEW_PROMPT_LINE_CAP)
+      : configuredLineCap;
+    const reviewFile = truncateFileDiff(params.file, modelLineCap);
     const { systemPrompt, userPrompt } = buildFileReviewPrompts({
       ...params,
+      file: reviewFile,
       config: params.config.review,
     });
 
@@ -148,12 +205,12 @@ export class ModelService {
     });
     const modelsToTry = [primary, ...fallbacks];
 
-    let lastError: any;
+    let lastError: unknown;
+    let lastTransientError: unknown;
     let sawTransientFailure = false;
-    const unavailableProviders = new Set<string>();
     for (const currentModel of modelsToTry) {
-      if (isCloudflareModel(currentModel) && unavailableProviders.has('cloudflare')) {
-        logger.warn(`Skipping Cloudflare model ${currentModel} because Cloudflare AI allocation is unavailable`);
+      if (isCloudflareModel(currentModel) && await this.isProviderUnavailable('cloudflare')) {
+        logger.warn(`Skipping Cloudflare model ${currentModel} because Cloudflare AI allocation is unavailable for job ${this.options.jobId ?? 'unknown'}`);
         continue;
       }
 
@@ -173,22 +230,26 @@ export class ModelService {
             ...response,
             parsed,
             userPrompt,
+            reviewedLineCount: reviewFile.lineCount,
+            wasPromptTruncated: reviewFile.isTruncated === true,
           };
-        } catch (error: any) {
+        } catch (error) {
           lastError = error;
           if (isTransientModelFailure(error)) {
             sawTransientFailure = true;
+            lastTransientError = error;
           }
           attempts++;
           if (isCloudflareModel(currentModel) && isCloudflareAllocationError(error)) {
-            unavailableProviders.add('cloudflare');
+            await this.markProviderUnavailable('cloudflare', error instanceof Error ? error.message : String(error));
           }
 
           const isRateLimit = isGoogleRateLimitError(error);
           const isRetryable = false;
+          const errorMessage = error instanceof Error ? error.message : String(error);
 
           logger.warn(`Model ${currentModel} failed for ${params.file.path} (attempt ${attempts}/${maxAttempts})`, {
-            error: error.message || error,
+            error: errorMessage,
             rateLimited: isRateLimit,
             willRetrySameModel: isRetryable,
             willTryFallback: !isRetryable && modelsToTry.indexOf(currentModel) < modelsToTry.length - 1
@@ -203,10 +264,11 @@ export class ModelService {
     }
 
     if (sawTransientFailure) {
-      const lastMessage = lastError instanceof Error ? lastError.message : String(lastError ?? 'Unknown model error');
+      const retryCause = lastTransientError ?? lastError;
+      const lastMessage = retryCause instanceof Error ? retryCause.message : String(retryCause ?? 'Unknown model error');
       throw new RetryableModelError(
         `All configured review models failed for ${params.file.path}; retrying later. Last error: ${lastMessage}`,
-        lastError,
+        retryCause,
       );
     }
 
@@ -222,12 +284,12 @@ export class ModelService {
     const { primary, fallbacks } = this.selectModel({ totalLineCount: 0, config: params.config });
     const modelsToTry = [primary, ...fallbacks];
 
-    let lastError: any;
+    let lastError: unknown;
+    let lastTransientError: unknown;
     let sawTransientFailure = false;
-    const unavailableProviders = new Set<string>();
     for (const currentModel of modelsToTry) {
-      if (isCloudflareModel(currentModel) && unavailableProviders.has('cloudflare')) {
-        logger.warn(`Skipping Cloudflare summary model ${currentModel} because Cloudflare AI allocation is unavailable`);
+      if (isCloudflareModel(currentModel) && await this.isProviderUnavailable('cloudflare')) {
+        logger.warn(`Skipping Cloudflare summary model ${currentModel} because Cloudflare AI allocation is unavailable for job ${this.options.jobId ?? 'unknown'}`);
         continue;
       }
 
@@ -242,23 +304,25 @@ export class ModelService {
         }
 
         return response;
-      } catch (error: any) {
+      } catch (error) {
         lastError = error;
         if (isTransientModelFailure(error)) {
           sawTransientFailure = true;
+          lastTransientError = error;
         }
         if (isCloudflareModel(currentModel) && isCloudflareAllocationError(error)) {
-          unavailableProviders.add('cloudflare');
+          await this.markProviderUnavailable('cloudflare', error instanceof Error ? error.message : String(error));
         }
-        logger.warn(`Summary model ${currentModel} failed`, { error: error.message || error });
+        logger.warn(`Summary model ${currentModel} failed`, { error: error instanceof Error ? error.message : String(error) });
       }
     }
 
     if (sawTransientFailure) {
-      const lastMessage = lastError instanceof Error ? lastError.message : String(lastError ?? 'Unknown model error');
+      const retryCause = lastTransientError ?? lastError;
+      const lastMessage = retryCause instanceof Error ? retryCause.message : String(retryCause ?? 'Unknown model error');
       throw new RetryableModelError(
         `All configured summary models failed; retrying later. Last error: ${lastMessage}`,
-        lastError,
+        retryCause,
       );
     }
 

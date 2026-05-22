@@ -398,4 +398,82 @@ dbDescribe('Review Flow Lifecycle', () => {
 
     reviewSpy.mockRestore();
   }, REVIEW_FLOW_TIMEOUT_MS);
+
+  it('marks completed jobs with skipped files as partial reviews', async () => {
+    const { GitHubService } = await import('@server/services/github');
+    const repo = `test-repo-${Date.now()}-partial`;
+    const headSha = sha('e');
+    const baseSha = sha('f');
+    const getDiffSpy = vi.spyOn(GitHubService.prototype, 'getPullRequestDiff').mockResolvedValue(
+      generateMockDiff([
+        { path: 'src/app.ts', content: 'console.log(1);' },
+        { path: 'src/failed.ts', content: 'console.log(2);' },
+      ]),
+    );
+
+    const job = await insertJob(env, {
+      installationId: '123',
+      owner: 'test-owner',
+      repo,
+      prNumber: 7,
+      prTitle: 'Partial Test',
+      prAuthor: 'author',
+      commitSha: headSha,
+      baseSha,
+      trigger: 'auto',
+      headRef: 'feature',
+      baseRef: 'main',
+      configSnapshot: defaultRepoConfig,
+    });
+    await updateJobFileCount(env, job.id, 2);
+    await updateJobStep(env, job.id, 'Preparation', { status: 'done' });
+    await updateJobStep(env, job.id, 'Reviewing Files', { status: 'done' });
+    await upsertFileReview(env, job.id, {
+      filePath: 'src/app.ts',
+      fileStatus: 'done',
+      modelUsed: 'test-model',
+      modelProvider: 'test-provider',
+      diffLineCount: 1,
+      diffInput: 'diff',
+      rawAiOutput: '{}',
+      parsedComments: [],
+      inputTokens: 1,
+      outputTokens: 1,
+      durationMs: 1,
+      verdict: 'approve',
+      fileSummary: 'ok',
+      errorMessage: null,
+    });
+    await upsertFileReview(env, job.id, {
+      filePath: 'src/failed.ts',
+      fileStatus: 'failed',
+      modelUsed: 'gemma-4-31b-it',
+      modelProvider: 'google',
+      diffLineCount: 1,
+      diffInput: '',
+      rawAiOutput: null,
+      parsedComments: [],
+      inputTokens: null,
+      outputTokens: null,
+      durationMs: 1,
+      verdict: null,
+      fileSummary: null,
+      errorMessage: 'Review skipped after 3 repeated model provider outages.',
+    });
+
+    await runWithDb(env, async () => {
+      (env.REVIEW_QUEUE as any).sent.length = 0;
+      const result = await runReviewJob(env, {
+        jobId: job.id,
+        deliveryId: 'delivery-partial',
+        phase: 'finalize',
+      });
+      expect(result).toEqual({ action: 'ack' });
+    });
+
+    const finalJob = await getJobForProcessing(env, job.id);
+    expect(finalJob?.status).toBe('done');
+    expect(finalJob?.error_msg).toContain('Partial review: 1 of 2 files');
+    getDiffSpy.mockRestore();
+  }, REVIEW_FLOW_TIMEOUT_MS);
 });

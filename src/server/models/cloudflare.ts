@@ -7,8 +7,32 @@ import type { ModelResponse } from './types';
 const CLOUDFLARE_TIMEOUT_MS = 45_000;
 const CLOUDFLARE_MAX_RETRIES = 1;
 
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null;
+}
+
 function isText(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function getRecord(value: unknown, key: string): UnknownRecord | null {
+  if (!isRecord(value)) return null;
+  const child = value[key];
+  return isRecord(child) ? child : null;
+}
+
+function getText(value: unknown, key: string): string | null {
+  if (!isRecord(value)) return null;
+  const child = value[key];
+  return isText(child) ? child.trim() : null;
+}
+
+function getNumber(value: unknown, key: string) {
+  if (!isRecord(value)) return null;
+  const child = value[key];
+  return typeof child === 'number' ? child : null;
 }
 
 function extractMessageContent(content: unknown): string | null {
@@ -18,7 +42,7 @@ function extractMessageContent(content: unknown): string | null {
     const text = content
       .map((part) => {
         if (isText(part)) return part;
-        if (part && typeof part === 'object' && isText((part as any).text)) return (part as any).text;
+        if (isRecord(part) && isText(part.text)) return part.text;
         return '';
       })
       .join('')
@@ -29,24 +53,38 @@ function extractMessageContent(content: unknown): string | null {
   return null;
 }
 
-function extractCloudflareText(result: any, model: string): string {
+function extractCloudflareText(result: unknown, model: string): string {
   if (isText(result)) return result.trim();
-  if (isText(result?.response)) return result.response.trim();
-  if (isText(result?.result?.response)) return result.result.response.trim();
+  const response = getText(result, 'response');
+  if (response) return response;
 
-  const choice = result?.choices?.[0];
-  const content = extractMessageContent(choice?.message?.content);
+  const nestedResult = getRecord(result, 'result');
+  const nestedResponse = getText(nestedResult, 'response');
+  if (nestedResponse) return nestedResponse;
+
+  const choices = isRecord(result) && Array.isArray(result.choices) ? result.choices : null;
+  const choice = choices?.[0];
+  const message = getRecord(choice, 'message');
+  const content = extractMessageContent(message?.content);
   if (content) return content;
 
-  const finishReason = choice?.finish_reason ?? choice?.stop_reason;
+  const finishReason = isRecord(choice) ? choice.finish_reason ?? choice.stop_reason : null;
   if (finishReason) {
     throw new Error(`Cloudflare model ${model} returned no review content (finish_reason=${finishReason}).`);
   }
-  if (isText(choice?.message?.reasoning) || isText(choice?.message?.reasoning_content)) {
+  if (isText(message?.reasoning) || isText(message?.reasoning_content)) {
     throw new Error(`Cloudflare model ${model} returned reasoning without review content.`);
   }
 
   throw new Error(`Cloudflare model ${model} returned an empty response.`);
+}
+
+function extractCloudflareUsage(result: unknown) {
+  const usage = getRecord(result, 'usage') ?? getRecord(getRecord(result, 'result'), 'usage');
+  return {
+    inputTokens: getNumber(usage, 'prompt_tokens') ?? 0,
+    outputTokens: getNumber(usage, 'completion_tokens') ?? 0,
+  };
 }
 
 export async function reviewWithCloudflare(
@@ -56,7 +94,7 @@ export async function reviewWithCloudflare(
   tracker?: { incrementSubrequests(count?: number): void },
 ): Promise<ModelResponse> {
   const maxRetries = CLOUDFLARE_MAX_RETRIES;
-  let lastError: any;
+  let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -90,11 +128,12 @@ export async function reviewWithCloudflare(
       logger.info(`AI model ${model} responded in ${durationMs}ms`);
 
       const rawText = extractCloudflareText(result, model);
+      const usage = extractCloudflareUsage(result);
 
       return {
         rawText,
-        inputTokens: result?.usage?.prompt_tokens ?? result?.result?.usage?.prompt_tokens ?? 0,
-        outputTokens: result?.usage?.completion_tokens ?? result?.result?.usage?.completion_tokens ?? 0,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
         modelUsed: model,
         provider: 'cloudflare',
       };
