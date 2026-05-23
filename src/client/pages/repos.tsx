@@ -238,7 +238,7 @@ function RepoModelModal({
     if (!repo || !dirty) return;
     setSaving('apply');
     setError(null);
-    const tid = toast.loading(`Saving model strategy for ${repo.owner}/${repo.repo}...`);
+    const tid = toast.loading('Applying model strategy…');
     try {
       await api.updateRepoConfig(repo.owner, repo.repo, {
         model: {
@@ -249,11 +249,11 @@ function RepoModelModal({
       });
       setInitialRoute(route);
       onModelApplied(repo, route);
-      toast.success('Model strategy saved', { id: tid });
+      toast.success('Strategy saved', { id: tid, description: `${repo.owner}/${repo.repo} now uses a custom model chain.` });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to save model strategy.';
       setError(msg);
-      toast.error('Save failed', { id: tid, description: msg });
+      toast.error('Could not save strategy', { id: tid, description: 'Your changes were not applied. Please try again.' });
     } finally {
       setSaving(null);
     }
@@ -263,7 +263,7 @@ function RepoModelModal({
     if (!repo) return;
     setSaving('reset');
     setError(null);
-    const tid = toast.loading(`Using global strategy for ${repo.owner}/${repo.repo}...`);
+    const tid = toast.loading('Resetting to global defaults…');
     try {
       await api.updateRepoConfig(repo.owner, repo.repo, {
         model: {
@@ -276,11 +276,11 @@ function RepoModelModal({
       setRoute(globalRoute);
       setInitialRoute(globalRoute);
       onModelReset(repo);
-      toast.success('Repo now uses global strategy', { id: tid });
+      toast.success('Reset to global strategy', { id: tid, description: `${repo.owner}/${repo.repo} will inherit account defaults.` });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to reset model strategy.';
       setError(msg);
-      toast.error('Reset failed', { id: tid, description: msg });
+      toast.error('Reset failed', { id: tid, description: 'Could not remove the custom strategy. Try again.' });
     } finally {
       setSaving(null);
     }
@@ -379,14 +379,19 @@ export function ReposPage() {
   const handleToggleEnabled = async (repo: RepoConfigRecord, nextEnabled: boolean) => {
     const targetId = repoId(repo);
     setPendingToggles(current => new Set(current).add(targetId));
-    const tid = toast.loading(`${nextEnabled ? 'Enabling' : 'Pausing'} ${targetId}...`);
+    const tid = toast.loading(nextEnabled ? 'Enabling code reviews…' : 'Pausing code reviews…');
     try {
       await api.updateRepoConfig(repo.owner, repo.repo, { enabled: nextEnabled });
       mergeRepo(targetId, { enabled: nextEnabled });
-      toast.success(nextEnabled ? 'Reviews enabled' : 'Reviews paused', { id: tid, description: targetId });
+      toast.success(
+        nextEnabled ? 'Reviews active' : 'Reviews paused',
+        { id: tid, description: nextEnabled
+          ? `${targetId} will receive automated review comments.`
+          : `${targetId} is now quiet — no new reviews will be posted.`
+        },
+      );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to update repository.';
-      toast.error('Update failed', { id: tid, description: msg });
+      toast.error('Could not update repository', { id: tid, description: 'The change did not go through. Please try again.' });
     } finally {
       setPendingToggles(current => {
         const next = new Set(current);
@@ -416,19 +421,21 @@ export function ReposPage() {
     if (syncing) return;
     setSyncing(true);
     setError(null);
-    const tid = toast.loading('Syncing repositories from GitHub...');
+    const tid = toast.loading('Syncing with GitHub…');
     try {
       const result = await api.syncRepos();
       const syncedCount = result?.synced?.length ?? 0;
-      toast.success('Repositories synced', {
+      toast.success('Repositories up to date', {
         id: tid,
-        description: `${syncedCount} ${syncedCount === 1 ? 'repository' : 'repositories'} synced successfully`,
+        description: syncedCount > 0
+          ? `${syncedCount} ${syncedCount === 1 ? 'repository' : 'repositories'} refreshed from GitHub.`
+          : 'Everything is already in sync.',
       });
       loadRepos();
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Sync failed.';
       setError(msg);
-      toast.error('Sync failed', { id: tid, description: msg });
+      toast.error('Sync failed', { id: tid, description: 'Could not reach GitHub. Check your connection and try again.' });
     } finally {
       setSyncing(false);
     }

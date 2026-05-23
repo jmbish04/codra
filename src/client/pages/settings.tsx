@@ -98,7 +98,7 @@ export function SettingsPage() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to load settings';
       setError(msg);
-      toast.error('Failed to load settings', { description: msg });
+      toast.error('Could not load settings', { description: 'Something went wrong fetching your configuration.' });
     } finally {
       setLoading(false);
     }
@@ -110,18 +110,18 @@ export function SettingsPage() {
     if (!globalConfig || !globalDirty) return;
     setSaving('global');
     setError(null);
-    const tid = toast.loading('Saving global strategy...');
+    const tid = toast.loading('Saving model strategy…');
     try {
       await api.updateGlobalConfig(globalConfig);
       setSavedGlobalConfig(globalConfig);
       toast.success('Global strategy saved', {
         id: tid,
-        description: `Primary model: ${getModelLabel(globalConfig.main)}`,
+        description: 'All repositories without a custom strategy will use these settings.',
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Update failed';
       setError(msg);
-      toast.error('Failed to save strategy', { id: tid, description: msg });
+      toast.error('Could not save strategy', { id: tid, description: 'Your changes were not applied. Please try again.' });
     } finally {
       setSaving(null);
     }
@@ -137,16 +137,16 @@ export function SettingsPage() {
     if (!current) return;
     setSaving(id);
     setError(null);
-    const tid = toast.loading(`Updating ${id}...`);
+    const tid = toast.loading('Updating quota…');
     try {
       await api.updateModelConfig(id, quotaPayload(current));
       const saved = { ...current, updatedAt: new Date().toISOString() };
       markConfigSaved(id, saved);
-      toast.success('Model quota updated', { id: tid, description: id });
+      toast.success('Quota updated', { id: tid, description: 'Rate limits have been applied to this model.' });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Update failed';
       setError(msg);
-      toast.error('Failed to update quota', { id: tid, description: msg });
+      toast.error('Quota update failed', { id: tid, description: 'The limit change did not save. Please try again.' });
     } finally {
       setSaving(null);
     }
@@ -156,7 +156,11 @@ export function SettingsPage() {
     if (dirtyConfigs.length === 0) return;
     setSaving('quotas');
     setError(null);
-    const tid = toast.loading(`Saving ${dirtyConfigs.length} quota ${dirtyConfigs.length === 1 ? 'change' : 'changes'}...`);
+    const tid = toast.loading(
+      dirtyConfigs.length === 1
+        ? 'Saving 1 quota change…'
+        : `Saving ${dirtyConfigs.length} quota changes…`,
+    );
     try {
       await Promise.all(dirtyConfigs.map(cfg => api.updateModelConfig(cfg.modelId, quotaPayload(cfg))));
       const now = new Date().toISOString();
@@ -165,11 +169,11 @@ export function SettingsPage() {
       setSavedConfigs(current =>
         configs.map(cfg => (dirtyIds.has(cfg.modelId) ? { ...cfg, updatedAt: now } : current.find(saved => saved.modelId === cfg.modelId) ?? cfg)),
       );
-      toast.success('Quotas saved', { id: tid });
+      toast.success('All quotas saved', { id: tid, description: `${dirtyConfigs.length} ${dirtyConfigs.length === 1 ? 'model' : 'models'} updated successfully.` });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Update failed';
       setError(msg);
-      toast.error('Failed to save quotas', { id: tid, description: msg });
+      toast.error('Could not save quotas', { id: tid, description: 'One or more limits failed to save. Try again.' });
     } finally {
       setSaving(null);
     }

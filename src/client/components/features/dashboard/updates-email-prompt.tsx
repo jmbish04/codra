@@ -35,12 +35,12 @@ export function UpdatesEmailPrompt() {
     try {
       const response = await api.subscribeUpdates(email);
       setStatus(response);
-      toast.success('Updates email saved', {
-        description: 'You will only get important Codra release and security notes.',
+      toast.success('You’re subscribed', {
+        description: 'We’ll only reach out for important releases and security notices.',
       });
     } catch (error) {
-      toast.error('Could not save updates email', {
-        description: error instanceof Error ? error.message : 'Please try again.',
+      toast.error('Subscription failed', {
+        description: 'We couldn’t save your email. Please check it and try again.',
       });
     } finally {
       setSubmitting(false);

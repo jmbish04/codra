@@ -26,6 +26,25 @@ function ToasterWrapper() {
       position="bottom-right"
       richColors
       closeButton
+      gap={8}
+      toastOptions={{
+        duration: 4000,
+        classNames: {
+          toast: 'codra-toast',
+          title: 'codra-toast-title',
+          description: 'codra-toast-description',
+          actionButton: 'codra-toast-action',
+          cancelButton: 'codra-toast-cancel',
+          closeButton: 'codra-toast-close',
+          icon: 'codra-toast-icon',
+          loader: 'codra-toast-loader',
+          success: 'codra-toast-success',
+          error: 'codra-toast-error',
+          warning: 'codra-toast-warning',
+          info: 'codra-toast-info',
+          loading: 'codra-toast-loading',
+        },
+      }}
     />
   );
 }
