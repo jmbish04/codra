@@ -399,6 +399,79 @@ dbDescribe('Review Flow Lifecycle', () => {
     reviewSpy.mockRestore();
   }, REVIEW_FLOW_TIMEOUT_MS);
 
+  it('reviews files in a chunk concurrently', async () => {
+    const { GitHubService } = await import('@server/services/github');
+    const { ModelService } = await import('@server/services/model');
+    const repo = `test-repo-${Date.now()}-concurrent`;
+    const headSha = sha('8');
+    const baseSha = sha('9');
+    const getDiffSpy = vi.spyOn(GitHubService.prototype, 'getPullRequestDiff').mockResolvedValue(
+      generateMockDiff([
+        { path: 'src/one.ts', content: 'console.log(1);' },
+        { path: 'src/two.ts', content: 'console.log(2);' },
+      ]),
+    );
+    let active = 0;
+    let maxActive = 0;
+    const reviewSpy = vi.spyOn(ModelService.prototype as any, 'reviewFile').mockImplementation(async (params: any) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      active -= 1;
+      return {
+        parsed: {
+          comments: [],
+          verdict: 'approve',
+          fileSummary: `Reviewed ${params.file.path}`,
+          overallCorrectness: 'no issues',
+          confidenceScore: 0.9,
+        },
+        modelUsed: 'test-model',
+        provider: 'test-provider',
+        inputTokens: 10,
+        outputTokens: 5,
+        rawText: '{}',
+        userPrompt: '',
+      };
+    });
+
+    const job = await insertJob(env, {
+      installationId: '123',
+      owner: 'test-owner',
+      repo,
+      prNumber: 6,
+      prTitle: 'Concurrent Test',
+      prAuthor: 'author',
+      commitSha: headSha,
+      baseSha,
+      trigger: 'auto',
+      headRef: 'feature',
+      baseRef: 'main',
+      configSnapshot: defaultRepoConfig,
+    });
+    await updateJobFileCount(env, job.id, 2);
+    await updateJobStep(env, job.id, 'Preparation', { status: 'done' });
+
+    await runWithDb(env, async () => {
+      (env.REVIEW_QUEUE as any).sent.length = 0;
+      const result = await runReviewJob(env, {
+        jobId: job.id,
+        deliveryId: 'delivery-concurrent',
+        phase: 'review',
+      });
+
+      expect(result).toEqual({ action: 'ack' });
+      expect(maxActive).toBe(2);
+      expect((env.REVIEW_QUEUE as any).sent[0]).toMatchObject({ jobId: job.id, phase: 'finalize' });
+    });
+
+    const reviews = await getFileReviewsForJobs(env, [job.id]);
+    expect(reviews.filter((review) => review.file_status === 'done')).toHaveLength(2);
+
+    reviewSpy.mockRestore();
+    getDiffSpy.mockRestore();
+  }, REVIEW_FLOW_TIMEOUT_MS);
+
   it('marks completed jobs with skipped files as partial reviews', async () => {
     const { GitHubService } = await import('@server/services/github');
     const { ModelService } = await import('@server/services/model');

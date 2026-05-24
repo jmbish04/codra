@@ -321,7 +321,7 @@ describe('ModelService', () => {
 
     const userPrompt = requestBody.contents[0].parts[0].text as string;
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(requestBody.generationConfig.maxOutputTokens).toBe(3072);
+    expect(requestBody.generationConfig.maxOutputTokens).toBe(4096);
     expect(userPrompt).toContain('[NOTE: This diff has been truncated from 900 lines to 800 lines for brevity.]');
     expect(userPrompt).toContain('const value799 = 799;');
     expect(userPrompt).not.toContain('const value800 = 800;');

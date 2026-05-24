@@ -433,6 +433,8 @@ async function runReviewPhase(
   const currentReviews = new Map(allExistingReviews.filter((review) => review.job_id === job.id).map((review) => [review.file_path, review]));
   const parentReviews = new Map(allExistingReviews.filter((review) => review.job_id !== job.id && review.file_status === 'done').map((review) => [review.file_path, review]));
 
+  const reviewTasks: Array<Promise<void>> = [];
+
   for (const file of files) {
     const existingReview = currentReviews.get(file.path);
     if (existingReview && countsAsHandledFileReview(existingReview)) {
@@ -440,12 +442,15 @@ async function runReviewPhase(
     }
 
     const inherited = parentReviews.get(file.path);
-    if (inherited) {
+    const reviewTask = async () => {
+      if (!inherited) {
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, existingReview);
+        return;
+      }
+
       if (!canInheritParentFileReview(config, inherited)) {
         logger.info(`Ignoring inherited review for ${file.path}; parent model ${inherited.model_used} is not in the current model strategy`);
         await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, existingReview);
-        processedThisChunk += 1;
-        await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
       } else {
         await upsertFileReview(env, job.id, {
           filePath: file.path,
@@ -466,18 +471,23 @@ async function runReviewPhase(
           errorMessage: null,
         });
         currentReviews.set(file.path, inherited);
-        processedThisChunk += 1;
-        await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
       }
-    } else {
-      await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, existingReview);
-      processedThisChunk += 1;
-      await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
-    }
+    };
+
+    reviewTasks.push(reviewTask());
+    processedThisChunk += 1;
 
     if (processedThisChunk >= REVIEW_CHUNK_FILE_LIMIT || Date.now() - startedAt >= REVIEW_CHUNK_WALL_CLOCK_MS) {
       break;
     }
+  }
+
+  const results = await Promise.allSettled(reviewTasks);
+  await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
+
+  const rejected = results.find((result) => result.status === 'rejected');
+  if (rejected) {
+    throw rejected.reason;
   }
 
   const latestReviews = await getFileReviewsForJobs(env, [job.id]);

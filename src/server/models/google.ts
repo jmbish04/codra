@@ -4,9 +4,9 @@ import { withTimeout } from '@server/core/timeout';
 import type { ModelResponse } from './types';
 
 /** Max wall-clock time allowed for a single Google AI Studio call. */
-const GOOGLE_TIMEOUT_MS = 30_000;
+const GOOGLE_TIMEOUT_MS = 120_000;
 const GOOGLE_MAX_RETRIES = 0;
-const GOOGLE_MAX_OUTPUT_TOKENS = 3072;
+const GOOGLE_MAX_OUTPUT_TOKENS = 4096;
 
 export async function reviewWithGoogle(
   env: Pick<AppBindings, 'GEMINI_API_KEY'>,

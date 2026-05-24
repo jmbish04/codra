@@ -4,8 +4,9 @@ import { TimeoutError } from '@server/core/timeout';
 import type { ModelResponse } from './types';
 
 /** Max wall-clock time allowed for a single Workers-AI call. */
-const CLOUDFLARE_TIMEOUT_MS = 30_000;
+const CLOUDFLARE_TIMEOUT_MS = 120_000;
 const CLOUDFLARE_MAX_RETRIES = 0;
+const CLOUDFLARE_MAX_OUTPUT_TOKENS = 4096;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -119,7 +120,7 @@ export async function reviewWithCloudflare(
             { role: 'system', content: input.systemPrompt },
             { role: 'user', content: input.userPrompt },
           ],
-          max_completion_tokens: 4096,
+          max_completion_tokens: CLOUDFLARE_MAX_OUTPUT_TOKENS,
           temperature: 0,
         }),
         timeoutPromise,
