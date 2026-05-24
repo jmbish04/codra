@@ -873,7 +873,7 @@
 /* ── Outer list / viewport ───────────────────────── */
 [data-sonner-toaster] {
   --offset: 1.25rem !important;
-  --width:  22rem   !important;
+  --width: min(22rem, calc(100vw - 2rem)) !important;
   font-family: var(--font-sans) !important;
 }
 

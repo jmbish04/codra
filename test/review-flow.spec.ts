@@ -63,7 +63,10 @@ vi.mock('@server/services/model', () => {
         async generateSummary() {
             return {
                 modelUsed: 'sum-model',
+                provider: 'google',
                 rawText: '{"summary": "test"}',
+                inputTokens: 3,
+                outputTokens: 2,
             };
         }
     }
@@ -549,6 +552,8 @@ dbDescribe('Review Flow Lifecycle', () => {
     const finalJob = await getJobForProcessing(env, job.id);
     expect(finalJob?.status).toBe('done');
     expect(finalJob?.error_msg).toContain('Partial review: 1 of 2 files');
+    expect(finalJob?.summary_markdown).toMatch(/^### Codra Review/);
+    expect(finalJob?.summary_model).toBeNull();
     expect(summarySpy).not.toHaveBeenCalled();
     summarySpy.mockRestore();
     getDiffSpy.mockRestore();

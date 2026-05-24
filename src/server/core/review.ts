@@ -485,9 +485,14 @@ async function runReviewPhase(
   const results = await Promise.allSettled(reviewTasks);
   await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
 
-  const rejected = results.find((result) => result.status === 'rejected');
-  if (rejected) {
-    throw rejected.reason;
+  const rejected = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (rejected.length > 0) {
+    rejected.forEach((result, index) => {
+      logger.error(`Review chunk task ${index + 1}/${rejected.length} failed`, result.reason);
+    });
+    throw rejected.length === 1
+      ? rejected[0].reason
+      : new AggregateError(rejected.map((result) => result.reason), `${rejected.length} review chunk tasks failed`);
   }
 
   const latestReviews = await getFileReviewsForJobs(env, [job.id]);

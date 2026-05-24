@@ -59,7 +59,14 @@ export function JobProgress({ job }: JobProgressProps) {
         </div>
 
         {/* Progress track */}
-        <div className="h-[3px] rounded-full bg-primary-foreground/15 overflow-hidden">
+        <div
+          className="h-[3px] rounded-full bg-primary-foreground/15 overflow-hidden"
+          role="progressbar"
+          aria-valuenow={isQueued ? 0 : pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={isQueued ? 'Review waiting in queue' : 'File review progress'}
+        >
           <div
             className="h-full rounded-full bg-primary-foreground transition-[width] duration-700 ease-out"
             style={{ width: isQueued ? '0%' : `${pct}%` }}

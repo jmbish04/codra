@@ -10,7 +10,10 @@ interface JobMetaCardsProps {
 
 function elapsedSec(step: JobStep): string | null {
   if (step.finishedAt && step.startedAt) {
-    const ms = new Date(step.finishedAt).getTime() - new Date(step.startedAt).getTime();
+    const start = new Date(step.startedAt).getTime();
+    const end = new Date(step.finishedAt).getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+    const ms = end - start;
     return `${(ms / 1000).toFixed(1)}s`;
   }
   return null;
@@ -91,6 +94,7 @@ function StepRow({ step, index, total }: { step: JobStep; index: number; total: 
 export function JobMetaCards({ job }: JobMetaCardsProps) {
   const isPartialReview = job.status === 'done' && job.errorMessage?.startsWith('Partial review:');
   const steps = job.steps ?? [];
+  const shortCommitSha = job.commitSha?.slice(0, 7) ?? 'unknown';
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -103,7 +107,7 @@ export function JobMetaCards({ job }: JobMetaCardsProps) {
           {/* Metadata grid */}
           <dl className="grid grid-cols-2 gap-x-6 gap-y-5">
             {[
-              { label: 'Status',  value: <StatusBadge label={job.status} /> },
+              { label: 'Status',  value: <StatusBadge label={job.status} job={job} /> },
               { label: 'Verdict', value: job.verdict
                   ? <StatusBadge label={job.verdict} />
                   : <span className="text-muted-foreground/50 text-sm">—</span>
@@ -126,15 +130,19 @@ export function JobMetaCards({ job }: JobMetaCardsProps) {
             <div>
               <dt className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground mb-1.5">Commit</dt>
               <dd>
-                <a
-                  href={`https://github.com/${job.owner}/${job.repo}/commit/${job.commitSha}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-foreground hover:text-primary transition-colors"
-                >
-                  {job.commitSha.slice(0, 7)}
-                  <ExternalLink size={10} className="text-muted-foreground/50" />
-                </a>
+                {job.commitSha ? (
+                  <a
+                    href={`https://github.com/${job.owner}/${job.repo}/commit/${job.commitSha}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-foreground hover:text-primary transition-colors"
+                  >
+                    {shortCommitSha}
+                    <ExternalLink size={10} className="text-muted-foreground/50" />
+                  </a>
+                ) : (
+                  <span className="font-mono text-xs text-muted-foreground">{shortCommitSha}</span>
+                )}
               </dd>
             </div>
 
@@ -206,7 +214,7 @@ export function JobMetaCards({ job }: JobMetaCardsProps) {
           ) : (
             <div>
               {steps.map((step, idx) => (
-                <StepRow key={idx} step={step} index={idx} total={steps.length} />
+                <StepRow key={step.name || idx} step={step} index={idx} total={steps.length} />
               ))}
             </div>
           )}
