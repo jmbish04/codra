@@ -50,7 +50,7 @@ describe('ModelService', () => {
     });
   });
 
-  it('rejects Cloudflare reasoning-only responses instead of trying to parse the response envelope', async () => {
+  it('turns Cloudflare reasoning-only responses into inconclusive review JSON', async () => {
     const env = createTestEnv({
       AI: {
         async run() {
@@ -70,12 +70,15 @@ describe('ModelService', () => {
       } as any,
     });
 
-    await expect(
-      reviewWithCloudflare(env, '@cf/moonshotai/kimi-k2.6', {
-        systemPrompt: 'system',
-        userPrompt: 'user',
-      }),
-    ).rejects.toThrow('returned no review content');
+    const response = await reviewWithCloudflare(env, '@cf/moonshotai/kimi-k2.6', {
+      systemPrompt: 'system',
+      userPrompt: 'user',
+    });
+    const parsed = JSON.parse(response.rawText);
+
+    expect(parsed.findings).toEqual([]);
+    expect(parsed.overall_correctness).toBe('patch is incorrect');
+    expect(parsed.overall_explanation).toContain('inconclusive');
   });
 
   it('does not spend an extra queue slice retrying the same Cloudflare model inline', async () => {
@@ -98,20 +101,30 @@ describe('ModelService', () => {
     expect(attempts).toBe(1);
   });
 
-  it('skips later models from the same provider after a transient provider failure', async () => {
+  it('tries the smaller Google fallback after the primary Google model fails', async () => {
     let cloudflareCalls = 0;
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          error: {
-            code: 500,
-            message: 'Internal error encountered.',
-            status: 'INTERNAL',
-          },
-        }),
-        { status: 500, headers: { 'content-type': 'application/json' } },
-      ),
-    );
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 500,
+              message: 'Internal error encountered.',
+              status: 'INTERNAL',
+            },
+          }),
+          { status: 500, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}' }] } }],
+            usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
     const env = createTestEnv({
       AI: {
         async run() {
@@ -154,9 +167,11 @@ describe('ModelService', () => {
       totalLineCount: 1,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(cloudflareCalls).toBe(1);
-    expect(response.modelUsed).toBe('@cf/zai-org/glm-4.7-flash');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/models/gemma-4-31b-it:generateContent');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/models/gemma-4-26b-a4b-it:generateContent');
+    expect(cloudflareCalls).toBe(0);
+    expect(response.modelUsed).toBe('gemma-4-26b-a4b-it');
   });
 
   it('marks exhausted transient provider failures as retryable for the queue', async () => {

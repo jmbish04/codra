@@ -36,6 +36,18 @@ function getNumber(value: unknown, key: string) {
   return typeof child === 'number' ? child : null;
 }
 
+function synthesizeInconclusiveReview(model: string, reason: string): string {
+  logger.warn(`Cloudflare model ${model} returned no parseable review content; synthesizing inconclusive review JSON`, {
+    reason,
+  });
+  return JSON.stringify({
+    findings: [],
+    overall_correctness: 'patch is incorrect',
+    overall_explanation: `Cloudflare model ${model} returned no parseable review content (${reason}). The file review is inconclusive.`,
+    overall_confidence_score: 0,
+  });
+}
+
 function extractMessageContent(content: unknown): string | null {
   if (isText(content)) return content.trim();
 
@@ -70,14 +82,22 @@ function extractCloudflareText(result: unknown, model: string): string {
   if (content) return content;
 
   const finishReason = isRecord(choice) ? choice.finish_reason ?? choice.stop_reason : null;
-  if (finishReason) {
-    throw new Error(`Cloudflare model ${model} returned no review content (finish_reason=${finishReason}).`);
-  }
-  if (isText(message?.reasoning) || isText(message?.reasoning_content)) {
-    throw new Error(`Cloudflare model ${model} returned reasoning without review content.`);
+  const reasoning = isText(message?.reasoning) ? message.reasoning : isText(message?.reasoning_content) ? message.reasoning_content : null;
+  if (reasoning) {
+    if (reasoning.includes('{') && reasoning.includes('}')) {
+      logger.warn(`Cloudflare model ${model} returned reasoning without content; attempting to parse reasoning as review JSON`, {
+        finishReason,
+      });
+      return reasoning.trim();
+    }
+    return synthesizeInconclusiveReview(model, `reasoning-only response${finishReason ? `, finish_reason=${String(finishReason)}` : ''}`);
   }
 
-  throw new Error(`Cloudflare model ${model} returned an empty response.`);
+  if (finishReason) {
+    return synthesizeInconclusiveReview(model, `finish_reason=${String(finishReason)}`);
+  }
+
+  return synthesizeInconclusiveReview(model, 'empty response');
 }
 
 function extractCloudflareUsage(result: unknown) {
