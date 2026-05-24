@@ -1,16 +1,25 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { jobsQuerySchema } from '@shared/schema';
 import type { AppEnv } from '@server/env';
 import { bytesToHex, getJobDetail, getJobForProcessing, insertJob, listJobs, mapJob, supersedeOlderJobs } from '@server/db/jobs';
 import { jsonError } from '@server/core/http';
-import { runBestEffortJobMaintenance } from '@server/core/job-recovery';
+import { scheduleBestEffortJobMaintenance } from '@server/core/job-recovery';
 import { loadRepoConfig } from '@server/core/config';
+
+function getExecutionContext(c: Context<AppEnv>) {
+  try {
+    return c.executionCtx;
+  } catch {
+    return undefined;
+  }
+}
 
 export function createJobsRouter() {
   const app = new Hono<AppEnv>();
 
   app.get('/', async (c) => {
-    await runBestEffortJobMaintenance(c.env);
+    scheduleBestEffortJobMaintenance(c.env, getExecutionContext(c));
 
     const rawQuery = c.req.query();
     const query = jobsQuerySchema.parse(rawQuery);
@@ -20,7 +29,7 @@ export function createJobsRouter() {
   });
 
   app.get('/:id', async (c) => {
-    await runBestEffortJobMaintenance(c.env);
+    scheduleBestEffortJobMaintenance(c.env, getExecutionContext(c));
 
     const job = await getJobDetail(c.env, c.req.param('id'));
     if (!job) {

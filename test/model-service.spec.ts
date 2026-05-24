@@ -78,7 +78,7 @@ describe('ModelService', () => {
     ).rejects.toThrow('returned no review content');
   });
 
-  it('retries the same Cloudflare model once before failing it', async () => {
+  it('does not spend an extra queue slice retrying the same Cloudflare model inline', async () => {
     let attempts = 0;
     const env = createTestEnv({
       AI: {
@@ -95,7 +95,68 @@ describe('ModelService', () => {
         userPrompt: 'user',
       }),
     ).rejects.toThrow('temporary provider error');
-    expect(attempts).toBe(2);
+    expect(attempts).toBe(1);
+  });
+
+  it('skips later models from the same provider after a transient provider failure', async () => {
+    let cloudflareCalls = 0;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 500,
+            message: 'Internal error encountered.',
+            status: 'INTERNAL',
+          },
+        }),
+        { status: 500, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const env = createTestEnv({
+      AI: {
+        async run() {
+          cloudflareCalls++;
+          return {
+            response: JSON.stringify({
+              findings: [],
+              overall_correctness: 'patch is correct',
+              overall_explanation: 'ok',
+              overall_confidence_score: 0.9,
+            }),
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+          };
+        },
+      } as any,
+      GEMINI_API_KEY: 'test-key',
+    });
+    const service = new ModelService(env);
+
+    const response = await service.reviewFile({
+      file: {
+        path: 'src/app.ts',
+        lineCount: 1,
+        hunks: [],
+        isDeleted: false,
+        isBinary: false,
+        isNew: false,
+        previousPath: null,
+      },
+      prTitle: 'Test',
+      prDescription: null,
+      config: {
+        ...defaultRepoConfig,
+        model: {
+          main: 'gemma-4-31b-it',
+          fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
+          size_overrides: [],
+        },
+      },
+      totalLineCount: 1,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(cloudflareCalls).toBe(1);
+    expect(response.modelUsed).toBe('@cf/zai-org/glm-4.7-flash');
   });
 
   it('marks exhausted transient provider failures as retryable for the queue', async () => {

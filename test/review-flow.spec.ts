@@ -401,6 +401,7 @@ dbDescribe('Review Flow Lifecycle', () => {
 
   it('marks completed jobs with skipped files as partial reviews', async () => {
     const { GitHubService } = await import('@server/services/github');
+    const { ModelService } = await import('@server/services/model');
     const repo = `test-repo-${Date.now()}-partial`;
     const headSha = sha('e');
     const baseSha = sha('f');
@@ -425,6 +426,7 @@ dbDescribe('Review Flow Lifecycle', () => {
       baseRef: 'main',
       configSnapshot: defaultRepoConfig,
     });
+    const summarySpy = vi.spyOn(ModelService.prototype as any, 'generateSummary');
     await updateJobFileCount(env, job.id, 2);
     await updateJobStep(env, job.id, 'Preparation', { status: 'done' });
     await updateJobStep(env, job.id, 'Reviewing Files', { status: 'done' });
@@ -474,6 +476,8 @@ dbDescribe('Review Flow Lifecycle', () => {
     const finalJob = await getJobForProcessing(env, job.id);
     expect(finalJob?.status).toBe('done');
     expect(finalJob?.error_msg).toContain('Partial review: 1 of 2 files');
+    expect(summarySpy).not.toHaveBeenCalled();
+    summarySpy.mockRestore();
     getDiffSpy.mockRestore();
   }, REVIEW_FLOW_TIMEOUT_MS);
 });

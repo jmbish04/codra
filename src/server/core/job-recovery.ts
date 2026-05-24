@@ -59,3 +59,13 @@ export async function runBestEffortJobMaintenance(env: AppBindings) {
     logger.error('Opportunistic job maintenance failed', error instanceof Error ? error : new Error(String(error)));
   }
 }
+
+export function scheduleBestEffortJobMaintenance(
+  env: AppBindings,
+  executionCtx?: Pick<ExecutionContext, 'waitUntil'>,
+) {
+  const task = runBestEffortJobMaintenance(env);
+  if (executionCtx) {
+    executionCtx.waitUntil(task);
+  }
+}

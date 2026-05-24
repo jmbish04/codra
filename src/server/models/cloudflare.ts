@@ -4,8 +4,8 @@ import { TimeoutError } from '@server/core/timeout';
 import type { ModelResponse } from './types';
 
 /** Max wall-clock time allowed for a single Workers-AI call. */
-const CLOUDFLARE_TIMEOUT_MS = 45_000;
-const CLOUDFLARE_MAX_RETRIES = 1;
+const CLOUDFLARE_TIMEOUT_MS = 30_000;
+const CLOUDFLARE_MAX_RETRIES = 0;
 
 type UnknownRecord = Record<string, unknown>;
 

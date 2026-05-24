@@ -5,7 +5,7 @@ import { requireSession } from '@server/middleware/auth';
 import { requireCsrfHeader } from '@server/middleware/csrf';
 import { observability } from '@server/middleware/observability';
 import { createAuthRouter } from '@server/routes/auth';
-import { createWebhookRouter } from '@server/routes/webhook';
+import { createWebhookRouter, handleGitHubWebhook } from '@server/routes/webhook';
 import { createAuthApiRouter } from '@server/routes/api/auth';
 import { createJobsRouter } from '@server/routes/api/jobs';
 import { createReposRouter } from '@server/routes/api/repos';
@@ -26,6 +26,7 @@ export function createApp() {
 
   app.route('/auth', createAuthRouter());
   app.route('/webhook', createWebhookRouter());
+  app.post('/', handleGitHubWebhook);
 
   app.use('/api/*', requireSession);
   app.use('/api/*', requireCsrfHeader);
