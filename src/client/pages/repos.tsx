@@ -22,7 +22,9 @@ import type { RepoConfigRecord } from '@shared/schema';
 import {
   describeModelRoute,
   ModelRouteEditor,
+  type ModelOption,
   type ModelRouteConfig,
+  type ProviderOption,
 } from '@client/components/features/models/model-chain';
 
 const DEFAULT_GLOBAL_CONFIG: ModelRouteConfig = {
@@ -104,6 +106,7 @@ function formatLastActivity(value: string | Date | null) {
 interface RepoRowProps {
   repo: RepoConfigRecord;
   globalConfig: any;
+  modelOptions: ModelOption[];
   togglePending: boolean;
   onToggleEnabled: (repo: RepoConfigRecord, enabled: boolean) => void;
   onEdit: (repo: RepoConfigRecord) => void;
@@ -112,6 +115,7 @@ interface RepoRowProps {
 function RepoRow({
   repo,
   globalConfig,
+  modelOptions,
   togglePending,
   onToggleEnabled,
   onEdit,
@@ -165,7 +169,7 @@ function RepoRow({
         </div>
 
         <p className="min-w-0 truncate text-xs text-muted-foreground lg:px-2">
-          {describeModelRoute(route)}
+          {describeModelRoute(route, modelOptions)}
         </p>
 
         <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
@@ -198,6 +202,8 @@ function RepoRow({
 interface RepoModelModalProps {
   repo: RepoConfigRecord | null;
   globalConfig: any;
+  modelOptions: ModelOption[];
+  providerOptions: ProviderOption[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onModelApplied: (repo: RepoConfigRecord, route: ModelRouteConfig) => void;
@@ -207,6 +213,8 @@ interface RepoModelModalProps {
 function RepoModelModal({
   repo,
   globalConfig,
+  modelOptions,
+  providerOptions,
   open,
   onOpenChange,
   onModelApplied,
@@ -309,7 +317,13 @@ function RepoModelModal({
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
             {error && <Alert variant="destructive" className="mb-4">{error}</Alert>}
-            <ModelRouteEditor value={route} onChange={setRoute} density="comfortable" />
+            <ModelRouteEditor
+              value={route}
+              onChange={setRoute}
+              models={modelOptions}
+              providers={providerOptions}
+              density="comfortable"
+            />
           </div>
 
           <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border bg-muted/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
@@ -341,6 +355,8 @@ function RepoModelModal({
 export function ReposPage() {
   const [repos, setRepos] = useState<RepoConfigRecord[]>([]);
   const [globalConfig, setGlobalConfig] = useState<any>(null);
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+  const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -354,10 +370,17 @@ export function ReposPage() {
     Promise.all([
       api.getRepos(),
       api.getGlobalConfig(),
+      api.getModelConfigs(),
     ])
-      .then(([reposRes, globalRes]) => {
+      .then(([reposRes, globalRes, modelsRes]) => {
         setRepos(reposRes.repos);
         setGlobalConfig(globalRes.config);
+        setProviderOptions(modelsRes.providers.map(provider => ({ value: provider.id, label: provider.name })));
+        setModelOptions(modelsRes.configs.map(config => ({
+          value: config.modelId,
+          label: `${config.providerName} / ${config.modelName}`,
+          providerId: config.providerId,
+        })));
         setLoading(false);
       })
       .catch(e => {
@@ -505,6 +528,7 @@ export function ReposPage() {
                 key={id}
                 repo={repo}
                 globalConfig={globalConfig}
+                modelOptions={modelOptions}
                 togglePending={pendingToggles.has(id)}
                 onToggleEnabled={handleToggleEnabled}
                 onEdit={(nextRepo) => setEditingRepoId(repoId(nextRepo))}
@@ -517,6 +541,8 @@ export function ReposPage() {
       <RepoModelModal
         repo={editingRepo}
         globalConfig={globalConfig}
+        modelOptions={modelOptions}
+        providerOptions={providerOptions}
         open={editingRepo !== null}
         onOpenChange={(open) => {
           if (!open) setEditingRepoId(null);

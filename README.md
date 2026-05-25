@@ -47,7 +47,7 @@ Codra listens to GitHub pull request events, runs AI-powered review jobs, posts 
 - Dead letter queue inspection, replay, and purge workflows
 - GitHub OAuth dashboard authentication
 - External PostgreSQL storage through Cloudflare Hyperdrive
-- Google Gemini and Cloudflare Workers AI model providers
+- Dashboard-managed LLM providers for OpenAI, OpenRouter, Anthropic, Google, and Cloudflare models
 - Repository settings for labels, skipped globs, custom rules, and model routing
 
 ## How It Works
@@ -65,7 +65,7 @@ Codra listens to GitHub pull request events, runs AI-powered review jobs, posts 
 - **Dashboard**: React, Vite, Tailwind CSS, Radix UI, Recharts
 - **Data**: PostgreSQL, Cloudflare Hyperdrive, Cloudflare KV
 - **Queues**: Cloudflare Queues with DLQ workflows
-- **Models**: Google Gemini and Cloudflare Workers AI
+- **Models**: OpenAI, OpenRouter, Anthropic, Google, and Cloudflare providers
 - **GitHub**: GitHub App webhooks, checks, reviews, and OAuth
 - **Quality**: TypeScript, Zod, Vitest, Playwright browser tests
 

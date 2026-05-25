@@ -11,7 +11,7 @@ declare interface Env {
   APP_PRIVATE_KEY: string;
   GITHUB_APP_ID: string;
   GITHUB_APP_WEBHOOK_SECRET: string;
-  GEMINI_API_KEY: string;
+  LLM_CONFIG_ENCRYPTION_KEY: string;
   GEMINI_MODEL: string;
   BOT_USERNAME: string;
   ENVIRONMENT: string;

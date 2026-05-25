@@ -1,4 +1,6 @@
 import type { AppBindings } from '@server/env';
+import { encryptLlmApiKey } from '@server/core/llm-crypto';
+import { queryRows } from '@server/db/client';
 
 export class MemoryKV {
   private readonly store = new Map<string, string>();
@@ -100,7 +102,7 @@ export function createTestEnv(overrides: Partial<AppBindings> = {}): AppBindings
     AUTH_CALLBACK_URL: requiredEnv('AUTH_CALLBACK_URL'),
     APP_URL: requiredEnv('APP_URL'),
     DASHBOARD_ALLOWED_USERS: requiredEnv('DASHBOARD_ALLOWED_USERS'),
-    get GEMINI_API_KEY() { return unusedEnv('GEMINI_API_KEY'); },
+    LLM_CONFIG_ENCRYPTION_KEY: 'test-llm-config-encryption-key',
     BOT_USERNAME: requiredEnv('BOT_USERNAME'),
     get ENVIRONMENT() { return unusedEnv('ENVIRONMENT'); },
     get CF_API_TOKEN() { return unusedEnv('CF_API_TOKEN'); },
@@ -108,6 +110,19 @@ export function createTestEnv(overrides: Partial<AppBindings> = {}): AppBindings
     get CF_DLQ_ID() { return unusedEnv('CF_DLQ_ID'); },
     ...overrides,
   };
+}
+
+export async function saveTestProviderApiKey(env: AppBindings, providerName = 'Google', apiKey = 'test-key') {
+  const encrypted = await encryptLlmApiKey(env, apiKey);
+  await queryRows(
+    env,
+    `
+    UPDATE llm_providers
+    SET encrypted_api_key = $1, enabled = TRUE, updated_at = now()
+    WHERE name = $2
+    `,
+    [encrypted, providerName],
+  );
 }
 
 /**

@@ -70,5 +70,7 @@ export type DlqResponse = {
 };
 
 export type ModelConfigsResponse = {
+  providers: import('./schema').LlmProvider[];
   configs: import('./schema').ModelConfig[];
+  syncErrors?: Array<{ providerId: string; providerName: string; error: string }>;
 };

@@ -40,7 +40,7 @@ export interface AppBindings {
   AUTH_CALLBACK_URL: string;
   APP_URL: string;
   DASHBOARD_ALLOWED_USERS: string;
-  GEMINI_API_KEY: string;
+  LLM_CONFIG_ENCRYPTION_KEY: string;
   BOT_USERNAME: string;
   ENVIRONMENT: string;
   CF_API_TOKEN: string;

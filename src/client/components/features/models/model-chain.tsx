@@ -4,17 +4,16 @@ import { Select } from '@client/components/ui/select';
 import { Button } from '@client/components/ui/button';
 import { Trash2, ListPlus } from 'lucide-react';
 
-export const PROVIDERS = [
-  { value: 'cloudflare', label: 'Cloudflare' },
-  { value: 'google', label: 'Google' },
-];
+export type ProviderOption = {
+  value: string;
+  label: string;
+};
 
-export const MODELS = [
-  { value: 'gemma-4-31b-it', label: 'Gemma 4 (31b)', provider: 'google' },
-  { value: 'gemma-4-26b-a4b-it', label: 'Gemma 4 (26b)', provider: 'google' },
-  { value: '@cf/moonshotai/kimi-k2.6', label: 'Kimi K2.6', provider: 'cloudflare' },
-  { value: '@cf/zai-org/glm-4.7-flash', label: 'GLM 4.7 Flash', provider: 'cloudflare' },
-];
+export type ModelOption = {
+  value: string;
+  label: string;
+  providerId: string;
+};
 
 export type ModelDensity = 'compact' | 'comfortable';
 
@@ -30,19 +29,19 @@ export type ModelRouteConfig = {
   size_overrides: ModelRouteTier[];
 };
 
-export function getProviderLabel(provider: string) {
-  return PROVIDERS.find(p => p.value === provider)?.label ?? provider;
+export function getProviderLabel(provider: string, providers: ProviderOption[] = []) {
+  return providers.find(p => p.value === provider)?.label ?? provider;
 }
 
-export function getModelLabel(model: string) {
-  return MODELS.find(m => m.value === model)?.label ?? model;
+export function getModelLabel(model: string, models: ModelOption[] = []) {
+  return models.find(m => m.value === model)?.label ?? model;
 }
 
-export function describeModelRoute(config: ModelRouteConfig) {
+export function describeModelRoute(config: ModelRouteConfig, models: ModelOption[] = []) {
   const fallbacks = config.fallbacks?.length ?? 0;
   const tiers = config.size_overrides?.length ?? 0;
   return [
-    getModelLabel(config.main),
+    getModelLabel(config.main, models),
     fallbacks > 0 ? `${fallbacks} fallback${fallbacks === 1 ? '' : 's'}` : 'no fallbacks',
     tiers > 0 ? `${tiers} tier${tiers === 1 ? '' : 's'}` : 'baseline only',
   ].join(' · ');
@@ -51,6 +50,8 @@ export function describeModelRoute(config: ModelRouteConfig) {
 interface ModelSelectorProps {
   value: string;
   onValueChange: (value: string) => void;
+  models: ModelOption[];
+  providers: ProviderOption[];
   hideLabels?: boolean;
   density?: ModelDensity;
   className?: string;
@@ -59,24 +60,34 @@ interface ModelSelectorProps {
 export function ModelSelector({
   value,
   onValueChange,
+  models,
+  providers,
   hideLabels,
   density = 'comfortable',
   className,
 }: ModelSelectorProps) {
-  const currentModel = MODELS.find(m => m.value === value) || MODELS[0];
-  const [provider, setProvider] = useState(currentModel.provider);
+  const currentModel = models.find(m => m.value === value) || models[0];
+  const [provider, setProvider] = useState(currentModel?.providerId ?? providers[0]?.value ?? '');
 
   useEffect(() => {
-    const model = MODELS.find(m => m.value === value);
-    if (model && model.provider !== provider) {
-      setProvider(model.provider);
+    const model = models.find(m => m.value === value);
+    if (model && model.providerId !== provider) {
+      setProvider(model.providerId);
     }
-  }, [provider, value]);
+  }, [models, provider, value]);
 
   const filteredModels = useMemo(
-    () => MODELS.filter(m => m.provider === provider).map(m => ({ value: m.value, label: m.label })),
-    [provider],
+    () => models.filter(m => m.providerId === provider).map(m => ({ value: m.value, label: m.label })),
+    [models, provider],
   );
+
+  if (models.length === 0 || providers.length === 0) {
+    return (
+      <div className={cn('rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground', className)}>
+        No configured models
+      </div>
+    );
+  }
 
   return (
     <div
@@ -93,10 +104,10 @@ export function ModelSelector({
         value={provider}
         onValueChange={(nextProvider) => {
           setProvider(nextProvider);
-          const first = MODELS.find(m => m.provider === nextProvider);
+          const first = models.find(m => m.providerId === nextProvider);
           if (first) onValueChange(first.value);
         }}
-        options={PROVIDERS}
+        options={providers}
         triggerClassName={cn(density === 'compact' && 'h-8 text-xs')}
       />
       <Select
@@ -114,6 +125,8 @@ interface ModelChainProps {
   primary: string;
   fallbacks: string[];
   onChange: (primary: string, fallbacks: string[]) => void;
+  models: ModelOption[];
+  providers: ProviderOption[];
   density?: ModelDensity;
 }
 
@@ -121,9 +134,14 @@ export function ModelChain({
   primary,
   fallbacks,
   onChange,
+  models,
+  providers,
   density = 'comfortable',
 }: ModelChainProps) {
-  const addFallback = () => onChange(primary, [...fallbacks, MODELS[0].value]);
+  const addFallback = () => {
+    const first = models[0]?.value;
+    if (first) onChange(primary, [...fallbacks, first]);
+  };
   const removeFallback = (idx: number) => onChange(primary, fallbacks.filter((_, i) => i !== idx));
   const updateFallback = (idx: number, val: string) => {
     const next = [...fallbacks];
@@ -144,6 +162,8 @@ export function ModelChain({
           )} />
           <ModelSelector
             value={primary}
+            models={models}
+            providers={providers}
             density={density}
             hideLabels={density === 'compact'}
             onValueChange={(val) => onChange(val, fallbacks)}
@@ -159,6 +179,8 @@ export function ModelChain({
             <div className="min-w-0 flex-1">
               <ModelSelector
                 value={fb}
+                models={models}
+                providers={providers}
                 hideLabels
                 density={density}
                 onValueChange={(val) => updateFallback(i, val)}
@@ -198,6 +220,8 @@ export function ModelChain({
 interface ModelRouteEditorProps {
   value: ModelRouteConfig;
   onChange: (value: ModelRouteConfig) => void;
+  models: ModelOption[];
+  providers: ProviderOption[];
   density?: ModelDensity;
   className?: string;
 }
@@ -205,6 +229,8 @@ interface ModelRouteEditorProps {
 export function ModelRouteEditor({
   value,
   onChange,
+  models,
+  providers,
   density = 'comfortable',
   className,
 }: ModelRouteEditorProps) {
@@ -217,11 +243,13 @@ export function ModelRouteEditor({
   };
 
   const addTier = () => {
+    const first = models[0]?.value;
+    if (!first) return;
     onChange({
       ...value,
       size_overrides: [
         ...tiers,
-        { max_lines: 300, model: MODELS[0].value, fallbacks: [] },
+        { max_lines: 300, model: first, fallbacks: [] },
       ],
     });
   };
@@ -268,6 +296,8 @@ export function ModelRouteEditor({
         <ModelChain
           primary={value.main}
           fallbacks={value.fallbacks ?? []}
+          models={models}
+          providers={providers}
           density={density}
           onChange={(main, fallbacks) => onChange({ ...value, main, fallbacks })}
         />
@@ -316,6 +346,8 @@ export function ModelRouteEditor({
               <ModelChain
                 primary={tier.model}
                 fallbacks={tier.fallbacks || []}
+                models={models}
+                providers={providers}
                 density={density}
                 onChange={(model, fallbacks) => updateTier(index, { model, fallbacks })}
               />

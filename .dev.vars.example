@@ -5,8 +5,8 @@
 # --- Integration tests ---
 TEST_DATABASE_URL="postgresql://user:password@localhost:5432/codra"
 
-# --- AI provider ---
-GEMINI_API_KEY="REPLACE_WITH_YOUR_GEMINI_API_KEY"
+# --- LLM provider config encryption ---
+LLM_CONFIG_ENCRYPTION_KEY="REPLACE_WITH_A_LONG_RANDOM_ENCRYPTION_KEY"
 
 # --- GitHub App and OAuth ---
 GITHUB_APP_WEBHOOK_SECRET="REPLACE_WITH_YOUR_WEBHOOK_SECRET"

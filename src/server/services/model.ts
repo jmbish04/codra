@@ -1,6 +1,8 @@
 import type { AppBindings } from '../env';
 import { reviewWithGoogle } from '../models/google';
 import { reviewWithCloudflare } from '../models/cloudflare';
+import { reviewWithOpenAI } from '../models/openai';
+import { reviewWithAnthropic } from '../models/anthropic';
 import { buildFileReviewPrompts } from '../prompts/file-review';
 import { buildSummaryPrompt, SUMMARY_SYSTEM_PROMPT } from '../prompts/summary';
 import { parseFileReviewResponse } from '../core/model-output';
@@ -10,15 +12,15 @@ import type { TokenTracker } from '../core/token-tracker';
 import type { ModelResponse } from '../models/types';
 import { logger } from '../core/logger';
 import { normalizeModelId } from '@shared/schema';
+import { getResolvedModelConfig, type ResolvedModelConfig } from '@server/db/model-configs';
+import { decryptLlmApiKey } from '@server/core/llm-crypto';
 
-const DEFAULT_GOOGLE_FALLBACK = 'gemma-4-31b-it';
 const PROVIDER_UNAVAILABLE_TTL_SECONDS = 24 * 60 * 60;
 const COMPACT_REVIEW_PROMPT_LINE_CAP = 400;
 const MODEL_ALIASES: Record<string, string> = {
   'gemma-4-31b': 'gemma-4-31b-it',
   'gemma-4-26b': 'gemma-4-26b-a4b-it',
 };
-type ModelProvider = 'cloudflare' | 'google';
 
 export class RetryableModelError extends Error {
   readonly retryable = true;
@@ -38,14 +40,6 @@ export class RetryableModelError extends Error {
 
 export function isRetryableModelError(error: unknown) {
   return Boolean(error && typeof error === 'object' && 'retryable' in error && error.retryable === true);
-}
-
-function isCloudflareModel(model: string) {
-  return model.startsWith('@cf/');
-}
-
-function getModelProvider(model: string): ModelProvider {
-  return isCloudflareModel(model) ? 'cloudflare' : 'google';
 }
 
 function normalizeModel(model: string) {
@@ -96,26 +90,26 @@ export class ModelService {
     private options: { jobId?: string } = {},
   ) {}
 
-  private providerUnavailableKey(provider: ModelProvider) {
-    return this.options.jobId ? `jobs:${this.options.jobId}:provider-unavailable:${provider}` : null;
+  private providerUnavailableKey(providerId: string) {
+    return this.options.jobId ? `jobs:${this.options.jobId}:provider-unavailable:${providerId}` : null;
   }
 
-  private async isProviderUnavailable(provider: ModelProvider) {
-    const key = this.providerUnavailableKey(provider);
+  private async isProviderUnavailable(providerId: string) {
+    const key = this.providerUnavailableKey(providerId);
     if (!key) return false;
 
     try {
       return (await this.env.APP_KV.get(key)) !== null;
     } catch (error) {
-      logger.warn(`Failed to read unavailable provider marker for ${provider}`, {
+      logger.warn(`Failed to read unavailable provider marker for ${providerId}`, {
         error: error instanceof Error ? error.message : String(error),
       });
       return false;
     }
   }
 
-  private async markProviderUnavailable(provider: ModelProvider, reason: string) {
-    const key = this.providerUnavailableKey(provider);
+  private async markProviderUnavailable(providerId: string, reason: string) {
+    const key = this.providerUnavailableKey(providerId);
     if (!key) return;
 
     try {
@@ -128,7 +122,7 @@ export class ModelService {
         { expirationTtl: PROVIDER_UNAVAILABLE_TTL_SECONDS },
       );
     } catch (error) {
-      logger.warn(`Failed to write unavailable provider marker for ${provider}`, {
+      logger.warn(`Failed to write unavailable provider marker for ${providerId}`, {
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -165,23 +159,71 @@ export class ModelService {
     const chain = uniqueModels([selectedModel, ...fallbackModels]);
     selectedModel = chain[0] ?? 'gemma-4-31b-it';
     fallbackModels = chain.slice(1);
-    if (chain.length > 0 && chain.every(isCloudflareModel)) {
-      fallbackModels = [...fallbackModels, DEFAULT_GOOGLE_FALLBACK];
-    }
 
     return { primary: selectedModel, fallbacks: fallbackModels };
   }
 
-  private async callModel(model: string, input: { systemPrompt: string; userPrompt: string }): Promise<ModelResponse> {
-    model = normalizeModel(model);
-    // Determine provider based on model name
-    // Cloudflare models start with @cf/
-    if (model.startsWith('@cf/')) {
-      return await reviewWithCloudflare(this.env, model, input, this.tracker);
-    } else {
-      // Default to Google for gemma/gemini
-      return await reviewWithGoogle(this.env, model, input, this.tracker);
+  private async resolveModel(model: string) {
+    const normalized = normalizeModel(model);
+    const resolved = await getResolvedModelConfig(this.env, normalized);
+    if (!resolved) {
+      throw new Error(`Model ${normalized} is not configured. Add it in Settings before using it in a route.`);
     }
+
+    if (!resolved.providerEnabled) {
+      throw new Error(`Provider ${resolved.providerName} is disabled.`);
+    }
+
+    return resolved;
+  }
+
+  private async decryptApiKey(config: ResolvedModelConfig) {
+    if (!config.encryptedApiKey) {
+      throw new Error(`Provider ${config.providerName} does not have a saved API key.`);
+    }
+    return decryptLlmApiKey(this.env, config.encryptedApiKey);
+  }
+
+  private async callResolvedModel(
+    config: ResolvedModelConfig,
+    input: { systemPrompt: string; userPrompt: string },
+  ): Promise<ModelResponse> {
+    if (config.apiFormat === 'cloudflare-workers-ai') {
+      return reviewWithCloudflare(this.env, config.modelName, input, this.tracker, config.providerName);
+    }
+
+    if (config.apiFormat === 'gemini') {
+      return reviewWithGoogle(
+        { apiKey: await this.decryptApiKey(config), baseUrl: config.baseUrl, providerName: config.providerName },
+        config.modelName,
+        input,
+        this.tracker,
+      );
+    }
+
+    if (config.apiFormat === 'openai') {
+      return reviewWithOpenAI(
+        {
+          apiKey: await this.decryptApiKey(config),
+          baseUrl: config.baseUrl || 'https://api.openai.com/v1',
+          providerName: config.providerName,
+        },
+        config.modelName,
+        input,
+        this.tracker,
+      );
+    }
+
+    return reviewWithAnthropic(
+      { apiKey: await this.decryptApiKey(config), baseUrl: config.baseUrl, providerName: config.providerName },
+      config.modelName,
+      input,
+      this.tracker,
+    );
+  }
+
+  private async callModel(model: string, input: { systemPrompt: string; userPrompt: string }): Promise<ModelResponse> {
+    return this.callResolvedModel(await this.resolveModel(model), input);
   }
 
   async reviewFile(params: {
@@ -213,9 +255,19 @@ export class ModelService {
     let lastTransientError: unknown;
     let sawTransientFailure = false;
     for (const currentModel of modelsToTry) {
-      const provider = getModelProvider(currentModel);
-      if (provider === 'cloudflare' && await this.isProviderUnavailable('cloudflare')) {
-        logger.warn(`Skipping Cloudflare model ${currentModel} because Cloudflare AI allocation is unavailable for job ${this.options.jobId ?? 'unknown'}`);
+      let resolved: ResolvedModelConfig;
+      try {
+        resolved = await this.resolveModel(currentModel);
+      } catch (error) {
+        lastError = error;
+        logger.warn(`Model ${currentModel} could not be resolved`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
+
+      if (resolved.apiFormat === 'cloudflare-workers-ai' && await this.isProviderUnavailable(resolved.providerId)) {
+        logger.warn(`Skipping ${resolved.providerName} model ${currentModel} because the provider is unavailable for job ${this.options.jobId ?? 'unknown'}`);
         continue;
       }
 
@@ -224,7 +276,7 @@ export class ModelService {
 
       while (attempts < maxAttempts) {
         try {
-          const response = await this.callModel(currentModel, { systemPrompt, userPrompt });
+          const response = await this.callResolvedModel(resolved, { systemPrompt, userPrompt });
 
           if (this.tracker) {
             this.tracker.record(response.modelUsed, response.inputTokens, response.outputTokens);
@@ -245,8 +297,8 @@ export class ModelService {
             lastTransientError = error;
           }
           attempts++;
-          if (isCloudflareModel(currentModel) && isCloudflareAllocationError(error)) {
-            await this.markProviderUnavailable('cloudflare', error instanceof Error ? error.message : String(error));
+          if (resolved.apiFormat === 'cloudflare-workers-ai' && isCloudflareAllocationError(error)) {
+            await this.markProviderUnavailable(resolved.providerId, error instanceof Error ? error.message : String(error));
           }
 
           const isRateLimit = isGoogleRateLimitError(error);
@@ -293,13 +345,24 @@ export class ModelService {
     let lastTransientError: unknown;
     let sawTransientFailure = false;
     for (const currentModel of modelsToTry) {
-      if (isCloudflareModel(currentModel) && await this.isProviderUnavailable('cloudflare')) {
-        logger.warn(`Skipping Cloudflare summary model ${currentModel} because Cloudflare AI allocation is unavailable for job ${this.options.jobId ?? 'unknown'}`);
+      let resolved: ResolvedModelConfig;
+      try {
+        resolved = await this.resolveModel(currentModel);
+      } catch (error) {
+        lastError = error;
+        logger.warn(`Summary model ${currentModel} could not be resolved`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
+
+      if (resolved.apiFormat === 'cloudflare-workers-ai' && await this.isProviderUnavailable(resolved.providerId)) {
+        logger.warn(`Skipping ${resolved.providerName} summary model ${currentModel} because the provider is unavailable for job ${this.options.jobId ?? 'unknown'}`);
         continue;
       }
 
       try {
-        const response = await this.callModel(currentModel, {
+        const response = await this.callResolvedModel(resolved, {
           systemPrompt: SUMMARY_SYSTEM_PROMPT,
           userPrompt: buildSummaryPrompt(params),
         });
@@ -315,8 +378,8 @@ export class ModelService {
           sawTransientFailure = true;
           lastTransientError = error;
         }
-        if (isCloudflareModel(currentModel) && isCloudflareAllocationError(error)) {
-          await this.markProviderUnavailable('cloudflare', error instanceof Error ? error.message : String(error));
+        if (resolved.apiFormat === 'cloudflare-workers-ai' && isCloudflareAllocationError(error)) {
+          await this.markProviderUnavailable(resolved.providerId, error instanceof Error ? error.message : String(error));
         }
         logger.warn(`Summary model ${currentModel} failed`, { error: error instanceof Error ? error.message : String(error) });
       }

@@ -231,8 +231,18 @@ async function ensureModelCatalog() {
 
   await query(
     `
-      INSERT INTO model_configs (model_id, rpm, tpm, rpd, provider)
-      VALUES ($1, 10, 131072, 300, 'cloudflare')
+      INSERT INTO llm_providers (name, api_format, base_url, enabled)
+      VALUES ('Cloudflare', 'cloudflare-workers-ai', NULL, TRUE)
+      ON CONFLICT (name) DO NOTHING
+    `,
+  );
+
+  await query(
+    `
+      INSERT INTO model_configs (model_id, rpm, tpm, rpd, provider, provider_id, model_name)
+      SELECT $1, 10, 131072, 300, 'cloudflare', id, $1
+      FROM llm_providers
+      WHERE name = 'Cloudflare'
       ON CONFLICT (model_id) DO NOTHING
     `,
     [kimiK26Model],

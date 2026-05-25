@@ -1,7 +1,7 @@
 import { logger } from '@server/core/logger';
 import type { AppBindings } from '@server/env';
 import { TimeoutError } from '@server/core/timeout';
-import type { ModelResponse } from './types';
+import { ProviderRequestError, type ModelResponse } from './types';
 
 /** Max wall-clock time allowed for a single Workers-AI call. */
 const CLOUDFLARE_TIMEOUT_MS = 180_000;
@@ -154,6 +154,7 @@ export async function reviewWithCloudflare(
   model: string,
   input: { systemPrompt: string; userPrompt: string },
   tracker?: { incrementSubrequests(count?: number): void },
+  providerName = 'Cloudflare',
 ): Promise<ModelResponse> {
   const maxRetries = CLOUDFLARE_MAX_RETRIES;
   let lastError: unknown;
@@ -209,11 +210,18 @@ export async function reviewWithCloudflare(
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         modelUsed: model,
-        provider: 'cloudflare',
+        provider: providerName,
       };
     } catch (error) {
       lastError = error;
       const errorMsg = error instanceof Error ? error.message : String(error);
+
+      if (errorMsg.includes('Binding AI needs to be run remotely')) {
+        const message = 'Cloudflare Workers AI is not available in local Wrangler. Run with remote bindings or deploy the Worker to test Cloudflare models.';
+        logger.warn(message, { model });
+        throw new ProviderRequestError(providerName, 400, message);
+      }
+
       logger.error(`Cloudflare request failed (attempt ${attempt}/${maxRetries})`, { error: errorMsg });
 
       // If we've used up our neuron quota, don't retry - it's a persistent error for this account/day

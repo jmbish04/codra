@@ -6,6 +6,7 @@ export const fileStatuses = ['pending', 'done', 'skipped', 'failed'] as const;
 export const reviewVerdicts = ['approve', 'comment'] as const;
 export const reviewSeverities = ['P0', 'P1', 'P2', 'P3', 'nit'] as const;
 export const reviewCategories = ['security', 'bugs', 'performance', 'correctness', 'quality'] as const; // Keeping for DB compatibility but will deprecate usage in prompts
+export const llmApiFormats = ['openai', 'anthropic', 'gemini', 'cloudflare-workers-ai'] as const;
 
 export const dateStringSchema = z.union([z.string(), z.date()]).transform((d) => (d instanceof Date ? d.toISOString() : d));
 export const coerceNumberSchema = z.coerce.number();
@@ -338,15 +339,31 @@ export type JobSummary = z.infer<typeof jobSummarySchema>;
 export type FileReviewRecord = z.infer<typeof fileReviewRecordSchema>;
 export type JobDetail = z.infer<typeof jobDetailSchema>;
 export type RepoConfigRecord = z.infer<typeof repoConfigRecordSchema>;
-export const modelConfigSchema = z.object({
-  modelId: z.string(),
-  rpm: z.number().int(),
-  tpm: z.number().int(),
-  rpd: z.number().int(),
-  provider: z.string(),
+export const llmProviderSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  apiFormat: z.enum(llmApiFormats),
+  baseUrl: z.string().nullable(),
+  enabled: z.boolean(),
+  hasApiKey: z.boolean(),
+  createdAt: dateStringSchema,
   updatedAt: dateStringSchema,
 });
 
+export const modelConfigSchema = z.object({
+  modelId: z.string(),
+  providerId: z.string().uuid(),
+  providerName: z.string(),
+  apiFormat: z.enum(llmApiFormats),
+  modelName: z.string(),
+  rpm: z.number().int(),
+  tpm: z.number().int(),
+  rpd: z.number().int(),
+  updatedAt: dateStringSchema,
+});
+
+export type LlmApiFormat = z.infer<typeof llmProviderSchema>['apiFormat'];
+export type LlmProvider = z.infer<typeof llmProviderSchema>;
 export type ModelConfig = z.infer<typeof modelConfigSchema>;
 export type StatsPayload = z.infer<typeof statsSchema>;
 

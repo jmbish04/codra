@@ -67,17 +67,20 @@ export function Select({
             <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-max min-w-[var(--radix-dropdown-menu-trigger-width)]">
+        <DropdownMenuContent
+          collisionPadding={12}
+          className="max-h-[min(28rem,var(--radix-dropdown-menu-content-available-height))] min-w-[var(--radix-dropdown-menu-trigger-width)] max-w-[calc(100vw-1.5rem)] overflow-y-auto sm:w-max sm:max-w-[42rem]"
+        >
           {options.map((option) => (
             <DropdownMenuItem
               key={option.value}
               onClick={() => onValueChange(option.value)}
               className={cn(
-                'cursor-pointer whitespace-nowrap',
+                'cursor-pointer whitespace-normal break-words py-2',
                 value === option.value && 'bg-accent font-medium dark:bg-primary/[0.12]'
               )}
             >
-              {option.label}
+              <span className="min-w-0">{option.label}</span>
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>
