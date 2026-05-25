@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRetryableModelError, ModelService } from '@server/services/model';
 import { reviewWithCloudflare } from '@server/models/cloudflare';
+import { reviewWithGoogle } from '@server/models/google';
 import { createTestEnv } from './helpers';
 import { defaultRepoConfig } from '@shared/schema';
 
@@ -81,6 +82,36 @@ describe('ModelService', () => {
     expect(parsed.overall_explanation).toContain('inconclusive');
   });
 
+  it('does not parse Cloudflare reasoning as review JSON when final content is missing', async () => {
+    const env = createTestEnv({
+      AI: {
+        async run() {
+          return {
+            choices: [
+              {
+                message: {
+                  content: null,
+                  reasoning: 'Reasoning mentioned an object like {"foo":"bar"} but never produced final JSON.',
+                },
+                finish_reason: 'length',
+              },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 8192 },
+          };
+        },
+      } as any,
+    });
+
+    const response = await reviewWithCloudflare(env, '@cf/zai-org/glm-4.7-flash', {
+      systemPrompt: 'system',
+      userPrompt: 'user',
+    });
+    const parsed = JSON.parse(response.rawText);
+
+    expect(parsed.findings).toEqual([]);
+    expect(parsed.overall_explanation).toContain('reasoning-only response');
+  });
+
   it('asks Cloudflare chat models for strict review JSON', async () => {
     let inputs: any;
     const env = createTestEnv({
@@ -114,8 +145,37 @@ describe('ModelService', () => {
       },
     });
     expect(inputs.messages[0].content).toContain('Return only the JSON object');
+    expect(inputs.max_completion_tokens).toBe(8192);
     expect(inputs.chat_template_kwargs).toBeUndefined();
     expect(inputs.reasoning_effort).toBeUndefined();
+  });
+
+  it('retries Google once for transient 524 edge timeouts', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: { code: 524, message: 'A timeout occurred.' } }),
+          { status: 524, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}' }] } }],
+            usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+
+    const response = await reviewWithGoogle(
+      { GEMINI_API_KEY: 'test-key' },
+      'gemma-4-31b-it',
+      { systemPrompt: 'system', userPrompt: 'user' },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(response.rawText).toContain('"findings"');
   });
 
   it('does not spend an extra queue slice retrying the same Cloudflare model inline', async () => {

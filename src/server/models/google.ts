@@ -5,8 +5,12 @@ import type { ModelResponse } from './types';
 
 /** Max wall-clock time allowed for a single Google AI Studio call. */
 const GOOGLE_TIMEOUT_MS = 180_000;
-const GOOGLE_MAX_RETRIES = 0;
+const GOOGLE_MAX_RETRIES = 1;
 const GOOGLE_MAX_OUTPUT_TOKENS = 4096;
+
+function isRetryableGoogleStatus(status: number) {
+  return status === 408 || status === 503 || status === 524;
+}
 
 export async function reviewWithGoogle(
   env: Pick<AppBindings, 'GEMINI_API_KEY'>,
@@ -57,13 +61,18 @@ export async function reviewWithGoogle(
       if (!response.ok) {
         const errorText = await response.text();
         const isRateLimit = response.status === 429;
-        const isRetryable = !isRateLimit && response.status >= 500;
+        const isRetryable = isRetryableGoogleStatus(response.status);
 
-        logger.error(`Google request failed with ${response.status}`, {
+        const logData = {
           error: errorText,
           attempt,
-          willRetry: isRetryable && attempt < maxRetries
-        });
+          willRetry: isRetryable && attempt < maxRetries,
+        };
+        if (isRetryable && attempt < maxRetries) {
+          logger.warn(`Google request failed with ${response.status}; retrying`, logData);
+        } else {
+          logger.error(`Google request failed with ${response.status}`, logData);
+        }
 
         if (isRateLimit) {
           throw new Error(`Google request failed with ${response.status}: ${errorText}`);

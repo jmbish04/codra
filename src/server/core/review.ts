@@ -18,7 +18,7 @@ type PersistedReviewJob = ReturnType<typeof mapJob>;
 
 export type ReviewJobRunResult = { action: 'ack' } | { action: 'retry'; delaySeconds: number };
 
-const REVIEW_CHUNK_FILE_LIMIT = 2;
+const REVIEW_CHUNK_FILE_LIMIT = 3;
 const REVIEW_CHUNK_WALL_CLOCK_MS = 12 * 60 * 1000;
 const JOB_LEASE_SECONDS = 15 * 60;
 const BUSY_RETRY_SECONDS = 60;

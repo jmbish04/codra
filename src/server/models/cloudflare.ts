@@ -6,7 +6,7 @@ import type { ModelResponse } from './types';
 /** Max wall-clock time allowed for a single Workers-AI call. */
 const CLOUDFLARE_TIMEOUT_MS = 180_000;
 const CLOUDFLARE_MAX_RETRIES = 0;
-const CLOUDFLARE_MAX_OUTPUT_TOKENS = 4096;
+const CLOUDFLARE_MAX_OUTPUT_TOKENS = 8192;
 const REVIEW_RESPONSE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -131,12 +131,6 @@ function extractCloudflareText(result: unknown, model: string): string {
   const finishReason = isRecord(choice) ? choice.finish_reason ?? choice.stop_reason : null;
   const reasoning = isText(message?.reasoning) ? message.reasoning : isText(message?.reasoning_content) ? message.reasoning_content : null;
   if (reasoning) {
-    if (reasoning.includes('{') && reasoning.includes('}')) {
-      logger.warn(`Cloudflare model ${model} returned reasoning without content; attempting to parse reasoning as review JSON`, {
-        finishReason,
-      });
-      return reasoning.trim();
-    }
     return synthesizeInconclusiveReview(model, `reasoning-only response${finishReason ? `, finish_reason=${String(finishReason)}` : ''}`);
   }
 
