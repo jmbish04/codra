@@ -87,6 +87,10 @@ export type GitHubReviewComment = {
   body: string;
 };
 
+type GitHubIssueLabel = {
+  name?: string;
+};
+
 function installationCacheKey(installationId: string) {
   return `install:${installationId}`;
 }
@@ -581,6 +585,28 @@ export class GitHubClient {
         body: JSON.stringify({ labels }),
       });
     });
+  }
+
+  async listIssueLabels(owner: string, repo: string, issueNumber: number) {
+    return withRetry(`listIssueLabels ${owner}/${repo}#${issueNumber}`, async () => {
+      const response = await this.requestAndCheck(`/repos/${owner}/${repo}/issues/${issueNumber}/labels?per_page=100`);
+      const labels = (await response.json()) as GitHubIssueLabel[];
+      return labels
+        .map(label => label.name)
+        .filter((name): name is string => typeof name === 'string' && name.length > 0);
+    });
+  }
+
+  async removeIssueLabelsIfPresent(owner: string, repo: string, issueNumber: number, labels: string[]) {
+    const currentLabels = await this.listIssueLabels(owner, repo, issueNumber);
+    const currentByLowerName = new Map(currentLabels.map(label => [label.toLowerCase(), label]));
+
+    for (const label of labels) {
+      const currentLabel = currentByLowerName.get(label.toLowerCase());
+      if (currentLabel) {
+        await this.removeIssueLabel(owner, repo, issueNumber, currentLabel);
+      }
+    }
   }
 
   async removeIssueLabel(owner: string, repo: string, issueNumber: number, label: string) {

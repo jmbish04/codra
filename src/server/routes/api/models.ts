@@ -6,6 +6,7 @@ import {
   deleteLlmProvider,
   deleteModelConfig,
   findLlmProviderByName,
+  getLlmProvider,
   getResolvedModelConfig,
   listLlmProviderSecrets,
   listLlmProviders,
@@ -105,6 +106,10 @@ function readModelIdParam(value: string) {
 
 function providerErrorStatus(error: ProviderRequestError) {
   return error.status >= 500 ? 502 : error.status;
+}
+
+function providerCanBeEnabled(apiFormat: z.infer<typeof apiFormatSchema>, encryptedApiKey: string | null | undefined) {
+  return apiFormat === 'cloudflare-workers-ai' || Boolean(encryptedApiKey);
 }
 
 function optionalEnv(value: () => string) {
@@ -217,6 +222,10 @@ export function createModelsRouter() {
       throw error;
     }
 
+    if (input.enabled && !providerCanBeEnabled(input.apiFormat, encryptedApiKey)) {
+      return jsonError(`Provider ${input.name} needs an API key before it can be enabled.`, 400);
+    }
+
     let provider;
     try {
       provider = await createLlmProvider(c.env, {
@@ -248,6 +257,9 @@ export function createModelsRouter() {
     }
 
     const input = parsed.data;
+    const existing = await getLlmProvider(c.env, id);
+    if (!existing) return jsonError('Provider not found.', 404);
+
     let encryptedApiKey: string | null | undefined;
     try {
       encryptedApiKey = input.apiFormat === 'cloudflare-workers-ai'
@@ -258,6 +270,13 @@ export function createModelsRouter() {
         return jsonError(error instanceof Error ? error.message : 'LLM encryption is not configured.', 400);
       }
       throw error;
+    }
+
+    const effectiveEncryptedApiKey = encryptedApiKey !== undefined
+      ? encryptedApiKey
+      : existing.encryptedApiKey;
+    if (input.enabled && !providerCanBeEnabled(input.apiFormat, effectiveEncryptedApiKey)) {
+      return jsonError(`Provider ${input.name} needs an API key before it can be enabled.`, 400);
     }
 
     let provider;

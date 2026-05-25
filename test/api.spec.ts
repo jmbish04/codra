@@ -400,6 +400,60 @@ describe('Dashboard API Suite', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it('rejects enabling non-Cloudflare providers without a saved API key', async () => {
+    const env = createTestEnv();
+    const token = await getAuthCookie(env);
+
+    const createResponse = await app.request('/api/models/providers', {
+      method: 'POST',
+      headers: {
+        Cookie: `codra_session=${token}`,
+        'x-requested-with': 'XMLHttpRequest',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'No Key Provider',
+        apiFormat: 'openai',
+        baseUrl: 'https://api.example.com/v1',
+        enabled: true,
+      }),
+    }, env);
+    expect(createResponse.status).toBe(400);
+
+    const disabledCreateResponse = await app.request('/api/models/providers', {
+      method: 'POST',
+      headers: {
+        Cookie: `codra_session=${token}`,
+        'x-requested-with': 'XMLHttpRequest',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'Disabled No Key Provider',
+        apiFormat: 'openai',
+        baseUrl: 'https://api.example.com/v1',
+        enabled: false,
+      }),
+    }, env);
+    expect(disabledCreateResponse.status).toBe(201);
+    const { provider } = await disabledCreateResponse.json() as { provider: { id: string; name: string; apiFormat: string; baseUrl: string } };
+
+    const updateResponse = await app.request(`/api/models/providers/${provider.id}`, {
+      method: 'PATCH',
+      headers: {
+        Cookie: `codra_session=${token}`,
+        'x-requested-with': 'XMLHttpRequest',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: provider.name,
+        apiFormat: provider.apiFormat,
+        baseUrl: provider.baseUrl,
+        enabled: true,
+      }),
+    }, env);
+    expect(updateResponse.status).toBe(400);
+  });
+
   it('refreshes provider model catalogs on the explicit sync endpoint', async () => {
     const env = createTestEnv();
     const token = await getAuthCookie(env);

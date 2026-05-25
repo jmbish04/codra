@@ -28,6 +28,7 @@ vi.mock('@server/services/github', () => {
         async createReview() { return { id: 456 }; }
         async ensureLabel() { return {}; }
         async addIssueLabels() { return {}; }
+        async removeIssueLabelsIfPresent() { return {}; }
         async removeIssueLabel() { return {}; }
     }
     return { GitHubService: MockGitHubService };

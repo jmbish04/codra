@@ -298,9 +298,12 @@ async function resolveQueuedJob(
       if (prPayload.action === 'closed' && repoConfig.parsedJson.review.labels !== false) {
         const labels = repoConfig.parsedJson.review.labels;
         const gh = new GitHubClient(env, installationId);
-        await gh.removeIssueLabel(prPayload.repository.owner.login, prPayload.repository.name, prPayload.pull_request.number, labels.p1);
-        await gh.removeIssueLabel(prPayload.repository.owner.login, prPayload.repository.name, prPayload.pull_request.number, labels.p2);
-        await gh.removeIssueLabel(prPayload.repository.owner.login, prPayload.repository.name, prPayload.pull_request.number, labels.p3);
+        await gh.removeIssueLabelsIfPresent(
+          prPayload.repository.owner.login,
+          prPayload.repository.name,
+          prPayload.pull_request.number,
+          [labels.p1, labels.p2, labels.p3],
+        );
       }
     }
     return null;
@@ -699,11 +702,12 @@ async function runFinalizePhase(
     } as const;
     const label = labelMap[verdictSummary.verdict];
 
-    for (const possibleLabel of [labels.p1, labels.p2, labels.p3]) {
-      if (possibleLabel !== label.name) {
-        await github.removeIssueLabel(job.owner, job.repo, job.prNumber, possibleLabel);
-      }
-    }
+    await github.removeIssueLabelsIfPresent(
+      job.owner,
+      job.repo,
+      job.prNumber,
+      [labels.p1, labels.p2, labels.p3].filter(possibleLabel => possibleLabel !== label.name),
+    );
 
     await github.ensureLabel(job.owner, job.repo, label.name, label.color);
     await github.addIssueLabels(job.owner, job.repo, job.prNumber, [label.name]);
