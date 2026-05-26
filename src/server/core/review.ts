@@ -3,6 +3,7 @@ import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHub
 import { defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import type { AppBindings } from '@server/env';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview } from '@server/db/file-reviews';
+import { getResolvedModelConfig } from '@server/db/model-configs';
 import { claimJobLease, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStep } from '@server/db/jobs';
 import { filterReviewableFiles, parseUnifiedDiff } from './diff';
 
@@ -90,6 +91,20 @@ function configuredModelSet(config: RepoConfig) {
 
 function canInheritParentFileReview(config: RepoConfig, review: { model_used: string }) {
   return configuredModelSet(config).has(normalizeModelId(review.model_used));
+}
+
+async function resolveModelProviderName(env: Pick<AppBindings, 'HYPERDRIVE'>, modelId: string | null | undefined) {
+  if (!modelId || modelId === 'unconfigured') return null;
+
+  try {
+    const resolved = await getResolvedModelConfig(env, normalizeModelId(modelId));
+    return resolved?.providerName ?? null;
+  } catch (error) {
+    logger.warn(`Failed to resolve provider for model ${modelId}`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 function shouldTriggerFromPullRequest(action: PullRequestWebhookPayload['action'], config: RepoConfig['review']) {
@@ -562,10 +577,11 @@ async function reviewAndPersistFile(
 
     if (isRetryableModelError(error)) {
       const modelId = config.model?.main ?? 'unconfigured';
+      const modelProvider = await resolveModelProviderName(env, modelId);
       const failureCount = await recordRetryableFileReviewFailure(env, job.id, {
         filePath: file.path,
         modelUsed: modelId,
-        modelProvider: 'configured',
+        modelProvider,
         diffLineCount: file.lineCount,
         diffInput: '',
         durationMs: Date.now() - startedAt,
@@ -578,7 +594,7 @@ async function reviewAndPersistFile(
           filePath: file.path,
           fileStatus: 'failed',
           modelUsed: modelId,
-          modelProvider: 'configured',
+          modelProvider,
           diffLineCount: file.lineCount,
           diffInput: '',
           rawAiOutput: null,
@@ -620,11 +636,12 @@ async function reviewAndPersistFile(
     }
 
     const modelId = config.model?.main ?? 'unconfigured';
+    const modelProvider = await resolveModelProviderName(env, modelId);
     await upsertFileReview(env, job.id, {
       filePath: file.path,
       fileStatus: 'failed',
       modelUsed: modelId,
-      modelProvider: 'configured',
+      modelProvider,
       diffLineCount: file.lineCount,
       diffInput: '',
       rawAiOutput: null,

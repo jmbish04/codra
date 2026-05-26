@@ -83,6 +83,12 @@ function getNumber(value: unknown, key: string) {
   return typeof child === 'number' ? child : null;
 }
 
+function isLocalWorkersAiBindingError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return normalized.includes('binding ai') && normalized.includes('run remotely');
+}
+
 function synthesizeInconclusiveReview(model: string, reason: string): string {
   logger.warn(`Cloudflare model ${model} returned no parseable review content; synthesizing inconclusive review JSON`, {
     reason,
@@ -216,7 +222,7 @@ export async function reviewWithCloudflare(
       lastError = error;
       const errorMsg = error instanceof Error ? error.message : String(error);
 
-      if (errorMsg.includes('Binding AI needs to be run remotely')) {
+      if (isLocalWorkersAiBindingError(error)) {
         const message = 'Cloudflare Workers AI is not available in local Wrangler. Run with remote bindings or deploy the Worker to test Cloudflare models.';
         logger.warn(message, { model });
         throw new ProviderRequestError(providerName, 400, message);

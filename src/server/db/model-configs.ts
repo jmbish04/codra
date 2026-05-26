@@ -332,6 +332,7 @@ export async function upsertDiscoveredModelConfigs(
   const uniqueModelNames = Array.from(new Set(input.modelNames.map(name => name.trim()).filter(Boolean)));
   if (uniqueModelNames.length === 0) return [];
 
+  const providerSlug = slugify(input.providerName);
   const [existingForProvider, existingModelIds] = await Promise.all([
     queryRows<{ model_id: string; model_name: string }>(
       env,
@@ -340,13 +341,13 @@ export async function upsertDiscoveredModelConfigs(
     ),
     queryRows<{ model_id: string }>(
       env,
-      `SELECT model_id FROM model_configs`,
+      `SELECT model_id FROM model_configs WHERE model_id LIKE $1`,
+      [`${providerSlug}:%`],
     ),
   ]);
 
   const existingModelNames = new Set(existingForProvider.map(row => row.model_name));
   const usedModelIds = new Set(existingModelIds.map(row => row.model_id));
-  const providerSlug = slugify(input.providerName);
   const rowsToInsert: Array<{
     model_id: string;
     provider_id: string;

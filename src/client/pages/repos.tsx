@@ -18,7 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
-import type { RepoConfigRecord } from '@shared/schema';
+import type { RepoConfig, RepoConfigRecord } from '@shared/schema';
 import {
   describeModelRoute,
   ModelRouteEditor,
@@ -33,6 +33,8 @@ const EMPTY_MODEL_ROUTE: ModelRouteConfig = {
   size_overrides: [],
 };
 
+type GlobalModelConfig = RepoConfig['model'];
+
 function repoId(repo: Pick<RepoConfigRecord, 'owner' | 'repo'>) {
   return `${repo.owner}/${repo.repo}`;
 }
@@ -41,7 +43,7 @@ function hasStoredModelStrategy(repo: RepoConfigRecord) {
   return repo.mainModel !== null || repo.fallbackModels !== null || repo.sizeOverrides !== null;
 }
 
-function normalizeRoute(config: any): ModelRouteConfig {
+function normalizeRoute(config: GlobalModelConfig | ModelRouteConfig | null | undefined): ModelRouteConfig {
   return {
     main: typeof config?.main === 'string' && config.main.trim() ? config.main : null,
     fallbacks: Array.isArray(config?.fallbacks) ? config.fallbacks : EMPTY_MODEL_ROUTE.fallbacks,
@@ -51,7 +53,7 @@ function normalizeRoute(config: any): ModelRouteConfig {
   };
 }
 
-function getGlobalRoute(globalConfig: any): ModelRouteConfig {
+function getGlobalRoute(globalConfig: GlobalModelConfig | ModelRouteConfig | null): ModelRouteConfig {
   return normalizeRoute(globalConfig);
 }
 
@@ -69,7 +71,7 @@ function routesEqual(a: ModelRouteConfig, b: ModelRouteConfig) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-function hasMeaningfulCustomStrategy(repo: RepoConfigRecord, globalConfig: any) {
+function hasMeaningfulCustomStrategy(repo: RepoConfigRecord, globalConfig: GlobalModelConfig | ModelRouteConfig | null) {
   const storedRoute = getStoredRepoRoute(repo);
   if (!storedRoute) return false;
 
@@ -79,7 +81,7 @@ function hasMeaningfulCustomStrategy(repo: RepoConfigRecord, globalConfig: any) 
   );
 }
 
-function getRepoRoute(repo: RepoConfigRecord, globalConfig: any): ModelRouteConfig {
+function getRepoRoute(repo: RepoConfigRecord, globalConfig: GlobalModelConfig | ModelRouteConfig | null): ModelRouteConfig {
   if (!hasMeaningfulCustomStrategy(repo, globalConfig)) {
     return getGlobalRoute(globalConfig);
   }
@@ -94,7 +96,7 @@ function formatLastActivity(value: string | Date | null) {
 
 interface RepoRowProps {
   repo: RepoConfigRecord;
-  globalConfig: any;
+  globalConfig: GlobalModelConfig | ModelRouteConfig | null;
   modelOptions: ModelOption[];
   togglePending: boolean;
   onToggleEnabled: (repo: RepoConfigRecord, enabled: boolean) => void;
@@ -190,7 +192,7 @@ function RepoRow({
 
 interface RepoModelModalProps {
   repo: RepoConfigRecord | null;
-  globalConfig: any;
+  globalConfig: GlobalModelConfig | ModelRouteConfig | null;
   modelOptions: ModelOption[];
   providerOptions: ProviderOption[];
   open: boolean;
@@ -343,7 +345,7 @@ function RepoModelModal({
 
 export function ReposPage() {
   const [repos, setRepos] = useState<RepoConfigRecord[]>([]);
-  const [globalConfig, setGlobalConfig] = useState<any>(null);
+  const [globalConfig, setGlobalConfig] = useState<ModelRouteConfig>(EMPTY_MODEL_ROUTE);
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -362,10 +364,14 @@ export function ReposPage() {
       api.getModelConfigs(),
     ])
       .then(([reposRes, globalRes, modelsRes]) => {
-        setRepos(reposRes.repos);
-        setGlobalConfig(globalRes.config);
-        setProviderOptions(modelsRes.providers.map(provider => ({ value: provider.id, label: provider.name })));
-        setModelOptions(modelsRes.configs.map(config => ({
+        const nextRepos = Array.isArray(reposRes?.repos) ? reposRes.repos : [];
+        const providers = Array.isArray(modelsRes?.providers) ? modelsRes.providers : [];
+        const configs = Array.isArray(modelsRes?.configs) ? modelsRes.configs : [];
+
+        setRepos(nextRepos);
+        setGlobalConfig(normalizeRoute(globalRes?.config));
+        setProviderOptions(providers.map(provider => ({ value: provider.id, label: provider.name })));
+        setModelOptions(configs.map(config => ({
           value: config.modelId,
           label: `${config.providerName} / ${config.modelName}`,
           providerId: config.providerId,
