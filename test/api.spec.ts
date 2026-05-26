@@ -428,7 +428,7 @@ describe('Dashboard API Suite', () => {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        name: 'Disabled No Key Provider',
+        name: `Disabled No Key Provider ${Date.now()}`,
         apiFormat: 'openai',
         baseUrl: 'https://api.example.com/v1',
         enabled: false,
@@ -458,6 +458,7 @@ describe('Dashboard API Suite', () => {
     const env = createTestEnv();
     const token = await getAuthCookie(env);
     await saveTestProviderApiKey(env);
+    const discoveredModelName = `test-discovered-${Date.now()}`;
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
       if (url.includes('/ai/models/search')) {
@@ -471,7 +472,7 @@ describe('Dashboard API Suite', () => {
       return Response.json({
         models: [
           {
-            name: 'models/gemini-2.5-flash',
+            name: `models/${discoveredModelName}`,
             supportedGenerationMethods: ['generateContent'],
           },
         ],
@@ -489,7 +490,8 @@ describe('Dashboard API Suite', () => {
 
     expect(response.status).toBe(200);
     const data = await response.json() as ModelConfigsResponse;
-    expect(data.configs.some(config => config.modelName === 'gemini-2.5-flash')).toBe(true);
+    const discoveredGoogleModel = data.configs.find(config => config.modelName === discoveredModelName);
+    expect(discoveredGoogleModel).toMatchObject({ rpm: null, rpd: null, tpm: null });
     expect(data.configs.some(config => config.providerName === 'Cloudflare' && config.modelName === '@cf/openai/gpt-oss-120b')).toBe(true);
     expect(data.syncErrors).toEqual([]);
   });

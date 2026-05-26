@@ -27,21 +27,10 @@ import {
   type ProviderOption,
 } from '@client/components/features/models/model-chain';
 
-const DEFAULT_GLOBAL_CONFIG: ModelRouteConfig = {
-  main: 'gemma-4-31b-it',
-  fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
-  size_overrides: [
-    {
-      max_lines: 300,
-      model: 'gemma-4-31b-it',
-      fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
-    },
-    {
-      max_lines: 100,
-      model: '@cf/moonshotai/kimi-k2.6',
-      fallbacks: ['@cf/zai-org/glm-4.7-flash'],
-    },
-  ],
+const EMPTY_MODEL_ROUTE: ModelRouteConfig = {
+  main: null,
+  fallbacks: [],
+  size_overrides: [],
 };
 
 function repoId(repo: Pick<RepoConfigRecord, 'owner' | 'repo'>) {
@@ -54,11 +43,11 @@ function hasStoredModelStrategy(repo: RepoConfigRecord) {
 
 function normalizeRoute(config: any): ModelRouteConfig {
   return {
-    main: config?.main || DEFAULT_GLOBAL_CONFIG.main,
-    fallbacks: Array.isArray(config?.fallbacks) ? config.fallbacks : DEFAULT_GLOBAL_CONFIG.fallbacks,
+    main: typeof config?.main === 'string' && config.main.trim() ? config.main : null,
+    fallbacks: Array.isArray(config?.fallbacks) ? config.fallbacks : EMPTY_MODEL_ROUTE.fallbacks,
     size_overrides: Array.isArray(config?.size_overrides)
       ? config.size_overrides
-      : DEFAULT_GLOBAL_CONFIG.size_overrides,
+      : EMPTY_MODEL_ROUTE.size_overrides,
   };
 }
 
@@ -70,9 +59,9 @@ function getStoredRepoRoute(repo: RepoConfigRecord): ModelRouteConfig | null {
   if (!hasStoredModelStrategy(repo)) return null;
 
   return {
-    main: repo.mainModel ?? DEFAULT_GLOBAL_CONFIG.main,
-    fallbacks: repo.fallbackModels ?? DEFAULT_GLOBAL_CONFIG.fallbacks,
-    size_overrides: Array.isArray(repo.sizeOverrides) ? repo.sizeOverrides : DEFAULT_GLOBAL_CONFIG.size_overrides,
+    main: repo.mainModel ?? null,
+    fallbacks: repo.fallbackModels ?? [],
+    size_overrides: Array.isArray(repo.sizeOverrides) ? repo.sizeOverrides : [],
   };
 }
 
@@ -86,7 +75,7 @@ function hasMeaningfulCustomStrategy(repo: RepoConfigRecord, globalConfig: any) 
 
   return (
     !routesEqual(storedRoute, getGlobalRoute(globalConfig)) &&
-    !routesEqual(storedRoute, DEFAULT_GLOBAL_CONFIG)
+    !routesEqual(storedRoute, EMPTY_MODEL_ROUTE)
   );
 }
 
@@ -225,8 +214,8 @@ function RepoModelModal({
     () => JSON.stringify(getGlobalRoute(globalConfig)),
     [globalConfig],
   );
-  const [route, setRoute] = useState<ModelRouteConfig>(DEFAULT_GLOBAL_CONFIG);
-  const [initialRoute, setInitialRoute] = useState<ModelRouteConfig>(DEFAULT_GLOBAL_CONFIG);
+  const [route, setRoute] = useState<ModelRouteConfig>(EMPTY_MODEL_ROUTE);
+  const [initialRoute, setInitialRoute] = useState<ModelRouteConfig>(EMPTY_MODEL_ROUTE);
   const [saving, setSaving] = useState<'apply' | 'reset' | null>(null);
   const [error, setError] = useState<string | null>(null);
 

@@ -51,6 +51,15 @@ describe('ModelService', () => {
     });
   });
 
+  it('fails clearly when no model strategy is configured', () => {
+    const service = new ModelService(createTestEnv());
+
+    expect(() => (service as any).selectModel({
+      totalLineCount: 1,
+      config: defaultRepoConfig,
+    })).toThrow('No review model strategy is configured');
+  });
+
   it('turns Cloudflare reasoning-only responses into inconclusive review JSON', async () => {
     const env = createTestEnv({
       AI: {

@@ -229,6 +229,15 @@ async function ensureModelCatalog() {
     return;
   }
 
+  await query('ALTER TABLE model_configs ALTER COLUMN rpm DROP NOT NULL');
+  await query('ALTER TABLE model_configs ALTER COLUMN tpm DROP NOT NULL');
+  await query('ALTER TABLE model_configs ALTER COLUMN rpd DROP NOT NULL');
+  await query(`
+    UPDATE model_configs
+    SET rpm = NULL, tpm = NULL, rpd = NULL, updated_at = now()
+    WHERE rpm = 1 AND tpm = 1 AND rpd = 1
+  `);
+
   await query(
     `
       INSERT INTO llm_providers (name, api_format, base_url, enabled)

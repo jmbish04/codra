@@ -74,7 +74,7 @@ function configuredModelSet(config: RepoConfig) {
     if (model) models.add(normalizeModelId(model));
   };
 
-  addModel(config.model?.main ?? 'gemma-4-31b-it');
+  addModel(config.model?.main);
   for (const fallback of config.model?.fallbacks ?? []) {
     addModel(fallback);
   }
@@ -561,7 +561,7 @@ async function reviewAndPersistFile(
     const errorMessage = error instanceof Error ? error.message : 'Unknown file review error';
 
     if (isRetryableModelError(error)) {
-      const modelId = config.model?.main ?? 'gemma-4-31b-it';
+      const modelId = config.model?.main ?? 'unconfigured';
       const failureCount = await recordRetryableFileReviewFailure(env, job.id, {
         filePath: file.path,
         modelUsed: modelId,
@@ -619,7 +619,7 @@ async function reviewAndPersistFile(
       throw error;
     }
 
-    const modelId = config.model?.main ?? 'gemma-4-31b-it';
+    const modelId = config.model?.main ?? 'unconfigured';
     await upsertFileReview(env, job.id, {
       filePath: file.path,
       fileStatus: 'failed',

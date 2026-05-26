@@ -123,7 +123,7 @@ export const repoConfigSchema = z.object({
   }),
   model: z
     .object({
-      main: z.string().nullable().default('gemma-4-31b-it'),
+      main: z.string().nullable().default(null),
       fallbacks: z.array(z.string()).nullable().default([]),
       size_overrides: z
         .array(
@@ -137,8 +137,8 @@ export const repoConfigSchema = z.object({
         .optional(),
     })
     .default({
-      main: 'gemma-4-31b-it',
-      fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
+      main: null,
+      fallbacks: [],
       size_overrides: [],
     }),
 });
@@ -315,8 +315,12 @@ export function normalizeModelId(model: string) {
 export function normalizeRepoModelConfig(model: RepoConfig['model']): RepoConfig['model'] {
   return {
     ...model,
-    main: model.main === null ? null : normalizeModelId(model.main),
-    fallbacks: model.fallbacks === null ? null : model.fallbacks.map(normalizeModelId),
+    main: model.main ? normalizeModelId(model.main) : null,
+    fallbacks: model.fallbacks === null
+      ? null
+      : Array.isArray(model.fallbacks)
+        ? model.fallbacks.map(normalizeModelId)
+        : [],
     size_overrides: model.size_overrides === null || model.size_overrides === undefined
       ? model.size_overrides
       : model.size_overrides.map((tier) => ({
@@ -356,9 +360,9 @@ export const modelConfigSchema = z.object({
   providerName: z.string(),
   apiFormat: z.enum(llmApiFormats),
   modelName: z.string(),
-  rpm: z.number().int(),
-  tpm: z.number().int(),
-  rpd: z.number().int(),
+  rpm: z.number().int().nullable(),
+  tpm: z.number().int().nullable(),
+  rpd: z.number().int().nullable(),
   updatedAt: dateStringSchema,
 });
 

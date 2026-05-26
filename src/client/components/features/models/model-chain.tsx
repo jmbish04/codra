@@ -24,7 +24,7 @@ export type ModelRouteTier = {
 };
 
 export type ModelRouteConfig = {
-  main: string;
+  main: string | null;
   fallbacks: string[];
   size_overrides: ModelRouteTier[];
 };
@@ -38,17 +38,21 @@ export function getModelLabel(model: string, models: ModelOption[] = []) {
 }
 
 export function describeModelRoute(config: ModelRouteConfig, models: ModelOption[] = []) {
+  if (!config.main && (config.fallbacks?.length ?? 0) === 0 && (config.size_overrides?.length ?? 0) === 0) {
+    return 'No model strategy configured';
+  }
+
   const fallbacks = config.fallbacks?.length ?? 0;
   const tiers = config.size_overrides?.length ?? 0;
   return [
-    getModelLabel(config.main, models),
+    config.main ? getModelLabel(config.main, models) : 'No baseline model',
     fallbacks > 0 ? `${fallbacks} fallback${fallbacks === 1 ? '' : 's'}` : 'no fallbacks',
     tiers > 0 ? `${tiers} tier${tiers === 1 ? '' : 's'}` : 'baseline only',
   ].join(' · ');
 }
 
 interface ModelSelectorProps {
-  value: string;
+  value: string | null;
   onValueChange: (value: string) => void;
   models: ModelOption[];
   providers: ProviderOption[];
@@ -66,7 +70,7 @@ export function ModelSelector({
   density = 'comfortable',
   className,
 }: ModelSelectorProps) {
-  const currentModel = models.find(m => m.value === value) || models[0];
+  const currentModel = models.find(m => m.value === value);
   const [provider, setProvider] = useState(currentModel?.providerId ?? providers[0]?.value ?? '');
 
   useEffect(() => {
@@ -112,9 +116,10 @@ export function ModelSelector({
       />
       <Select
         label={hideLabels ? undefined : 'Model'}
-        value={value}
+        value={value ?? ''}
         onValueChange={onValueChange}
         options={filteredModels}
+        placeholder="Select model..."
         triggerClassName={cn(density === 'compact' && 'h-8 text-xs')}
       />
     </div>
@@ -122,9 +127,9 @@ export function ModelSelector({
 }
 
 interface ModelChainProps {
-  primary: string;
+  primary: string | null;
   fallbacks: string[];
-  onChange: (primary: string, fallbacks: string[]) => void;
+  onChange: (primary: string | null, fallbacks: string[]) => void;
   models: ModelOption[];
   providers: ProviderOption[];
   density?: ModelDensity;
@@ -349,7 +354,9 @@ export function ModelRouteEditor({
                 models={models}
                 providers={providers}
                 density={density}
-                onChange={(model, fallbacks) => updateTier(index, { model, fallbacks })}
+                onChange={(model, fallbacks) => {
+                  if (model) updateTier(index, { model, fallbacks });
+                }}
               />
             </div>
           </section>

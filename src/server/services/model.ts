@@ -135,19 +135,11 @@ export class ModelService {
     const { model: modelCfg } = params.config;
     const thresholdBase = params.totalLineCount;
 
-    // Use default if not configured
-    if (!modelCfg) {
-      return {
-        primary: 'gemma-4-31b-it',
-        fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash']
-      };
-    }
-
-    let selectedModel = normalizeModel(modelCfg.main ?? 'gemma-4-31b-it');
-    let fallbackModels = (modelCfg.fallbacks || []).map(normalizeModel);
+    let selectedModel = modelCfg?.main ? normalizeModel(modelCfg.main) : null;
+    let fallbackModels = (modelCfg?.fallbacks || []).map(normalizeModel);
 
     // Apply size overrides based on total PR lines
-    if (modelCfg.size_overrides && modelCfg.size_overrides.length > 0) {
+    if (modelCfg?.size_overrides && modelCfg.size_overrides.length > 0) {
       const sortedOverrides = [...modelCfg.size_overrides].sort((a, b) => a.max_lines - b.max_lines);
       const matched = sortedOverrides.find(o => thresholdBase <= o.max_lines);
       if (matched) {
@@ -156,8 +148,12 @@ export class ModelService {
       }
     }
 
-    const chain = uniqueModels([selectedModel, ...fallbackModels]);
-    selectedModel = chain[0] ?? 'gemma-4-31b-it';
+    const chain = uniqueModels([...(selectedModel ? [selectedModel] : []), ...fallbackModels]);
+    if (chain.length === 0) {
+      throw new Error('No review model strategy is configured. Choose a global model strategy in Settings, or configure this repository.');
+    }
+
+    selectedModel = chain[0];
     fallbackModels = chain.slice(1);
 
     return { primary: selectedModel, fallbacks: fallbackModels };

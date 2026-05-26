@@ -34,21 +34,10 @@ import {
 } from '@client/components/features/models/model-chain';
 import { cn } from '@client/lib/utils';
 
-const DEFAULT_GLOBAL_CONFIG: ModelRouteConfig = {
-  main: 'gemma-4-31b-it',
-  fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
-  size_overrides: [
-    {
-      max_lines: 300,
-      model: 'gemma-4-31b-it',
-      fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
-    },
-    {
-      max_lines: 100,
-      model: '@cf/moonshotai/kimi-k2.6',
-      fallbacks: ['@cf/zai-org/glm-4.7-flash'],
-    },
-  ],
+const EMPTY_GLOBAL_CONFIG: ModelRouteConfig = {
+  main: null,
+  fallbacks: [],
+  size_overrides: [],
 };
 
 const API_FORMAT_OPTIONS: Array<{ value: LlmApiFormat; label: string }> = [
@@ -79,19 +68,18 @@ type NewModelDraft = {
   modelId: string;
   providerId: string;
   modelName: string;
-  rpm: number;
-  tpm: number;
-  rpd: number;
+  rpm: number | null;
+  tpm: number | null;
+  rpd: number | null;
 };
 
 type SyncError = { providerId: string; providerName: string; error: string };
 
 export function normalizeGlobalConfig(config: any): ModelRouteConfig {
-  if (!config || !config.main) return DEFAULT_GLOBAL_CONFIG;
   return {
-    main: config.main,
-    fallbacks: Array.isArray(config.fallbacks) ? config.fallbacks : DEFAULT_GLOBAL_CONFIG.fallbacks,
-    size_overrides: Array.isArray(config.size_overrides) ? config.size_overrides : DEFAULT_GLOBAL_CONFIG.size_overrides,
+    main: typeof config?.main === 'string' && config.main.trim() ? config.main : null,
+    fallbacks: Array.isArray(config?.fallbacks) ? config.fallbacks : EMPTY_GLOBAL_CONFIG.fallbacks,
+    size_overrides: Array.isArray(config?.size_overrides) ? config.size_overrides : EMPTY_GLOBAL_CONFIG.size_overrides,
   };
 }
 
@@ -118,6 +106,17 @@ function modelPayload(config: ModelConfig) {
     rpd: config.rpd,
     tpm: config.tpm,
   };
+}
+
+function parseOptionalLimit(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
+}
+
+function formatOptionalLimit(value: number | null) {
+  return value === null ? 'Unset' : value.toLocaleString();
 }
 
 function providerToDraft(provider: LlmProvider): ProviderDraft {
@@ -244,9 +243,9 @@ export function SettingsPage() {
     modelId: '',
     providerId: '',
     modelName: '',
-    rpm: 60,
-    tpm: 1_000_000,
-    rpd: 1_000,
+    rpm: null,
+    tpm: null,
+    rpd: null,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
@@ -620,8 +619,8 @@ export function SettingsPage() {
     );
   };
 
-  const updateQuota = (id: string, field: 'rpm' | 'rpd' | 'tpm', value: number) => {
-    updateModel(id, { [field]: Math.max(1, value) } as Partial<ModelConfig>);
+  const updateQuota = (id: string, field: 'rpm' | 'rpd' | 'tpm', value: number | null) => {
+    updateModel(id, { [field]: value } as Partial<ModelConfig>);
   };
 
   const newProviderReady = newProvider.name.trim().length > 0 &&
@@ -1022,8 +1021,9 @@ export function SettingsPage() {
                   <Input
                     type="number"
                     min={1}
-                    value={newModel[field]}
-                    onChange={e => setNewModel(current => ({ ...current, [field]: Number(e.target.value) || 1 }))}
+                    value={newModel[field] ?? ''}
+                    placeholder="None"
+                    onChange={e => setNewModel(current => ({ ...current, [field]: parseOptionalLimit(e.target.value) }))}
                   />
                 </div>
               ))}
@@ -1111,7 +1111,7 @@ export function SettingsPage() {
                     <div className="hidden items-center gap-1 xl:flex">
                       {(['rpm', 'rpd', 'tpm'] as const).map(field => (
                         <span key={field} className="rounded border border-border/50 bg-muted/20 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
-                          {field.toUpperCase()} {cfg[field].toLocaleString()}
+                          {field.toUpperCase()} {formatOptionalLimit(cfg[field])}
                         </span>
                       ))}
                     </div>
@@ -1185,8 +1185,9 @@ export function SettingsPage() {
                               <Input
                                 type="number"
                                 min={1}
-                                value={cfg[field]}
-                                onChange={e => updateQuota(cfg.modelId, field, Number(e.target.value) || 0)}
+                                value={cfg[field] ?? ''}
+                                placeholder="None"
+                                onChange={e => updateQuota(cfg.modelId, field, parseOptionalLimit(e.target.value))}
                               />
                             </div>
                           ))}

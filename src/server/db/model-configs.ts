@@ -26,9 +26,9 @@ type ModelConfigRow = {
   provider_name: string;
   api_format: LlmApiFormat;
   model_name: string;
-  rpm: number;
-  tpm: number;
-  rpd: number;
+  rpm: number | null;
+  tpm: number | null;
+  rpd: number | null;
   updated_at: string;
 };
 
@@ -351,9 +351,9 @@ export async function upsertDiscoveredModelConfigs(
     model_id: string;
     provider_id: string;
     model_name: string;
-    rpm: number;
-    tpm: number;
-    rpd: number;
+    rpm: number | null;
+    tpm: number | null;
+    rpd: number | null;
     provider: LlmApiFormat;
   }> = [];
 
@@ -373,9 +373,9 @@ export async function upsertDiscoveredModelConfigs(
       model_id: candidate,
       provider_id: input.providerId,
       model_name: modelName,
-      rpm: 60,
-      tpm: 1_000_000,
-      rpd: 1_000,
+      rpm: null,
+      tpm: null,
+      rpd: null,
       provider: input.apiFormat,
     });
   }
