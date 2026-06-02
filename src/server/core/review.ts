@@ -760,7 +760,6 @@ async function runFinalizePhase(
     summaryModel: null,
     errorMessage: partialErrorMessage,
   });
-  await updateJobStep(env, job.id, 'Completing', { status: 'done' });
   logger.info(`Review job completed: ${job.owner}/${job.repo} PR #${job.prNumber}`);
 }
 
