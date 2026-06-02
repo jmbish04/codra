@@ -204,7 +204,7 @@ export const api = {
   },
   updateModelConfig(id: string, config: ModelConfigPayload) {
     return request<{ ok: boolean; config: ModelConfig }>(`/api/models/${pathSegment(id)}`, {
-      method: 'POST',
+      method: 'PATCH',
       body: JSON.stringify(config),
     });
   },

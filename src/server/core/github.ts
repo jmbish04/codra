@@ -610,12 +610,12 @@ export class GitHubClient {
     const currentByLowerName = new Map(currentLabels.map(label => [label.toLowerCase(), label]));
 
     const uniqueLabels = Array.from(new Set(labels.map(label => label.toLowerCase())));
-    await Promise.all(uniqueLabels.map(async (label) => {
-      const currentLabel = currentByLowerName.get(label.toLowerCase());
+    for (const label of uniqueLabels) {
+      const currentLabel = currentByLowerName.get(label);
       if (currentLabel) {
         await this.removeIssueLabel(owner, repo, issueNumber, currentLabel);
       }
-    }));
+    }
   }
 
   async removeIssueLabel(owner: string, repo: string, issueNumber: number, label: string) {

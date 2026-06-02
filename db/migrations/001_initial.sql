@@ -160,7 +160,7 @@ CREATE TABLE IF NOT EXISTS model_configs (
 
 DELETE FROM model_configs WHERE model_id = '@cf/moonshotai/kimi-k2.5';
 
-CREATE OR REPLACE FUNCTION public.codra_replace_deprecated_model(input jsonb, old_value text, new_value text)
+CREATE OR REPLACE FUNCTION pg_temp.codra_replace_deprecated_model(input jsonb, old_value text, new_value text)
 RETURNS jsonb
 LANGUAGE sql
 IMMUTABLE
@@ -169,14 +169,14 @@ AS $$
     WHEN 'string' THEN CASE WHEN input #>> '{}' = old_value THEN to_jsonb(new_value) ELSE input END
     WHEN 'array' THEN COALESCE(
       (
-        SELECT jsonb_agg(public.codra_replace_deprecated_model(value, old_value, new_value) ORDER BY ord)
+        SELECT jsonb_agg(pg_temp.codra_replace_deprecated_model(value, old_value, new_value) ORDER BY ord)
         FROM jsonb_array_elements(input) WITH ORDINALITY AS item(value, ord)
       ),
       '[]'::jsonb
     )
     WHEN 'object' THEN COALESCE(
       (
-        SELECT jsonb_object_agg(key, public.codra_replace_deprecated_model(value, old_value, new_value))
+        SELECT jsonb_object_agg(key, pg_temp.codra_replace_deprecated_model(value, old_value, new_value))
         FROM jsonb_each(input)
       ),
       '{}'::jsonb
@@ -190,22 +190,22 @@ SET
   main_model = CASE WHEN main_model = '@cf/moonshotai/kimi-k2.5' THEN '@cf/moonshotai/kimi-k2.6' ELSE main_model END,
   fallback_models = CASE
     WHEN fallback_models IS NULL THEN NULL
-    ELSE public.codra_replace_deprecated_model(fallback_models, '@cf/moonshotai/kimi-k2.5', '@cf/moonshotai/kimi-k2.6')
+    ELSE pg_temp.codra_replace_deprecated_model(fallback_models, '@cf/moonshotai/kimi-k2.5', '@cf/moonshotai/kimi-k2.6')
   END,
   size_overrides = CASE
     WHEN size_overrides IS NULL THEN NULL
-    ELSE public.codra_replace_deprecated_model(size_overrides, '@cf/moonshotai/kimi-k2.5', '@cf/moonshotai/kimi-k2.6')
+    ELSE pg_temp.codra_replace_deprecated_model(size_overrides, '@cf/moonshotai/kimi-k2.5', '@cf/moonshotai/kimi-k2.6')
   END,
   parsed_json = CASE
     WHEN parsed_json IS NULL THEN NULL
-    ELSE public.codra_replace_deprecated_model(parsed_json, '@cf/moonshotai/kimi-k2.5', '@cf/moonshotai/kimi-k2.6')
+    ELSE pg_temp.codra_replace_deprecated_model(parsed_json, '@cf/moonshotai/kimi-k2.5', '@cf/moonshotai/kimi-k2.6')
   END
 WHERE main_model = '@cf/moonshotai/kimi-k2.5'
   OR fallback_models::text LIKE '%@cf/moonshotai/kimi-k2.5%'
   OR size_overrides::text LIKE '%@cf/moonshotai/kimi-k2.5%'
   OR parsed_json::text LIKE '%@cf/moonshotai/kimi-k2.5%';
 
-DROP FUNCTION IF EXISTS public.codra_replace_deprecated_model(jsonb, text, text);
+DROP FUNCTION IF EXISTS pg_temp.codra_replace_deprecated_model(jsonb, text, text);
 
 DO $$
 DECLARE
@@ -281,6 +281,7 @@ BEGIN
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS repository_id INTEGER;
 
   IF has_old_job_repo_columns THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS tmp_jobs_owner_repo_idx ON jobs(owner, repo)';
     EXECUTE '
       UPDATE jobs j
       SET repository_id = r.id
@@ -289,6 +290,7 @@ BEGIN
         AND r.owner = j.owner
         AND r.repo = j.repo
     ';
+    EXECUTE 'DROP INDEX tmp_jobs_owner_repo_idx';
   END IF;
 
   SELECT data_type

@@ -75,7 +75,7 @@ function tiersEqual(a: ModelRouteConfig['size_overrides'] = [], b: ModelRouteCon
   return a.length === b.length && a.every((tier, index) => {
     const other = b[index];
     return Boolean(
-      other &&
+      tier && other &&
       tier.max_lines === other.max_lines &&
       tier.model === other.model &&
       stringArraysEqual(tier.fallbacks ?? [], other.fallbacks ?? []),

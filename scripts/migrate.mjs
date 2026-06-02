@@ -294,6 +294,7 @@ async function ensureModelCatalog() {
           OR (mc.provider = 'google' AND provider_record.name = 'Google')
           OR (mc.provider = 'openai' AND provider_record.name = 'OpenAI')
           OR (mc.provider = 'anthropic' AND provider_record.name = 'Anthropic')
+          OR (mc.provider = 'openrouter' AND provider_record.name = 'OpenRouter')
         )
     `,
   );
@@ -401,7 +402,7 @@ async function normalizeRepoConfigs() {
   }
 
   await query(`
-    CREATE OR REPLACE FUNCTION public.codra_replace_deprecated_model(input jsonb, old_value text, new_value text)
+    CREATE OR REPLACE FUNCTION pg_temp.codra_replace_deprecated_model(input jsonb, old_value text, new_value text)
     RETURNS jsonb
     LANGUAGE sql
     IMMUTABLE
@@ -410,14 +411,14 @@ async function normalizeRepoConfigs() {
         WHEN 'string' THEN CASE WHEN input #>> '{}' = old_value THEN to_jsonb(new_value) ELSE input END
         WHEN 'array' THEN COALESCE(
           (
-            SELECT jsonb_agg(public.codra_replace_deprecated_model(value, old_value, new_value) ORDER BY ord)
+            SELECT jsonb_agg(pg_temp.codra_replace_deprecated_model(value, old_value, new_value) ORDER BY ord)
             FROM jsonb_array_elements(input) WITH ORDINALITY AS item(value, ord)
           ),
           '[]'::jsonb
         )
         WHEN 'object' THEN COALESCE(
           (
-            SELECT jsonb_object_agg(key, public.codra_replace_deprecated_model(value, old_value, new_value))
+            SELECT jsonb_object_agg(key, pg_temp.codra_replace_deprecated_model(value, old_value, new_value))
             FROM jsonb_each(input)
           ),
           '{}'::jsonb
@@ -434,15 +435,15 @@ async function normalizeRepoConfigs() {
         main_model = CASE WHEN main_model = $1 THEN $2 ELSE main_model END,
         fallback_models = CASE
           WHEN fallback_models IS NULL THEN NULL
-          ELSE public.codra_replace_deprecated_model(fallback_models, $1, $2)
+          ELSE pg_temp.codra_replace_deprecated_model(fallback_models, $1, $2)
         END,
         size_overrides = CASE
           WHEN size_overrides IS NULL THEN NULL
-          ELSE public.codra_replace_deprecated_model(size_overrides, $1, $2)
+          ELSE pg_temp.codra_replace_deprecated_model(size_overrides, $1, $2)
         END,
         parsed_json = CASE
           WHEN parsed_json IS NULL THEN NULL
-          ELSE public.codra_replace_deprecated_model(parsed_json, $1, $2)
+          ELSE pg_temp.codra_replace_deprecated_model(parsed_json, $1, $2)
         END
       WHERE main_model = $1
         OR fallback_models::text LIKE '%' || $1 || '%'
@@ -452,7 +453,7 @@ async function normalizeRepoConfigs() {
     [kimiK25Model, kimiK26Model],
   );
 
-  await query('DROP FUNCTION IF EXISTS public.codra_replace_deprecated_model(jsonb, text, text)');
+  await query('DROP FUNCTION IF EXISTS pg_temp.codra_replace_deprecated_model(jsonb, text, text)');
 }
 
 async function main() {
