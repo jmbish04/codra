@@ -87,6 +87,10 @@ export type GitHubReviewComment = {
   body: string;
 };
 
+type GitHubIssueLabel = {
+  name?: string;
+};
+
 function installationCacheKey(installationId: string) {
   return `install:${installationId}`;
 }
@@ -102,6 +106,10 @@ function installUrlFromSlug(slug: string) {
 
 function encodeGitHubContentPath(path: string) {
   return path.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+}
+
+function repoApiPath(owner: string, repo: string) {
+  return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
 }
 
 function pemToArrayBuffer(pem: string) {
@@ -370,7 +378,7 @@ export class GitHubClient {
 
   async getPullRequest(owner: string, repo: string, pullNumber: number) {
     return withRetry(`getPullRequest ${owner}/${repo}#${pullNumber}`, async () => {
-      const response = await this.requestAndCheck(`/repos/${owner}/${repo}/pulls/${pullNumber}`);
+      const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/pulls/${pullNumber}`);
       return (await response.json()) as PullRequestRecord;
     });
   }
@@ -378,7 +386,7 @@ export class GitHubClient {
   async getPullRequestDiff(owner: string, repo: string, pullNumber: number) {
     return withRetry(`getPullRequestDiff ${owner}/${repo}#${pullNumber}`, async () => {
       const response = await this.requestAndCheck(
-        `/repos/${owner}/${repo}/pulls/${pullNumber}`,
+        `${repoApiPath(owner, repo)}/pulls/${pullNumber}`,
         {},
         'application/vnd.github.v3.diff',
       );
@@ -388,7 +396,7 @@ export class GitHubClient {
 
   async getRepoFileOrNull(owner: string, repo: string, path: string) {
     return withRetry(`getRepoFileOrNull ${owner}/${repo}/${path}`, async () => {
-      const response = await this.request(`/repos/${owner}/${repo}/contents/${encodeGitHubContentPath(path)}`);
+      const response = await this.request(`${repoApiPath(owner, repo)}/contents/${encodeGitHubContentPath(path)}`);
       if (response.status === 404) {
         return null;
       }
@@ -417,7 +425,7 @@ export class GitHubClient {
     input: { headSha: string; title: string; summary: string; detailsUrl?: string },
   ) {
     return withRetry(`createCheckRun ${owner}/${repo}`, async () => {
-      const response = await this.requestAndCheck(`/repos/${owner}/${repo}/check-runs`, {
+      const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/check-runs`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -450,7 +458,7 @@ export class GitHubClient {
     },
   ) {
     return withRetry(`updateCheckRun ${owner}/${repo} ${checkRunId}`, async () => {
-      await this.requestAndCheck(`/repos/${owner}/${repo}/check-runs/${checkRunId}`, {
+      await this.requestAndCheck(`${repoApiPath(owner, repo)}/check-runs/${checkRunId}`, {
         method: 'PATCH',
         headers: {
           'content-type': 'application/json',
@@ -493,7 +501,8 @@ export class GitHubClient {
           })),
       };
 
-      let response = await this.request(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, {
+      const reviewPath = `${repoApiPath(owner, repo)}/pulls/${pullNumber}/reviews`;
+      let response = await this.request(reviewPath, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -507,7 +516,7 @@ export class GitHubClient {
           repo,
           pullNumber,
         });
-        response = await this.request(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, {
+        response = await this.request(reviewPath, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
@@ -526,7 +535,7 @@ export class GitHubClient {
         throw new GitHubError(
           response.status,
           errText,
-          `/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`,
+          reviewPath,
           `GitHub review creation failed with ${response.status}: ${errText}`,
         );
       }
@@ -537,7 +546,7 @@ export class GitHubClient {
 
   async ensureLabel(owner: string, repo: string, name: string, color: string) {
     return withRetry(`ensureLabel ${owner}/${repo} ${name}`, async () => {
-      const listResponse = await this.request(`/repos/${owner}/${repo}/labels/${encodeURIComponent(name)}`);
+      const listResponse = await this.request(`${repoApiPath(owner, repo)}/labels/${encodeURIComponent(name)}`);
       if (listResponse.ok) {
         return;
       }
@@ -551,7 +560,7 @@ export class GitHubClient {
         );
       }
 
-      const createResponse = await this.request(`/repos/${owner}/${repo}/labels`, {
+      const createResponse = await this.request(`${repoApiPath(owner, repo)}/labels`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -573,7 +582,7 @@ export class GitHubClient {
 
   async addIssueLabels(owner: string, repo: string, issueNumber: number, labels: string[]) {
     return withRetry(`addIssueLabels ${owner}/${repo}#${issueNumber}`, async () => {
-      await this.requestAndCheck(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`, {
+      await this.requestAndCheck(`${repoApiPath(owner, repo)}/issues/${issueNumber}/labels`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -583,10 +592,36 @@ export class GitHubClient {
     });
   }
 
+  async listIssueLabels(owner: string, repo: string, issueNumber: number) {
+    return withRetry(`listIssueLabels ${owner}/${repo}#${issueNumber}`, async () => {
+      const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/issues/${issueNumber}/labels?per_page=100`);
+      const labels = await response.json();
+      if (!Array.isArray(labels)) {
+        throw new Error('Expected an array of labels from GitHub API.');
+      }
+      return labels
+        .map((label: GitHubIssueLabel) => label.name)
+        .filter((name): name is string => typeof name === 'string' && name.length > 0);
+    });
+  }
+
+  async removeIssueLabelsIfPresent(owner: string, repo: string, issueNumber: number, labels: string[]) {
+    const currentLabels = await this.listIssueLabels(owner, repo, issueNumber);
+    const currentByLowerName = new Map(currentLabels.map(label => [label.toLowerCase(), label]));
+
+    const uniqueLabels = Array.from(new Set(labels.map(label => label.toLowerCase())));
+    for (const label of uniqueLabels) {
+      const currentLabel = currentByLowerName.get(label);
+      if (currentLabel) {
+        await this.removeIssueLabel(owner, repo, issueNumber, currentLabel);
+      }
+    }
+  }
+
   async removeIssueLabel(owner: string, repo: string, issueNumber: number, label: string) {
     return withRetry(`removeIssueLabel ${owner}/${repo}#${issueNumber} ${label}`, async () => {
       const response = await this.request(
-        `/repos/${owner}/${repo}/issues/${issueNumber}/labels/${encodeURIComponent(label)}`,
+        `${repoApiPath(owner, repo)}/issues/${issueNumber}/labels/${encodeURIComponent(label)}`,
         {
           method: 'DELETE',
         },

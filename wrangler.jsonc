@@ -54,6 +54,8 @@
         "max_batch_size": 1,
         "max_batch_timeout": 5,
         "max_concurrency": 1,
+        "visibility_timeout_ms": 900000,
+        "retry_delay": 60,
         "max_retries": 3
       }
     ]
@@ -83,7 +85,7 @@
       "GITHUB_APP_WEBHOOK_SECRET",
       "GITHUB_CLIENT_ID",
       "GITHUB_CLIENT_SECRET",
-      "GEMINI_API_KEY",
+      "LLM_CONFIG_ENCRYPTION_KEY",
       "CF_API_TOKEN",
       "CF_ACCOUNT_ID"
     ]

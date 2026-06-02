@@ -10,11 +10,12 @@ import type {
   AuthSessionResponse,
   JobDetailResponse,
   JobsResponse,
+  ModelConfigsResponse,
   RepoConfigsResponse,
   StatsResponse,
   UpdatesEmailResponse,
 } from '@shared/api';
-import { createTestEnv } from './helpers';
+import { createTestEnv, saveTestProviderApiKey } from './helpers';
 import { vi } from 'vitest';
 
 function mockGitHubProfile(login = 'devarshishimpi') {
@@ -382,6 +383,211 @@ describe('Dashboard API Suite', () => {
     }, env);
 
     expect(response.status).toBe(400);
+  });
+
+  it('returns model configs without refreshing remote provider catalogs', async () => {
+    const env = createTestEnv();
+    const token = await getAuthCookie(env);
+    await saveTestProviderApiKey(env);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('unexpected catalog fetch'));
+    fetchSpy.mockClear();
+
+    const response = await app.request('/api/models', {
+      headers: { Cookie: `codra_session=${token}` },
+    }, env);
+
+    expect(response.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects enabling non-Cloudflare providers without a saved API key', async () => {
+    const env = createTestEnv();
+    const token = await getAuthCookie(env);
+
+    const createResponse = await app.request('/api/models/providers', {
+      method: 'POST',
+      headers: {
+        Cookie: `codra_session=${token}`,
+        'x-requested-with': 'XMLHttpRequest',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'No Key Provider',
+        apiFormat: 'openai',
+        baseUrl: 'https://api.example.com/v1',
+        enabled: true,
+      }),
+    }, env);
+    expect(createResponse.status).toBe(400);
+
+    const disabledCreateResponse = await app.request('/api/models/providers', {
+      method: 'POST',
+      headers: {
+        Cookie: `codra_session=${token}`,
+        'x-requested-with': 'XMLHttpRequest',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: `Disabled No Key Provider ${Date.now()}`,
+        apiFormat: 'openai',
+        baseUrl: 'https://api.example.com/v1',
+        enabled: false,
+      }),
+    }, env);
+    expect(disabledCreateResponse.status).toBe(201);
+    const { provider } = await disabledCreateResponse.json() as { provider: { id: string; name: string; apiFormat: string; baseUrl: string } };
+
+    const updateResponse = await app.request(`/api/models/providers/${provider.id}`, {
+      method: 'PATCH',
+      headers: {
+        Cookie: `codra_session=${token}`,
+        'x-requested-with': 'XMLHttpRequest',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: provider.name,
+        apiFormat: provider.apiFormat,
+        baseUrl: provider.baseUrl,
+        enabled: true,
+      }),
+    }, env);
+    expect(updateResponse.status).toBe(400);
+  });
+
+  it('refreshes provider model catalogs on the explicit sync endpoint', async () => {
+    const env = createTestEnv();
+    const token = await getAuthCookie(env);
+    await saveTestProviderApiKey(env);
+    const discoveredModelName = `test-discovered-${Date.now()}`;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('/ai/models/search')) {
+        return Response.json({
+          success: false,
+          errors: [{ code: 10000, message: 'Authentication error' }],
+          messages: [],
+          result: null,
+        }, { status: 403 });
+      }
+      return Response.json({
+        models: [
+          {
+            name: `models/${discoveredModelName}`,
+            supportedGenerationMethods: ['generateContent'],
+          },
+        ],
+      });
+    });
+
+    const response = await app.request('/api/models/sync', {
+      method: 'POST',
+      headers: {
+        Cookie: `codra_session=${token}`,
+        'x-requested-with': 'XMLHttpRequest',
+        'content-type': 'application/json',
+      },
+    }, env);
+
+    expect(response.status).toBe(200);
+    const data = await response.json() as ModelConfigsResponse;
+    const discoveredGoogleModel = data.configs.find(config => config.modelName === discoveredModelName);
+    expect(discoveredGoogleModel).toMatchObject({ rpm: null, rpd: null, tpm: null });
+    expect(data.configs.some(config => config.providerName === 'Cloudflare' && config.modelName === '@cf/openai/gpt-oss-120b')).toBe(true);
+    expect(data.syncErrors).toEqual([]);
+  });
+
+  it('tests models whose ids contain URL path separators', async () => {
+    const env = createTestEnv();
+    const token = await getAuthCookie(env);
+    const modelId = '@cf/zai-org/glm-4.7-flash';
+
+    const response = await app.request(`/api/models/${encodeURIComponent(modelId)}/test`, {
+      method: 'POST',
+      headers: {
+        Cookie: `codra_session=${token}`,
+        'x-requested-with': 'XMLHttpRequest',
+      },
+    }, env);
+
+    expect(response.status).toBe(200);
+    const data = await response.json() as { modelUsed: string; provider: string };
+    expect(data.modelUsed).toBe(modelId);
+    expect(data.provider).toBe('Cloudflare');
+  });
+
+  it('returns provider status codes for model test failures', async () => {
+    const env = createTestEnv();
+    const token = await getAuthCookie(env);
+    await saveTestProviderApiKey(env);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({
+      error: {
+        code: 429,
+        message: 'Quota exceeded. Please retry later.',
+        status: 'RESOURCE_EXHAUSTED',
+      },
+    }, { status: 429 }));
+
+    const response = await app.request('/api/models/gemma-4-31b-it/test', {
+      method: 'POST',
+      headers: {
+        Cookie: `codra_session=${token}`,
+        'x-requested-with': 'XMLHttpRequest',
+      },
+    }, env);
+
+    expect(response.status).toBe(429);
+    const data = await response.json() as { error: string };
+    expect(data.error).toContain('Quota exceeded');
+    expect(data.error).not.toContain('"details"');
+  });
+
+  it('reports local Cloudflare Workers AI binding limitations clearly', async () => {
+    const env = createTestEnv({
+      AI: {
+        async run() {
+          throw new Error('Binding AI needs to be run remotely');
+        },
+      } as any,
+    });
+    const token = await getAuthCookie(env);
+
+    const response = await app.request(`/api/models/${encodeURIComponent('@cf/zai-org/glm-4.7-flash')}/test`, {
+      method: 'POST',
+      headers: {
+        Cookie: `codra_session=${token}`,
+        'x-requested-with': 'XMLHttpRequest',
+      },
+    }, env);
+
+    expect(response.status).toBe(400);
+    const data = await response.json() as { error: string };
+    expect(data.error).toContain('Cloudflare Workers AI is not available in local Wrangler');
+  });
+
+  it('maps upstream provider server errors to bad gateway after retry', async () => {
+    const env = createTestEnv();
+    const token = await getAuthCookie(env);
+    await saveTestProviderApiKey(env);
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({
+      error: {
+        code: 500,
+        message: 'Internal error encountered.',
+      },
+    }, { status: 500 }));
+    fetchMock.mockClear();
+
+    const response = await app.request('/api/models/gemma-4-31b-it/test', {
+      method: 'POST',
+      headers: {
+        Cookie: `codra_session=${token}`,
+        'x-requested-with': 'XMLHttpRequest',
+      },
+    }, env);
+
+    expect(response.status).toBe(502);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const data = await response.json() as { error: string };
+    expect(data.error).toContain('Internal error encountered.');
   });
 
   it('rejects invalid global model config writes', async () => {

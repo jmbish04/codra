@@ -3,6 +3,7 @@ import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHub
 import { defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import type { AppBindings } from '@server/env';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview } from '@server/db/file-reviews';
+import { getResolvedModelConfig } from '@server/db/model-configs';
 import { claimJobLease, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStep } from '@server/db/jobs';
 import { filterReviewableFiles, parseUnifiedDiff } from './diff';
 
@@ -74,7 +75,7 @@ function configuredModelSet(config: RepoConfig) {
     if (model) models.add(normalizeModelId(model));
   };
 
-  addModel(config.model?.main ?? 'gemma-4-31b-it');
+  addModel(config.model?.main);
   for (const fallback of config.model?.fallbacks ?? []) {
     addModel(fallback);
   }
@@ -90,6 +91,20 @@ function configuredModelSet(config: RepoConfig) {
 
 function canInheritParentFileReview(config: RepoConfig, review: { model_used: string }) {
   return configuredModelSet(config).has(normalizeModelId(review.model_used));
+}
+
+async function resolveModelProviderName(env: Pick<AppBindings, 'HYPERDRIVE'>, modelId: string | null | undefined) {
+  if (!modelId || modelId === 'unconfigured') return null;
+
+  try {
+    const resolved = await getResolvedModelConfig(env, normalizeModelId(modelId));
+    return resolved?.providerName ?? null;
+  } catch (error) {
+    logger.warn(`Failed to resolve provider for model ${modelId}`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 function shouldTriggerFromPullRequest(action: PullRequestWebhookPayload['action'], config: RepoConfig['review']) {
@@ -298,9 +313,12 @@ async function resolveQueuedJob(
       if (prPayload.action === 'closed' && repoConfig.parsedJson.review.labels !== false) {
         const labels = repoConfig.parsedJson.review.labels;
         const gh = new GitHubClient(env, installationId);
-        await gh.removeIssueLabel(prPayload.repository.owner.login, prPayload.repository.name, prPayload.pull_request.number, labels.p1);
-        await gh.removeIssueLabel(prPayload.repository.owner.login, prPayload.repository.name, prPayload.pull_request.number, labels.p2);
-        await gh.removeIssueLabel(prPayload.repository.owner.login, prPayload.repository.name, prPayload.pull_request.number, labels.p3);
+        await gh.removeIssueLabelsIfPresent(
+          prPayload.repository.owner.login,
+          prPayload.repository.name,
+          prPayload.pull_request.number,
+          [labels.p1, labels.p2, labels.p3],
+        );
       }
     }
     return null;
@@ -421,6 +439,12 @@ async function runReviewPhase(
 
   const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
   const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
+  const failureModelId = config.model?.main ?? 'unconfigured';
+  let failureModelProviderPromise: Promise<string | null> | null = null;
+  const resolveFailureModelProvider = () => {
+    failureModelProviderPromise ??= resolveModelProviderName(env, failureModelId);
+    return failureModelProviderPromise;
+  };
   const rawDiff = await github.getPullRequestDiff(job.owner, job.repo, job.prNumber);
   const files = filterReviewableFiles(parseUnifiedDiff(rawDiff), config.review);
   const totalLineCount = files.reduce((sum, file) => sum + file.lineCount, 0);
@@ -444,13 +468,13 @@ async function runReviewPhase(
     const inherited = parentReviews.get(file.path);
     const reviewTask = async () => {
       if (!inherited) {
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, existingReview);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, resolveFailureModelProvider, existingReview);
         return;
       }
 
       if (!canInheritParentFileReview(config, inherited)) {
         logger.info(`Ignoring inherited review for ${file.path}; parent model ${inherited.model_used} is not in the current model strategy`);
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, existingReview);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, resolveFailureModelProvider, existingReview);
       } else {
         await upsertFileReview(env, job.id, {
           filePath: file.path,
@@ -522,6 +546,7 @@ async function reviewAndPersistFile(
   config: RepoConfig,
   totalLineCount: number,
   model: ModelService,
+  resolveFailureModelProvider: () => Promise<string | null>,
   previousReview?: { transient_error_count: number },
 ) {
   const startedAt = Date.now();
@@ -556,13 +581,14 @@ async function reviewAndPersistFile(
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown file review error';
+    const modelId = config.model?.main ?? 'unconfigured';
+    const modelProvider = await resolveFailureModelProvider();
 
     if (isRetryableModelError(error)) {
-      const modelId = config.model?.main ?? 'gemma-4-31b-it';
       const failureCount = await recordRetryableFileReviewFailure(env, job.id, {
         filePath: file.path,
         modelUsed: modelId,
-        modelProvider: modelId.startsWith('@cf/') ? 'cloudflare' : 'google',
+        modelProvider,
         diffLineCount: file.lineCount,
         diffInput: '',
         durationMs: Date.now() - startedAt,
@@ -575,7 +601,7 @@ async function reviewAndPersistFile(
           filePath: file.path,
           fileStatus: 'failed',
           modelUsed: modelId,
-          modelProvider: modelId.startsWith('@cf/') ? 'cloudflare' : 'google',
+          modelProvider,
           diffLineCount: file.lineCount,
           diffInput: '',
           rawAiOutput: null,
@@ -616,12 +642,11 @@ async function reviewAndPersistFile(
       throw error;
     }
 
-    const modelId = config.model?.main ?? 'gemma-4-31b-it';
     await upsertFileReview(env, job.id, {
       filePath: file.path,
       fileStatus: 'failed',
       modelUsed: modelId,
-      modelProvider: modelId.startsWith('@cf/') ? 'cloudflare' : 'google',
+      modelProvider,
       diffLineCount: file.lineCount,
       diffInput: '',
       rawAiOutput: null,
@@ -699,11 +724,12 @@ async function runFinalizePhase(
     } as const;
     const label = labelMap[verdictSummary.verdict];
 
-    for (const possibleLabel of [labels.p1, labels.p2, labels.p3]) {
-      if (possibleLabel !== label.name) {
-        await github.removeIssueLabel(job.owner, job.repo, job.prNumber, possibleLabel);
-      }
-    }
+    await github.removeIssueLabelsIfPresent(
+      job.owner,
+      job.repo,
+      job.prNumber,
+      [labels.p1, labels.p2, labels.p3].filter(possibleLabel => possibleLabel !== label.name),
+    );
 
     await github.ensureLabel(job.owner, job.repo, label.name, label.color);
     await github.addIssueLabels(job.owner, job.repo, job.prNumber, [label.name]);
@@ -734,7 +760,6 @@ async function runFinalizePhase(
     summaryModel: null,
     errorMessage: partialErrorMessage,
   });
-  await updateJobStep(env, job.id, 'Completing', { status: 'done' });
   logger.info(`Review job completed: ${job.owner}/${job.repo} PR #${job.prNumber}`);
 }
 

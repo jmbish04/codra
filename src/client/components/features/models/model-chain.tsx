@@ -4,17 +4,16 @@ import { Select } from '@client/components/ui/select';
 import { Button } from '@client/components/ui/button';
 import { Trash2, ListPlus } from 'lucide-react';
 
-export const PROVIDERS = [
-  { value: 'cloudflare', label: 'Cloudflare' },
-  { value: 'google', label: 'Google' },
-];
+export type ProviderOption = {
+  value: string;
+  label: string;
+};
 
-export const MODELS = [
-  { value: 'gemma-4-31b-it', label: 'Gemma 4 (31b)', provider: 'google' },
-  { value: 'gemma-4-26b-a4b-it', label: 'Gemma 4 (26b)', provider: 'google' },
-  { value: '@cf/moonshotai/kimi-k2.6', label: 'Kimi K2.6', provider: 'cloudflare' },
-  { value: '@cf/zai-org/glm-4.7-flash', label: 'GLM 4.7 Flash', provider: 'cloudflare' },
-];
+export type ModelOption = {
+  value: string;
+  label: string;
+  providerId: string;
+};
 
 export type ModelDensity = 'compact' | 'comfortable';
 
@@ -25,32 +24,38 @@ export type ModelRouteTier = {
 };
 
 export type ModelRouteConfig = {
-  main: string;
+  main: string | null;
   fallbacks: string[];
   size_overrides: ModelRouteTier[];
 };
 
-export function getProviderLabel(provider: string) {
-  return PROVIDERS.find(p => p.value === provider)?.label ?? provider;
+export function getProviderLabel(provider: string, providers: ProviderOption[] = []) {
+  return providers.find(p => p.value === provider)?.label ?? provider;
 }
 
-export function getModelLabel(model: string) {
-  return MODELS.find(m => m.value === model)?.label ?? model;
+export function getModelLabel(model: string, models: ModelOption[] = []) {
+  return models.find(m => m.value === model)?.label ?? model;
 }
 
-export function describeModelRoute(config: ModelRouteConfig) {
+export function describeModelRoute(config: ModelRouteConfig, models: ModelOption[] = []) {
+  if (!config.main && (config.fallbacks?.length ?? 0) === 0 && (config.size_overrides?.length ?? 0) === 0) {
+    return 'No model strategy configured';
+  }
+
   const fallbacks = config.fallbacks?.length ?? 0;
   const tiers = config.size_overrides?.length ?? 0;
   return [
-    getModelLabel(config.main),
+    config.main ? getModelLabel(config.main, models) : 'No baseline model',
     fallbacks > 0 ? `${fallbacks} fallback${fallbacks === 1 ? '' : 's'}` : 'no fallbacks',
     tiers > 0 ? `${tiers} tier${tiers === 1 ? '' : 's'}` : 'baseline only',
   ].join(' · ');
 }
 
 interface ModelSelectorProps {
-  value: string;
+  value: string | null;
   onValueChange: (value: string) => void;
+  models: ModelOption[];
+  providers: ProviderOption[];
   hideLabels?: boolean;
   density?: ModelDensity;
   className?: string;
@@ -59,24 +64,34 @@ interface ModelSelectorProps {
 export function ModelSelector({
   value,
   onValueChange,
+  models,
+  providers,
   hideLabels,
   density = 'comfortable',
   className,
 }: ModelSelectorProps) {
-  const currentModel = MODELS.find(m => m.value === value) || MODELS[0];
-  const [provider, setProvider] = useState(currentModel.provider);
+  const currentModel = models.find(m => m.value === value);
+  const [provider, setProvider] = useState(currentModel?.providerId ?? providers[0]?.value ?? '');
 
   useEffect(() => {
-    const model = MODELS.find(m => m.value === value);
-    if (model && model.provider !== provider) {
-      setProvider(model.provider);
+    const model = models.find(m => m.value === value);
+    if (model && model.providerId !== provider) {
+      setProvider(model.providerId);
     }
-  }, [provider, value]);
+  }, [models, provider, value]);
 
   const filteredModels = useMemo(
-    () => MODELS.filter(m => m.provider === provider).map(m => ({ value: m.value, label: m.label })),
-    [provider],
+    () => models.filter(m => m.providerId === provider).map(m => ({ value: m.value, label: m.label })),
+    [models, provider],
   );
+
+  if (models.length === 0 || providers.length === 0) {
+    return (
+      <div className={cn('rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground', className)}>
+        No configured models
+      </div>
+    );
+  }
 
   return (
     <div
@@ -93,17 +108,18 @@ export function ModelSelector({
         value={provider}
         onValueChange={(nextProvider) => {
           setProvider(nextProvider);
-          const first = MODELS.find(m => m.provider === nextProvider);
+          const first = models.find(m => m.providerId === nextProvider);
           if (first) onValueChange(first.value);
         }}
-        options={PROVIDERS}
+        options={providers}
         triggerClassName={cn(density === 'compact' && 'h-8 text-xs')}
       />
       <Select
         label={hideLabels ? undefined : 'Model'}
-        value={value}
+        value={value ?? ''}
         onValueChange={onValueChange}
         options={filteredModels}
+        placeholder="Select model..."
         triggerClassName={cn(density === 'compact' && 'h-8 text-xs')}
       />
     </div>
@@ -111,9 +127,11 @@ export function ModelSelector({
 }
 
 interface ModelChainProps {
-  primary: string;
+  primary: string | null;
   fallbacks: string[];
-  onChange: (primary: string, fallbacks: string[]) => void;
+  onChange: (primary: string | null, fallbacks: string[]) => void;
+  models: ModelOption[];
+  providers: ProviderOption[];
   density?: ModelDensity;
 }
 
@@ -121,9 +139,14 @@ export function ModelChain({
   primary,
   fallbacks,
   onChange,
+  models,
+  providers,
   density = 'comfortable',
 }: ModelChainProps) {
-  const addFallback = () => onChange(primary, [...fallbacks, MODELS[0].value]);
+  const addFallback = () => {
+    const first = models[0]?.value;
+    if (first) onChange(primary, [...fallbacks, first]);
+  };
   const removeFallback = (idx: number) => onChange(primary, fallbacks.filter((_, i) => i !== idx));
   const updateFallback = (idx: number, val: string) => {
     const next = [...fallbacks];
@@ -144,6 +167,8 @@ export function ModelChain({
           )} />
           <ModelSelector
             value={primary}
+            models={models}
+            providers={providers}
             density={density}
             hideLabels={density === 'compact'}
             onValueChange={(val) => onChange(val, fallbacks)}
@@ -159,6 +184,8 @@ export function ModelChain({
             <div className="min-w-0 flex-1">
               <ModelSelector
                 value={fb}
+                models={models}
+                providers={providers}
                 hideLabels
                 density={density}
                 onValueChange={(val) => updateFallback(i, val)}
@@ -198,6 +225,8 @@ export function ModelChain({
 interface ModelRouteEditorProps {
   value: ModelRouteConfig;
   onChange: (value: ModelRouteConfig) => void;
+  models: ModelOption[];
+  providers: ProviderOption[];
   density?: ModelDensity;
   className?: string;
 }
@@ -205,6 +234,8 @@ interface ModelRouteEditorProps {
 export function ModelRouteEditor({
   value,
   onChange,
+  models,
+  providers,
   density = 'comfortable',
   className,
 }: ModelRouteEditorProps) {
@@ -217,11 +248,13 @@ export function ModelRouteEditor({
   };
 
   const addTier = () => {
+    const first = models[0]?.value;
+    if (!first) return;
     onChange({
       ...value,
       size_overrides: [
         ...tiers,
-        { max_lines: 300, model: MODELS[0].value, fallbacks: [] },
+        { max_lines: 300, model: first, fallbacks: [] },
       ],
     });
   };
@@ -238,91 +271,92 @@ export function ModelRouteEditor({
     : null;
 
   return (
-    <div className={cn('min-w-0 space-y-4', className)}>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-foreground">Model routing</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Baseline route plus file-size tiers for smaller changes.
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
+    <div className={cn('min-w-0 space-y-5', className)}>
+
+      {/* Toolbar row */}
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-xs text-muted-foreground">
+          Baseline route plus file-size tiers for smaller changes.
+        </p>
+        <button
           type="button"
           onClick={addTier}
-          className="h-8 shrink-0 gap-1.5 text-xs"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
         >
-          <ListPlus size={12} />
+          <ListPlus size={13} />
           Add tier
-        </Button>
+        </button>
       </div>
 
-      <section className="rounded-md border border-primary/20 bg-primary/[0.02] p-4">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-primary">Baseline route</span>
+      {/* Baseline route card */}
+      <div className="overflow-hidden rounded-lg border border-border">
+        <div className="flex items-center gap-2 border-b border-border/60 bg-muted/[0.04] px-4 py-2.5">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Baseline route</span>
           {largestTier !== null && (
-            <span className="text-[11px] text-muted-foreground">Files over {largestTier} lines</span>
+            <span className="text-xs text-muted-foreground">· files over {largestTier} lines</span>
           )}
         </div>
-        <ModelChain
-          primary={value.main}
-          fallbacks={value.fallbacks ?? []}
-          density={density}
-          onChange={(main, fallbacks) => onChange({ ...value, main, fallbacks })}
-        />
-      </section>
-
-      <div className="space-y-3">
-        {tiers.map((tier, index) => (
-          <section key={index} className="rounded-md border border-border bg-muted/5 p-4">
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h4 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                  Size tier
-                </h4>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Files up to the selected line count use this route.
-                </p>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                type="button"
-                aria-label="Remove size tier"
-                onClick={() => removeTier(index)}
-                className="h-8 w-8 shrink-0 text-muted-foreground/45 hover:bg-danger/5 hover:text-danger"
-              >
-                <Trash2 size={13} />
-              </Button>
-            </div>
-
-            <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[150px_minmax(0,1fr)]">
-              <div className="min-w-0 space-y-1.5">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  Max lines
-                </label>
-                <div className="flex h-9 min-w-0 items-center gap-2 rounded-md border border-border bg-background px-3 focus-within:ring-1 focus-within:ring-ring">
-                  <input
-                    type="number"
-                    min={1}
-                    value={tier.max_lines}
-                    onChange={e => updateTier(index, { max_lines: Number(e.target.value) || 1 })}
-                    className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none"
-                  />
-                  <span className="shrink-0 text-[10px] text-muted-foreground/50">lines</span>
-                </div>
-              </div>
-              <ModelChain
-                primary={tier.model}
-                fallbacks={tier.fallbacks || []}
-                density={density}
-                onChange={(model, fallbacks) => updateTier(index, { model, fallbacks })}
-              />
-            </div>
-          </section>
-        ))}
+        <div className="p-4">
+          <ModelChain
+            primary={value.main}
+            fallbacks={value.fallbacks ?? []}
+            models={models}
+            providers={providers}
+            density={density}
+            onChange={(main, fallbacks) => onChange({ ...value, main, fallbacks })}
+          />
+        </div>
       </div>
+
+      {/* Size tier cards */}
+      {tiers.length > 0 && (
+        <div className="space-y-3">
+          {tiers.map((tier, index) => (
+            <div key={index} className="overflow-hidden rounded-lg border border-border">
+              <div className="flex items-center justify-between gap-3 border-b border-border/60 bg-muted/[0.04] px-4 py-2.5">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  Size tier {tiers.length > 1 ? index + 1 : ''}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Remove size tier"
+                  onClick={() => removeTier(index)}
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-danger/5 hover:text-danger"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+              <div className="grid min-w-0 grid-cols-1 gap-4 p-4 lg:grid-cols-[160px_minmax(0,1fr)]">
+                <div className="min-w-0 space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                    Max lines
+                  </label>
+                  <div className="flex h-9 min-w-0 items-center gap-2 rounded-md border border-border bg-background px-3 focus-within:ring-1 focus-within:ring-ring">
+                    <input
+                      type="number"
+                      min={1}
+                      value={tier.max_lines}
+                      onChange={e => updateTier(index, { max_lines: Number(e.target.value) || 1 })}
+                      className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none"
+                    />
+                    <span className="shrink-0 text-xs text-muted-foreground">lines</span>
+                  </div>
+                </div>
+                <ModelChain
+                  primary={tier.model}
+                  fallbacks={tier.fallbacks || []}
+                  models={models}
+                  providers={providers}
+                  density={density}
+                  onChange={(model, fallbacks) => {
+                    if (model) updateTier(index, { model, fallbacks });
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

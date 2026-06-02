@@ -49,7 +49,7 @@ export function Select({
           <Button
             variant="outline"
             className={cn(
-              'h-9 w-full justify-between border-border/50 bg-background px-3 py-2 text-sm font-normal transition-all hover:bg-accent focus-visible:ring-0 focus-visible:ring-offset-0',
+              'h-9 w-full justify-between border-border bg-background px-3 py-2 text-sm font-normal transition-all hover:bg-muted/50 focus-visible:ring-0 focus-visible:ring-offset-0',
               !selectedOption && 'text-muted-foreground',
               triggerClassName
             )}
@@ -67,17 +67,20 @@ export function Select({
             <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-max min-w-[var(--radix-dropdown-menu-trigger-width)]">
+        <DropdownMenuContent
+          collisionPadding={12}
+          className="max-h-[min(28rem,var(--radix-dropdown-menu-content-available-height))] min-w-[var(--radix-dropdown-menu-trigger-width)] max-w-[calc(100vw-1.5rem)] overflow-y-auto sm:w-max sm:max-w-[42rem]"
+        >
           {options.map((option) => (
             <DropdownMenuItem
               key={option.value}
               onClick={() => onValueChange(option.value)}
               className={cn(
-                'cursor-pointer whitespace-nowrap',
-                value === option.value && 'bg-accent font-medium dark:bg-primary/[0.12]'
+                'cursor-pointer whitespace-normal break-words py-2',
+                value === option.value && 'bg-primary/10 font-medium text-primary dark:bg-primary/[0.12]'
               )}
             >
-              {option.label}
+              <span className="min-w-0">{option.label}</span>
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>

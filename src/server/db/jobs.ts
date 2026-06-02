@@ -549,6 +549,7 @@ export async function completeJob(
     errorMessage?: string | null;
   },
 ) {
+  const now = new Date().toISOString();
   await queryRows(
     env,
     `
@@ -567,7 +568,28 @@ export async function completeJob(
           review_id = $8,
           summary_model = $9,
           overall_confidence_score = $10,
-          error_msg = $11
+          error_msg = $11,
+          steps = CASE
+            WHEN EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(steps, '[]'::jsonb)) s WHERE s->>'name' = 'Completing')
+            THEN (
+              SELECT jsonb_agg(
+                CASE
+                  WHEN s->>'name' = 'Completing'
+                  THEN s || jsonb_build_object('status', 'done', 'finishedAt', $12::text, 'error', NULL)
+                  ELSE s
+                END
+              ) FROM jsonb_array_elements(COALESCE(steps, '[]'::jsonb)) s
+            )
+            ELSE COALESCE(steps, '[]'::jsonb) || jsonb_build_array(
+              jsonb_build_object(
+                'name', 'Completing',
+                'status', 'done',
+                'startedAt', $12::text,
+                'finishedAt', $12::text,
+                'error', NULL
+              )
+            )
+          END
       WHERE id = $1
     `,
     [
@@ -581,7 +603,8 @@ export async function completeJob(
       input.reviewId,
       input.summaryModel,
       input.overallConfidenceScore ?? null,
-      input.errorMessage ?? null
+      input.errorMessage ?? null,
+      now
     ],
   );
 }

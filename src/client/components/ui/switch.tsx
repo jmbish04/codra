@@ -9,7 +9,7 @@ export interface SwitchProps extends Omit<React.InputHTMLAttributes<HTMLInputEle
 const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
   ({ className, onCheckedChange, onChange, ...props }, ref) => {
     return (
-      <label className="relative inline-flex items-center cursor-pointer">
+      <label className="relative inline-flex cursor-pointer items-center">
         <input
           type="checkbox"
           className="sr-only peer"
@@ -21,9 +21,13 @@ const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
           {...props}
         />
         <div className={cn(
-          "w-9 h-5 bg-muted rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary",
+          "relative h-5 w-9 rounded-full border transition-all duration-200",
+          "border-border bg-muted-foreground/20",
+          "peer-checked:border-primary peer-checked:bg-primary",
+          "after:absolute after:left-[3px] after:top-[3px] after:h-3 after:w-3 after:rounded-full after:bg-white after:shadow-sm after:transition-transform after:duration-200 after:content-['']",
+          "peer-checked:after:translate-x-4",
           className
-        )}></div>
+        )} />
       </label>
     );
   }

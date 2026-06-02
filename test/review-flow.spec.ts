@@ -28,6 +28,7 @@ vi.mock('@server/services/github', () => {
         async createReview() { return { id: 456 }; }
         async ensureLabel() { return {}; }
         async addIssueLabels() { return {}; }
+        async removeIssueLabelsIfPresent() { return {}; }
         async removeIssueLabel() { return {}; }
     }
     return { GitHubService: MockGitHubService };
@@ -553,6 +554,8 @@ dbDescribe('Review Flow Lifecycle', () => {
     const finalJob = await getJobForProcessing(env, job.id);
     expect(finalJob?.status).toBe('done');
     expect(finalJob?.error_msg).toContain('Partial review: 1 of 2 files');
+    const steps = typeof finalJob?.steps === 'string' ? JSON.parse(finalJob.steps) : finalJob?.steps;
+    expect(steps?.find((step: { name: string }) => step.name === 'Completing')?.status).toBe('done');
     expect(finalJob?.summary_markdown).toMatch(/^### Codra Review/);
     expect(finalJob?.summary_model).toBeNull();
     expect(summarySpy).not.toHaveBeenCalled();

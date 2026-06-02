@@ -36,7 +36,8 @@ cp .dev.vars.example .dev.vars
 You will need to set up:
 - A GitHub App (for webhooks/checks).
 - A GitHub OAuth App (for dashboard authentication).
-- A Gemini API Key.
+- `LLM_CONFIG_ENCRYPTION_KEY` for encrypting dashboard-managed provider API keys.
+- LLM providers and model credentials from the Settings dashboard.
 - A Hyperdrive local connection string for `wrangler dev`.
 - A direct `DATABASE_URL` for migrations.
 

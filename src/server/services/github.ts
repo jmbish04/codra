@@ -36,8 +36,11 @@ export class GitHubService {
     return this.client.addIssueLabels(owner, repo, prNumber, labels);
   }
 
+  async removeIssueLabelsIfPresent(owner: string, repo: string, prNumber: number, labels: string[]) {
+    return this.client.removeIssueLabelsIfPresent(owner, repo, prNumber, labels);
+  }
+
   async removeIssueLabel(owner: string, repo: string, prNumber: number, label: string) {
     return this.client.removeIssueLabel(owner, repo, prNumber, label);
   }
 }
-

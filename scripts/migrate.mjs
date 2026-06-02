@@ -229,16 +229,171 @@ async function ensureModelCatalog() {
     return;
   }
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS llm_providers (
+      id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      name              TEXT        NOT NULL UNIQUE,
+      api_format        TEXT        NOT NULL CHECK (api_format IN ('openai', 'anthropic', 'gemini', 'cloudflare-workers-ai')),
+      base_url          TEXT,
+      encrypted_api_key TEXT,
+      enabled           BOOLEAN     NOT NULL DEFAULT TRUE,
+      created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await query(`
+    UPDATE llm_providers
+    SET name = 'Cloudflare', updated_at = now()
+    WHERE name = 'Cloudflare Workers AI'
+  `);
+
+  await query(`
+    UPDATE llm_providers
+    SET name = 'Google', updated_at = now()
+    WHERE name = 'Google Gemini'
+  `);
+
+  await query(`
+    INSERT INTO llm_providers (name, api_format, base_url, enabled)
+    VALUES
+      ('Cloudflare', 'cloudflare-workers-ai', NULL, TRUE),
+      ('Google', 'gemini', 'https://generativelanguage.googleapis.com/v1beta', FALSE),
+      ('OpenAI', 'openai', 'https://api.openai.com/v1', FALSE),
+      ('Anthropic', 'anthropic', 'https://api.anthropic.com/v1', FALSE),
+      ('OpenRouter', 'openai', 'https://openrouter.ai/api/v1', FALSE)
+    ON CONFLICT (name) DO UPDATE SET
+      api_format = EXCLUDED.api_format,
+      base_url = EXCLUDED.base_url,
+      updated_at = now()
+  `);
+
+  await query('ALTER TABLE model_configs ADD COLUMN IF NOT EXISTS provider_id UUID');
+  await query('ALTER TABLE model_configs ADD COLUMN IF NOT EXISTS model_name TEXT');
+
+  await query('ALTER TABLE model_configs ALTER COLUMN rpm DROP NOT NULL');
+  await query('ALTER TABLE model_configs ALTER COLUMN tpm DROP NOT NULL');
+  await query('ALTER TABLE model_configs ALTER COLUMN rpd DROP NOT NULL');
+  await query(`
+    UPDATE model_configs
+    SET rpm = NULL, tpm = NULL, rpd = NULL, updated_at = now()
+    WHERE rpm = 1 AND tpm = 1 AND rpd = 1
+  `);
+
   await query(
     `
-      INSERT INTO model_configs (model_id, rpm, tpm, rpd, provider)
-      VALUES ($1, 10, 131072, 300, 'cloudflare')
-      ON CONFLICT (model_id) DO NOTHING
+      UPDATE model_configs mc
+      SET
+        provider_id = provider_record.id,
+        model_name = COALESCE(mc.model_name, mc.model_id)
+      FROM llm_providers provider_record
+      WHERE mc.provider_id IS NULL
+        AND (
+          (mc.provider = 'cloudflare' AND provider_record.name = 'Cloudflare')
+          OR (mc.provider = 'gemini' AND provider_record.name = 'Google')
+          OR (mc.provider = 'google' AND provider_record.name = 'Google')
+          OR (mc.provider = 'openai' AND provider_record.name = 'OpenAI')
+          OR (mc.provider = 'anthropic' AND provider_record.name = 'Anthropic')
+          OR (mc.provider = 'openrouter' AND provider_record.name = 'OpenRouter')
+        )
+    `,
+  );
+
+  await query(
+    `
+      UPDATE model_configs mc
+      SET
+        provider_id = provider_record.id,
+        model_name = COALESCE(mc.model_name, mc.model_id),
+        provider = 'cloudflare'
+      FROM llm_providers provider_record
+      WHERE mc.provider_id IS NULL
+        AND provider_record.name = 'Cloudflare'
+    `,
+  );
+
+  await query('UPDATE model_configs SET model_name = model_id WHERE model_name IS NULL');
+
+  await query(
+    `
+      INSERT INTO model_configs (model_id, rpm, tpm, rpd, provider, provider_id, model_name, updated_at)
+      SELECT $1, 10, 131072, 300, 'cloudflare', p.id, $1, now()
+      FROM llm_providers p
+      WHERE p.name = 'Cloudflare'
+      ON CONFLICT (model_id) DO UPDATE SET
+        rpm = EXCLUDED.rpm,
+        tpm = EXCLUDED.tpm,
+        rpd = EXCLUDED.rpd,
+        provider = EXCLUDED.provider,
+        provider_id = EXCLUDED.provider_id,
+        model_name = EXCLUDED.model_name,
+        updated_at = now()
     `,
     [kimiK26Model],
   );
 
+  await query(
+    `
+      INSERT INTO model_configs (model_id, rpm, tpm, rpd, provider, provider_id, model_name, updated_at)
+      SELECT '@cf/zai-org/glm-4.7-flash', 20, 131072, 600, 'cloudflare', p.id, '@cf/zai-org/glm-4.7-flash', now()
+      FROM llm_providers p
+      WHERE p.name = 'Cloudflare'
+      ON CONFLICT (model_id) DO UPDATE SET
+        rpm = EXCLUDED.rpm,
+        tpm = EXCLUDED.tpm,
+        rpd = EXCLUDED.rpd,
+        provider = EXCLUDED.provider,
+        provider_id = EXCLUDED.provider_id,
+        model_name = EXCLUDED.model_name,
+        updated_at = now()
+    `,
+  );
+
+  await query(
+    `
+      INSERT INTO model_configs (model_id, rpm, tpm, rpd, provider, provider_id, model_name, updated_at)
+      SELECT 'gemma-4-31b-it', 15, 1000000, 1500, 'gemini', p.id, 'gemma-4-31b-it', now()
+      FROM llm_providers p
+      WHERE p.name = 'Google'
+      ON CONFLICT (model_id) DO UPDATE SET
+        provider = EXCLUDED.provider,
+        provider_id = EXCLUDED.provider_id,
+        model_name = EXCLUDED.model_name,
+        updated_at = now()
+    `,
+  );
+
+  await query(
+    `
+      INSERT INTO model_configs (model_id, rpm, tpm, rpd, provider, provider_id, model_name, updated_at)
+      SELECT 'gemma-4-26b-a4b-it', 30, 1000000, 1500, 'gemini', p.id, 'gemma-4-26b-a4b-it', now()
+      FROM llm_providers p
+      WHERE p.name = 'Google'
+      ON CONFLICT (model_id) DO UPDATE SET
+        provider = EXCLUDED.provider,
+        provider_id = EXCLUDED.provider_id,
+        model_name = EXCLUDED.model_name,
+        updated_at = now()
+    `,
+  );
+
   await query('DELETE FROM model_configs WHERE model_id = $1', [kimiK25Model]);
+
+  await query('ALTER TABLE model_configs ALTER COLUMN provider_id SET NOT NULL');
+  await query('ALTER TABLE model_configs ALTER COLUMN model_name SET NOT NULL');
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'model_configs_provider_id_fkey'
+      ) THEN
+        ALTER TABLE model_configs
+          ADD CONSTRAINT model_configs_provider_id_fkey
+          FOREIGN KEY (provider_id) REFERENCES llm_providers(id);
+      END IF;
+    END $$
+  `);
+  await query('CREATE INDEX IF NOT EXISTS model_configs_provider_id_idx ON model_configs (provider_id)');
 }
 
 async function normalizeRepoConfigs() {
@@ -247,7 +402,7 @@ async function normalizeRepoConfigs() {
   }
 
   await query(`
-    CREATE OR REPLACE FUNCTION pg_temp.replace_deprecated_model(input jsonb, old_value text, new_value text)
+    CREATE OR REPLACE FUNCTION pg_temp.codra_replace_deprecated_model(input jsonb, old_value text, new_value text)
     RETURNS jsonb
     LANGUAGE sql
     IMMUTABLE
@@ -256,14 +411,14 @@ async function normalizeRepoConfigs() {
         WHEN 'string' THEN CASE WHEN input #>> '{}' = old_value THEN to_jsonb(new_value) ELSE input END
         WHEN 'array' THEN COALESCE(
           (
-            SELECT jsonb_agg(pg_temp.replace_deprecated_model(value, old_value, new_value) ORDER BY ord)
+            SELECT jsonb_agg(pg_temp.codra_replace_deprecated_model(value, old_value, new_value) ORDER BY ord)
             FROM jsonb_array_elements(input) WITH ORDINALITY AS item(value, ord)
           ),
           '[]'::jsonb
         )
         WHEN 'object' THEN COALESCE(
           (
-            SELECT jsonb_object_agg(key, pg_temp.replace_deprecated_model(value, old_value, new_value))
+            SELECT jsonb_object_agg(key, pg_temp.codra_replace_deprecated_model(value, old_value, new_value))
             FROM jsonb_each(input)
           ),
           '{}'::jsonb
@@ -280,15 +435,15 @@ async function normalizeRepoConfigs() {
         main_model = CASE WHEN main_model = $1 THEN $2 ELSE main_model END,
         fallback_models = CASE
           WHEN fallback_models IS NULL THEN NULL
-          ELSE pg_temp.replace_deprecated_model(fallback_models, $1, $2)
+          ELSE pg_temp.codra_replace_deprecated_model(fallback_models, $1, $2)
         END,
         size_overrides = CASE
           WHEN size_overrides IS NULL THEN NULL
-          ELSE pg_temp.replace_deprecated_model(size_overrides, $1, $2)
+          ELSE pg_temp.codra_replace_deprecated_model(size_overrides, $1, $2)
         END,
         parsed_json = CASE
           WHEN parsed_json IS NULL THEN NULL
-          ELSE pg_temp.replace_deprecated_model(parsed_json, $1, $2)
+          ELSE pg_temp.codra_replace_deprecated_model(parsed_json, $1, $2)
         END
       WHERE main_model = $1
         OR fallback_models::text LIKE '%' || $1 || '%'
@@ -297,6 +452,8 @@ async function normalizeRepoConfigs() {
     `,
     [kimiK25Model, kimiK26Model],
   );
+
+  await query('DROP FUNCTION IF EXISTS pg_temp.codra_replace_deprecated_model(jsonb, text, text)');
 }
 
 async function main() {
@@ -315,6 +472,7 @@ async function main() {
       }
     }
 
+    await query('DROP INDEX IF EXISTS repositories_owner_idx');
     await ensureModelCatalog();
     await normalizeRepoConfigs();
 

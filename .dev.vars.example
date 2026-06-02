@@ -5,8 +5,8 @@
 # --- Integration tests ---
 TEST_DATABASE_URL="postgresql://user:password@localhost:5432/codra"
 
-# --- AI provider ---
-GEMINI_API_KEY="REPLACE_WITH_YOUR_GEMINI_API_KEY"
+# --- LLM provider config encryption ---
+LLM_CONFIG_ENCRYPTION_KEY="REPLACE_WITH_A_LONG_RANDOM_ENCRYPTION_KEY"
 
 # --- GitHub App and OAuth ---
 GITHUB_APP_WEBHOOK_SECRET="REPLACE_WITH_YOUR_WEBHOOK_SECRET"
@@ -16,6 +16,8 @@ GITHUB_CLIENT_SECRET="REPLACE_WITH_YOUR_CLIENT_SECRET"
 APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nREPLACE_WITH_YOUR_GITHUB_APP_PRIVATE_KEY_CONTENT\n-----END RSA PRIVATE KEY-----"
 
 # --- Cloudflare API ---
+# Required permissions: Queues Edit for DLQ actions, Workers AI Read for
+# Cloudflare model catalog discovery.
 CF_ACCOUNT_ID="REPLACE_WITH_YOUR_CLOUDFLARE_ACCOUNT_ID"
 CF_API_TOKEN="REPLACE_WITH_CLOUDFLARE_API_TOKEN"
 

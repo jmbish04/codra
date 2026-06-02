@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRetryableModelError, ModelService } from '@server/services/model';
 import { reviewWithCloudflare } from '@server/models/cloudflare';
 import { reviewWithGoogle } from '@server/models/google';
-import { createTestEnv } from './helpers';
+import { createTestEnv, saveTestProviderApiKey } from './helpers';
 import { defaultRepoConfig } from '@shared/schema';
 
 describe('ModelService', () => {
@@ -49,6 +49,15 @@ describe('ModelService', () => {
       primary: 'gemma-4-31b-it',
       fallbacks: [],
     });
+  });
+
+  it('fails clearly when no model strategy is configured', () => {
+    const service = new ModelService(createTestEnv());
+
+    expect(() => (service as any).selectModel({
+      totalLineCount: 1,
+      config: defaultRepoConfig,
+    })).toThrow('No review model strategy is configured');
   });
 
   it('turns Cloudflare reasoning-only responses into inconclusive review JSON', async () => {
@@ -169,7 +178,7 @@ describe('ModelService', () => {
       );
 
     const response = await reviewWithGoogle(
-      { GEMINI_API_KEY: 'test-key' },
+      { apiKey: 'test-key' },
       'gemma-4-31b-it',
       { systemPrompt: 'system', userPrompt: 'user' },
     );
@@ -216,6 +225,18 @@ describe('ModelService', () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            error: {
+              code: 500,
+              message: 'Internal error encountered.',
+              status: 'INTERNAL',
+            },
+          }),
+          { status: 500, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
             candidates: [{ content: { parts: [{ text: '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}' }] } }],
             usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
           }),
@@ -237,8 +258,8 @@ describe('ModelService', () => {
           };
         },
       } as any,
-      GEMINI_API_KEY: 'test-key',
     });
+    await saveTestProviderApiKey(env);
     const service = new ModelService(env);
 
     const response = await service.reviewFile({
@@ -264,9 +285,10 @@ describe('ModelService', () => {
       totalLineCount: 1,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(String(fetchMock.mock.calls[0][0])).toContain('/models/gemma-4-31b-it:generateContent');
-    expect(String(fetchMock.mock.calls[1][0])).toContain('/models/gemma-4-26b-a4b-it:generateContent');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/models/gemma-4-31b-it:generateContent');
+    expect(String(fetchMock.mock.calls[2][0])).toContain('/models/gemma-4-26b-a4b-it:generateContent');
     expect(cloudflareCalls).toBe(0);
     expect(response.modelUsed).toBe('gemma-4-26b-a4b-it');
   });
@@ -342,8 +364,8 @@ describe('ModelService', () => {
           throw new Error('Cloudflare daily free allocation exhausted (4006)');
         },
       } as any,
-      GEMINI_API_KEY: 'test-key',
     });
+    await saveTestProviderApiKey(env);
     const service = new ModelService(env, undefined, { jobId: 'job-provider-skip' });
     const file = {
       path: 'src/app.ts',
@@ -394,7 +416,8 @@ describe('ModelService', () => {
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
     });
-    const env = createTestEnv({ GEMINI_API_KEY: 'test-key' });
+    const env = createTestEnv();
+    await saveTestProviderApiKey(env);
     const service = new ModelService(env);
     const largeFile = {
       path: 'src/large.ts',
@@ -453,7 +476,8 @@ describe('ModelService', () => {
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
     });
-    const env = createTestEnv({ GEMINI_API_KEY: 'test-key' });
+    const env = createTestEnv();
+    await saveTestProviderApiKey(env);
     const service = new ModelService(env);
     const largeFile = {
       path: 'src/large.ts',

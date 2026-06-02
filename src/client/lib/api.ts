@@ -11,8 +11,29 @@ import type {
   SyncReposResponse,
   UpdatesEmailResponse,
 } from '@shared/api';
+import type { LlmApiFormat, LlmProvider, ModelConfig, RepoConfig } from '@shared/schema';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+function pathSegment(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error('Path segment cannot be empty.');
+  }
+  return encodeURIComponent(trimmed);
+}
+
+type QueryValue = string | number | boolean | null | undefined;
+export type ModelConfigPayload = Pick<ModelConfig, 'providerId' | 'modelName' | 'rpm' | 'tpm' | 'rpd'>;
+export type ProviderPayload = {
+  name: string;
+  apiFormat: LlmApiFormat;
+  baseUrl: string | null;
+  apiKey?: string;
+  clearApiKey?: boolean;
+  enabled: boolean;
+};
+type RepoConfigPatch = Partial<Pick<RepoConfig, 'review' | 'model'> & { enabled: boolean }>;
 
 async function request<T>(input: string, init?: RequestInit) {
   const method = init?.method?.toUpperCase() ?? 'GET';
@@ -115,7 +136,7 @@ export const api = {
       body: JSON.stringify({ email }),
     });
   },
-  getJobs(params: Record<string, any> = {}) {
+  getJobs(params: Record<string, QueryValue> = {}) {
     const searchParams = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined && value !== null && value !== '') {
@@ -141,7 +162,7 @@ export const api = {
     return request<RepoConfigsResponse>('/api/repos');
   },
   getRepo(owner: string, repo: string) {
-    return request<RepoConfigResponse>(`/api/repos/${owner}/${repo}/config`);
+    return request<RepoConfigResponse>(`/api/repos/${pathSegment(owner)}/${pathSegment(repo)}/config`);
   },
   getStats(days?: number) {
     const query = days ? `?days=${days}` : '';
@@ -167,8 +188,8 @@ export const api = {
       body: JSON.stringify({ lease_ids: leaseIds }),
     });
   },
-  updateRepoConfig(owner: string, repo: string, config: any) {
-    return request<{ ok: boolean }>(`/api/repos/${owner}/${repo}/config`, {
+  updateRepoConfig(owner: string, repo: string, config: RepoConfigPatch) {
+    return request<{ ok: boolean }>(`/api/repos/${pathSegment(owner)}/${pathSegment(repo)}/config`, {
       method: 'PATCH',
       body: JSON.stringify(config),
     });
@@ -176,16 +197,48 @@ export const api = {
   getModelConfigs() {
     return request<ModelConfigsResponse>('/api/models');
   },
-  updateModelConfig(id: string, config: any) {
-    return request<{ ok: boolean }>(`/api/models/${id}`, {
+  refreshModelCatalog() {
+    return request<ModelConfigsResponse>('/api/models/sync', {
+      method: 'POST',
+    });
+  },
+  updateModelConfig(id: string, config: ModelConfigPayload) {
+    return request<{ ok: boolean; config: ModelConfig }>(`/api/models/${pathSegment(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(config),
+    });
+  },
+  deleteModelConfig(id: string) {
+    return request<{ ok: boolean }>(`/api/models/${pathSegment(id)}`, {
+      method: 'DELETE',
+    });
+  },
+  createProvider(config: ProviderPayload) {
+    return request<{ provider: LlmProvider }>('/api/models/providers', {
       method: 'POST',
       body: JSON.stringify(config),
     });
   },
-  getGlobalConfig() {
-    return request<{ config: any }>('/api/models/global');
+  updateProvider(id: string, config: ProviderPayload) {
+    return request<{ provider: LlmProvider }>(`/api/models/providers/${pathSegment(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(config),
+    });
   },
-  updateGlobalConfig(config: any) {
+  deleteProvider(id: string) {
+    return request<{ ok: boolean }>(`/api/models/providers/${pathSegment(id)}`, {
+      method: 'DELETE',
+    });
+  },
+  testModelConfig(id: string) {
+    return request<{ ok: boolean; modelUsed: string; provider: string; inputTokens: number; outputTokens: number }>(`/api/models/${pathSegment(id)}/test`, {
+      method: 'POST',
+    });
+  },
+  getGlobalConfig() {
+    return request<{ config: RepoConfig['model'] }>('/api/models/global');
+  },
+  updateGlobalConfig(config: RepoConfig['model']) {
     return request<{ ok: boolean }>('/api/models/global', {
       method: 'PATCH',
       body: JSON.stringify(config),

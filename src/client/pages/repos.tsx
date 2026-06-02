@@ -18,29 +18,22 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
-import type { RepoConfigRecord } from '@shared/schema';
+import type { RepoConfig, RepoConfigRecord } from '@shared/schema';
 import {
   describeModelRoute,
   ModelRouteEditor,
+  type ModelOption,
   type ModelRouteConfig,
+  type ProviderOption,
 } from '@client/components/features/models/model-chain';
 
-const DEFAULT_GLOBAL_CONFIG: ModelRouteConfig = {
-  main: 'gemma-4-31b-it',
-  fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
-  size_overrides: [
-    {
-      max_lines: 300,
-      model: 'gemma-4-31b-it',
-      fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
-    },
-    {
-      max_lines: 100,
-      model: '@cf/moonshotai/kimi-k2.6',
-      fallbacks: ['@cf/zai-org/glm-4.7-flash'],
-    },
-  ],
+const EMPTY_MODEL_ROUTE: ModelRouteConfig = {
+  main: null,
+  fallbacks: [],
+  size_overrides: [],
 };
+
+type GlobalModelConfig = RepoConfig['model'];
 
 function repoId(repo: Pick<RepoConfigRecord, 'owner' | 'repo'>) {
   return `${repo.owner}/${repo.repo}`;
@@ -50,17 +43,17 @@ function hasStoredModelStrategy(repo: RepoConfigRecord) {
   return repo.mainModel !== null || repo.fallbackModels !== null || repo.sizeOverrides !== null;
 }
 
-function normalizeRoute(config: any): ModelRouteConfig {
+function normalizeRoute(config: GlobalModelConfig | ModelRouteConfig | null | undefined): ModelRouteConfig {
   return {
-    main: config?.main || DEFAULT_GLOBAL_CONFIG.main,
-    fallbacks: Array.isArray(config?.fallbacks) ? config.fallbacks : DEFAULT_GLOBAL_CONFIG.fallbacks,
+    main: typeof config?.main === 'string' && config.main.trim() ? config.main : null,
+    fallbacks: Array.isArray(config?.fallbacks) ? config.fallbacks : EMPTY_MODEL_ROUTE.fallbacks,
     size_overrides: Array.isArray(config?.size_overrides)
       ? config.size_overrides
-      : DEFAULT_GLOBAL_CONFIG.size_overrides,
+      : EMPTY_MODEL_ROUTE.size_overrides,
   };
 }
 
-function getGlobalRoute(globalConfig: any): ModelRouteConfig {
+function getGlobalRoute(globalConfig: GlobalModelConfig | ModelRouteConfig | null): ModelRouteConfig {
   return normalizeRoute(globalConfig);
 }
 
@@ -68,27 +61,47 @@ function getStoredRepoRoute(repo: RepoConfigRecord): ModelRouteConfig | null {
   if (!hasStoredModelStrategy(repo)) return null;
 
   return {
-    main: repo.mainModel ?? DEFAULT_GLOBAL_CONFIG.main,
-    fallbacks: repo.fallbackModels ?? DEFAULT_GLOBAL_CONFIG.fallbacks,
-    size_overrides: Array.isArray(repo.sizeOverrides) ? repo.sizeOverrides : DEFAULT_GLOBAL_CONFIG.size_overrides,
+    main: repo.mainModel ?? null,
+    fallbacks: repo.fallbackModels ?? [],
+    size_overrides: Array.isArray(repo.sizeOverrides) ? repo.sizeOverrides : [],
   };
 }
 
-function routesEqual(a: ModelRouteConfig, b: ModelRouteConfig) {
-  return JSON.stringify(a) === JSON.stringify(b);
+function stringArraysEqual(a: string[] = [], b: string[] = []) {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
-function hasMeaningfulCustomStrategy(repo: RepoConfigRecord, globalConfig: any) {
+function tiersEqual(a: ModelRouteConfig['size_overrides'] = [], b: ModelRouteConfig['size_overrides'] = []) {
+  return a.length === b.length && a.every((tier, index) => {
+    const other = b[index];
+    return Boolean(
+      tier && other &&
+      tier.max_lines === other.max_lines &&
+      tier.model === other.model &&
+      stringArraysEqual(tier.fallbacks ?? [], other.fallbacks ?? []),
+    );
+  });
+}
+
+function routesEqual(a: ModelRouteConfig, b: ModelRouteConfig) {
+  return (
+    a.main === b.main &&
+    stringArraysEqual(a.fallbacks ?? [], b.fallbacks ?? []) &&
+    tiersEqual(a.size_overrides ?? [], b.size_overrides ?? [])
+  );
+}
+
+function hasMeaningfulCustomStrategy(repo: RepoConfigRecord, globalConfig: GlobalModelConfig | ModelRouteConfig | null) {
   const storedRoute = getStoredRepoRoute(repo);
   if (!storedRoute) return false;
 
   return (
     !routesEqual(storedRoute, getGlobalRoute(globalConfig)) &&
-    !routesEqual(storedRoute, DEFAULT_GLOBAL_CONFIG)
+    !routesEqual(storedRoute, EMPTY_MODEL_ROUTE)
   );
 }
 
-function getRepoRoute(repo: RepoConfigRecord, globalConfig: any): ModelRouteConfig {
+function getRepoRoute(repo: RepoConfigRecord, globalConfig: GlobalModelConfig | ModelRouteConfig | null): ModelRouteConfig {
   if (!hasMeaningfulCustomStrategy(repo, globalConfig)) {
     return getGlobalRoute(globalConfig);
   }
@@ -103,7 +116,8 @@ function formatLastActivity(value: string | Date | null) {
 
 interface RepoRowProps {
   repo: RepoConfigRecord;
-  globalConfig: any;
+  globalConfig: GlobalModelConfig | ModelRouteConfig | null;
+  modelOptions: ModelOption[];
   togglePending: boolean;
   onToggleEnabled: (repo: RepoConfigRecord, enabled: boolean) => void;
   onEdit: (repo: RepoConfigRecord) => void;
@@ -112,6 +126,7 @@ interface RepoRowProps {
 function RepoRow({
   repo,
   globalConfig,
+  modelOptions,
   togglePending,
   onToggleEnabled,
   onEdit,
@@ -165,7 +180,7 @@ function RepoRow({
         </div>
 
         <p className="min-w-0 truncate text-xs text-muted-foreground lg:px-2">
-          {describeModelRoute(route)}
+          {describeModelRoute(route, modelOptions)}
         </p>
 
         <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
@@ -197,7 +212,9 @@ function RepoRow({
 
 interface RepoModelModalProps {
   repo: RepoConfigRecord | null;
-  globalConfig: any;
+  globalConfig: GlobalModelConfig | ModelRouteConfig | null;
+  modelOptions: ModelOption[];
+  providerOptions: ProviderOption[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onModelApplied: (repo: RepoConfigRecord, route: ModelRouteConfig) => void;
@@ -207,6 +224,8 @@ interface RepoModelModalProps {
 function RepoModelModal({
   repo,
   globalConfig,
+  modelOptions,
+  providerOptions,
   open,
   onOpenChange,
   onModelApplied,
@@ -217,8 +236,8 @@ function RepoModelModal({
     () => JSON.stringify(getGlobalRoute(globalConfig)),
     [globalConfig],
   );
-  const [route, setRoute] = useState<ModelRouteConfig>(DEFAULT_GLOBAL_CONFIG);
-  const [initialRoute, setInitialRoute] = useState<ModelRouteConfig>(DEFAULT_GLOBAL_CONFIG);
+  const [route, setRoute] = useState<ModelRouteConfig>(EMPTY_MODEL_ROUTE);
+  const [initialRoute, setInitialRoute] = useState<ModelRouteConfig>(EMPTY_MODEL_ROUTE);
   const [saving, setSaving] = useState<'apply' | 'reset' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -309,7 +328,13 @@ function RepoModelModal({
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
             {error && <Alert variant="destructive" className="mb-4">{error}</Alert>}
-            <ModelRouteEditor value={route} onChange={setRoute} density="comfortable" />
+            <ModelRouteEditor
+              value={route}
+              onChange={setRoute}
+              models={modelOptions}
+              providers={providerOptions}
+              density="comfortable"
+            />
           </div>
 
           <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border bg-muted/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
@@ -340,7 +365,9 @@ function RepoModelModal({
 
 export function ReposPage() {
   const [repos, setRepos] = useState<RepoConfigRecord[]>([]);
-  const [globalConfig, setGlobalConfig] = useState<any>(null);
+  const [globalConfig, setGlobalConfig] = useState<ModelRouteConfig>(EMPTY_MODEL_ROUTE);
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+  const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -354,10 +381,21 @@ export function ReposPage() {
     Promise.all([
       api.getRepos(),
       api.getGlobalConfig(),
+      api.getModelConfigs(),
     ])
-      .then(([reposRes, globalRes]) => {
-        setRepos(reposRes.repos);
-        setGlobalConfig(globalRes.config);
+      .then(([reposRes, globalRes, modelsRes]) => {
+        const nextRepos = Array.isArray(reposRes?.repos) ? reposRes.repos : [];
+        const providers = Array.isArray(modelsRes?.providers) ? modelsRes.providers : [];
+        const configs = Array.isArray(modelsRes?.configs) ? modelsRes.configs : [];
+
+        setRepos(nextRepos);
+        setGlobalConfig(normalizeRoute(globalRes?.config));
+        setProviderOptions(providers.map(provider => ({ value: provider.id, label: provider.name })));
+        setModelOptions(configs.map(config => ({
+          value: config.modelId,
+          label: `${config.providerName} / ${config.modelName}`,
+          providerId: config.providerId,
+        })));
         setLoading(false);
       })
       .catch(e => {
@@ -505,6 +543,7 @@ export function ReposPage() {
                 key={id}
                 repo={repo}
                 globalConfig={globalConfig}
+                modelOptions={modelOptions}
                 togglePending={pendingToggles.has(id)}
                 onToggleEnabled={handleToggleEnabled}
                 onEdit={(nextRepo) => setEditingRepoId(repoId(nextRepo))}
@@ -517,6 +556,8 @@ export function ReposPage() {
       <RepoModelModal
         repo={editingRepo}
         globalConfig={globalConfig}
+        modelOptions={modelOptions}
+        providerOptions={providerOptions}
         open={editingRepo !== null}
         onOpenChange={(open) => {
           if (!open) setEditingRepoId(null);
