@@ -401,8 +401,12 @@ async function normalizeRepoConfigs() {
     return;
   }
 
+  console.log('Normalizing repo configs...');
+  const functionName = 'codra_replace_deprecated_model';
+  
+  console.log(`Creating function: pg_temp.${functionName}`);
   await query(`
-    CREATE OR REPLACE FUNCTION pg_temp.codra_replace_deprecated_model(input jsonb, old_value text, new_value text)
+    CREATE FUNCTION pg_temp.${functionName}(input jsonb, old_value text, new_value text)
     RETURNS jsonb
     LANGUAGE sql
     IMMUTABLE
@@ -411,14 +415,14 @@ async function normalizeRepoConfigs() {
         WHEN 'string' THEN CASE WHEN input #>> '{}' = old_value THEN to_jsonb(new_value) ELSE input END
         WHEN 'array' THEN COALESCE(
           (
-            SELECT jsonb_agg(pg_temp.codra_replace_deprecated_model(value, old_value, new_value) ORDER BY ord)
+            SELECT jsonb_agg(pg_temp.${functionName}(value, old_value, new_value) ORDER BY ord)
             FROM jsonb_array_elements(input) WITH ORDINALITY AS item(value, ord)
           ),
           '[]'::jsonb
         )
         WHEN 'object' THEN COALESCE(
           (
-            SELECT jsonb_object_agg(key, pg_temp.codra_replace_deprecated_model(value, old_value, new_value))
+            SELECT jsonb_object_agg(key, pg_temp.${functionName}(value, old_value, new_value))
             FROM jsonb_each(input)
           ),
           '{}'::jsonb
@@ -428,6 +432,7 @@ async function normalizeRepoConfigs() {
     $$
   `);
 
+  console.log('Updating repo configs...');
   await query(
     `
       UPDATE repo_configs
@@ -435,15 +440,15 @@ async function normalizeRepoConfigs() {
         main_model = CASE WHEN main_model = $1 THEN $2 ELSE main_model END,
         fallback_models = CASE
           WHEN fallback_models IS NULL THEN NULL
-          ELSE pg_temp.codra_replace_deprecated_model(fallback_models, $1, $2)
+          ELSE pg_temp.${functionName}(fallback_models, $1, $2)
         END,
         size_overrides = CASE
           WHEN size_overrides IS NULL THEN NULL
-          ELSE pg_temp.codra_replace_deprecated_model(size_overrides, $1, $2)
+          ELSE pg_temp.${functionName}(size_overrides, $1, $2)
         END,
         parsed_json = CASE
           WHEN parsed_json IS NULL THEN NULL
-          ELSE pg_temp.codra_replace_deprecated_model(parsed_json, $1, $2)
+          ELSE pg_temp.${functionName}(parsed_json, $1, $2)
         END
       WHERE main_model = $1
         OR fallback_models::text LIKE '%' || $1 || '%'
@@ -453,12 +458,17 @@ async function normalizeRepoConfigs() {
     [kimiK25Model, kimiK26Model],
   );
 
-  await query('DROP FUNCTION IF EXISTS pg_temp.codra_replace_deprecated_model(jsonb, text, text)');
+  console.log(`Dropping function: pg_temp.${functionName}`);
+  await query(`DROP FUNCTION IF EXISTS pg_temp.${functionName}(jsonb, text, text)`);
+  console.log('Repo configs normalized.');
 }
 
 async function main() {
-  await query('SELECT pg_advisory_lock($1)', [migrationLockId]);
   try {
+    console.log('Acquiring advisory lock...');
+    await query('SELECT pg_advisory_lock($1)', [migrationLockId]);
+
+    console.log('Starting database migrations...');
     await ensureMigrationTable();
 
     const migrationFiles = (await readdir(migrationsDir))
@@ -472,12 +482,14 @@ async function main() {
       }
     }
 
+    console.log('Running catalog and config normalizations...');
     await query('DROP INDEX IF EXISTS repositories_owner_idx');
     await ensureModelCatalog();
     await normalizeRepoConfigs();
 
     console.log('Database migrations are up to date.');
   } finally {
+    console.log('Releasing advisory lock...');
     await query('SELECT pg_advisory_unlock($1)', [migrationLockId]);
     await sql.end();
   }

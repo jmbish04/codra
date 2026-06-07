@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { Clock } from 'lucide-react';
 import { Select } from '@client/components/ui/select';
 import { cn } from '@client/lib/utils';
@@ -6,6 +7,7 @@ interface TimeRangeSelectProps {
   value: number;
   onValueChange: (value: number) => void;
   className?: string;
+  triggerStyle?: CSSProperties;
 }
 
 const timeRanges = [
@@ -15,7 +17,7 @@ const timeRanges = [
   { label: 'Last 90 days', value: 90 },
 ];
 
-export function TimeRangeSelect({ value, onValueChange, className }: TimeRangeSelectProps) {
+export function TimeRangeSelect({ value, onValueChange, className, triggerStyle }: TimeRangeSelectProps) {
   const selectedRange = timeRanges.find((r) => r.value === value) || timeRanges[2];
 
   return (
@@ -28,6 +30,7 @@ export function TimeRangeSelect({ value, onValueChange, className }: TimeRangeSe
       }))}
       leadingIcon={<Clock className="h-3.5 w-3.5" />}
       triggerClassName={cn('w-44', className)}
+      triggerStyle={triggerStyle}
     />
   );
 }

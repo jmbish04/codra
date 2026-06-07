@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 
 import { TimeRangeSelect } from '@client/components/features/stats/time-range-select';
+import { PageHeaderActions } from '@client/components/shared/page-header-actions';
 import { PageHeader } from '@client/components/layout/page-header';
 import { Skeleton } from '@client/components/shared/skeleton';
 import { Alert } from '@client/components/ui/alert';
@@ -471,19 +472,12 @@ export function StatsPage() {
         title="Review metrics"
         description="Daily review and comment activity for the selected range."
         actions={
-          <>
-            <TimeRangeSelect value={days} onValueChange={setDays} />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => load(true)}
-              disabled={refreshing}
-              className="gap-2"
-            >
-              <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-              Refresh
-            </Button>
-          </>
+          <PageHeaderActions
+            days={days}
+            onDaysChange={setDays}
+            onRefresh={() => load(true)}
+            refreshing={refreshing}
+          />
         }
       />
 

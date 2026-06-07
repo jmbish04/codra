@@ -2,12 +2,12 @@ import { useState } from 'react';
 import { api } from '@client/lib/api';
 import type { StatsPayload } from '@shared/schema';
 import type { JobSummary } from '@shared/schema';
-import { RefreshCw, ArrowRight } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { JobsTable } from '@client/components/shared/jobs-table';
+import { PageHeaderActions } from '@client/components/shared/page-header-actions';
 import { Link } from 'react-router-dom';
 
 import { Button } from '@client/components/ui/button';
-import { TimeRangeSelect } from '@client/components/features/stats/time-range-select';
 import { PageHeader } from '@client/components/layout/page-header';
 import { OverviewStats } from '@client/components/features/stats/overview-stats';
 import { usePolling } from '@client/hooks/use-polling';
@@ -51,23 +51,12 @@ export function DashboardPage() {
         title="Dashboard"
         description="Totals and recent review jobs for the selected time range."
         actions={
-          <>
-            <TimeRangeSelect 
-              value={days}
-              onValueChange={setDays}
-            />
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => load(true)}
-              disabled={refreshing}
-              className="gap-2"
-            >
-              <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-              Refresh
-            </Button>
-          </>
+          <PageHeaderActions
+            days={days}
+            onDaysChange={setDays}
+            onRefresh={() => load(true)}
+            refreshing={refreshing}
+          />
         }
       />
 

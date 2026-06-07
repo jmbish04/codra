@@ -134,8 +134,11 @@ function extractJson(raw: string) {
       }
     }
 
-    // Truncated - return everything from first brace
-    return raw.slice(firstBrace).trim();
+    // Truncated JSON: the closing brace(s) are missing. Append them so jsonrepair
+    // has a structurally complete (though incomplete-content) object to work with.
+    const partial = raw.slice(firstBrace).trim();
+    const closing = '}'.repeat(Math.max(1, stack));
+    return `${partial}${closing}`;
   }
 
   return raw.trim();
@@ -260,8 +263,11 @@ export function parseFileReviewResponse(raw: string, file: FileDiff): {
       throw new Error('Model response did not contain review JSON keys.');
     }
   } catch (e) {
+    // Log a prefix of the raw response so we can diagnose what the model returned
+    // without bloating logs with 10k+ char dumps.
     logger.error('Failed to extract JSON from model response', {
       rawLength: raw.length,
+      rawPrefix: raw.slice(0, 500),
       error: e instanceof Error ? e.message : String(e),
     });
     throw new Error('Could not find JSON root in model response.');

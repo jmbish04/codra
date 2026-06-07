@@ -118,6 +118,10 @@ async function requestWithMeta<T>(input: string, init?: RequestInit) {
   };
 }
 
+let updatesEmailPromise: Promise<UpdatesEmailResponse> | null = null;
+let updatesEmailFetchTime = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 export const api = {
   getSession() {
     return request<AuthSessionResponse>('/api/auth/session');
@@ -128,13 +132,25 @@ export const api = {
     });
   },
   getUpdatesEmailStatus() {
-    return request<UpdatesEmailResponse>('/api/auth/updates-email');
+    const now = Date.now();
+    if (!updatesEmailPromise || (now - updatesEmailFetchTime > CACHE_TTL)) {
+      updatesEmailFetchTime = now;
+      updatesEmailPromise = request<UpdatesEmailResponse>('/api/auth/updates-email').catch((err) => {
+        updatesEmailPromise = null;
+        throw err;
+      });
+    }
+    return updatesEmailPromise;
   },
   subscribeUpdates(email: string) {
-    return request<UpdatesEmailResponse>('/api/auth/updates-email', {
+    updatesEmailPromise = request<UpdatesEmailResponse>('/api/auth/updates-email', {
       method: 'POST',
       body: JSON.stringify({ email }),
+    }).catch((err) => {
+      updatesEmailPromise = null;
+      throw err;
     });
+    return updatesEmailPromise;
   },
   getJobs(params: Record<string, QueryValue> = {}) {
     const searchParams = new URLSearchParams();

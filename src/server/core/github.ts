@@ -116,6 +116,9 @@ function pemToArrayBuffer(pem: string) {
   const base64 = pem
     .replace(/-----BEGIN (RSA )?PRIVATE KEY-----/g, '')
     .replace(/-----END (RSA )?PRIVATE KEY-----/g, '')
+    // Handle literal \n escape sequences (e.g. when the key is stored as a
+    // single-line string with \n instead of real newlines in wrangler secrets)
+    .replace(/\\n/g, '')
     .replace(/\s+/g, '');
 
   const binary = atob(base64);

@@ -21,7 +21,7 @@ export function CommentCard({ comment, filePath }: CommentCardProps) {
   return (
     <article
       className={cn(
-        'mb-4 rounded-md border p-5 shadow-md',
+        'mb-4 rounded-md border p-5 shadow-sm',
         sev.bg, sev.border,
       )}
     >

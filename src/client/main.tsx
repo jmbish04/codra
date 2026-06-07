@@ -1,18 +1,20 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { AppShell } from './components/layout/app-shell';
-import { LandingPage } from './pages/landing';
-import { DashboardPage } from './pages/dashboard';
-import { LoginPage } from './pages/login';
-import { JobsPage } from './pages/jobs';
-import { JobDetailPage } from './pages/job-detail';
-import { JobLogsPage } from './pages/job-logs';
-import { ReposPage } from './pages/repos';
-import { StatsPage } from './pages/stats';
-import { SettingsPage } from './pages/settings';
-import { NotFoundPage } from './pages/not-found';
+
+const LandingPage = React.lazy(() => import('./pages/landing').then(m => ({ default: m.LandingPage })));
+const DashboardPage = React.lazy(() => import('./pages/dashboard').then(m => ({ default: m.DashboardPage })));
+const LoginPage = React.lazy(() => import('./pages/login').then(m => ({ default: m.LoginPage })));
+const JobsPage = React.lazy(() => import('./pages/jobs').then(m => ({ default: m.JobsPage })));
+const JobDetailPage = React.lazy(() => import('./pages/job-detail').then(m => ({ default: m.JobDetailPage })));
+const JobLogsPage = React.lazy(() => import('./pages/job-logs').then(m => ({ default: m.JobLogsPage })));
+const ReposPage = React.lazy(() => import('./pages/repos').then(m => ({ default: m.ReposPage })));
+const StatsPage = React.lazy(() => import('./pages/stats').then(m => ({ default: m.StatsPage })));
+const SettingsPage = React.lazy(() => import('./pages/settings').then(m => ({ default: m.SettingsPage })));
+const NotFoundPage = React.lazy(() => import('./pages/not-found').then(m => ({ default: m.NotFoundPage })));
+
 import './app.css';
 
 import { ThemeProvider } from './lib/theme';
@@ -49,30 +51,61 @@ function ToasterWrapper() {
   );
 }
 
+class ErrorBoundary extends React.Component<{ fallback?: React.ReactNode, children: React.ReactNode }, { error: Error | null }> {
+  constructor(props: { fallback?: React.ReactNode, children: React.ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
+  }
+  render() {
+    if (this.state.error) {
+      if (this.props.fallback) return this.props.fallback;
+      return (
+        <div className="flex flex-col items-center justify-center p-8 text-destructive">
+          <p className="font-bold">An error occurred rendering this component:</p>
+          <pre className="mt-2 rounded bg-muted p-4 text-xs font-mono">{this.state.error.toString()}</pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const withSuspense = (Component: React.ComponentType, isFullPage = false) => (
+  <ErrorBoundary>
+    <Suspense fallback={<div role="status" aria-busy="true" className={`flex items-center justify-center ${isFullPage ? 'h-screen' : 'h-full w-full'}`} />}>
+      <Component />
+    </Suspense>
+  </ErrorBoundary>
+);
+
 const router = createBrowserRouter([
   {
     path: '/',
-    element: <LandingPage />,
+    element: withSuspense(LandingPage, true),
   },
   {
     path: '/login',
-    element: <LoginPage />,
+    element: withSuspense(LoginPage, true),
   },
   {
     element: <AppShell />,
     children: [
-      { path: 'dashboard', element: <DashboardPage /> },
-      { path: 'jobs', element: <JobsPage /> },
-      { path: 'jobs/:id', element: <JobDetailPage /> },
-      { path: 'jobs/:id/logs', element: <JobLogsPage /> },
-      { path: 'repos', element: <ReposPage /> },
-      { path: 'stats', element: <StatsPage /> },
-      { path: 'settings', element: <SettingsPage /> },
+      { path: 'dashboard', element: withSuspense(DashboardPage) },
+      { path: 'jobs', element: withSuspense(JobsPage) },
+      { path: 'jobs/:id', element: withSuspense(JobDetailPage) },
+      { path: 'jobs/:id/logs', element: withSuspense(JobLogsPage) },
+      { path: 'repos', element: withSuspense(ReposPage) },
+      { path: 'stats', element: withSuspense(StatsPage) },
+      { path: 'settings', element: withSuspense(SettingsPage) },
     ],
   },
   {
     path: '*',
-    element: <NotFoundPage />,
+    element: withSuspense(NotFoundPage, true),
   },
 ]);
 
