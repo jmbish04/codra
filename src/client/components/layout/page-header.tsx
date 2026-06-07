@@ -7,6 +7,7 @@ interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
   title: string;
   description?: React.ReactNode;
   actions?: React.ReactNode;
+  versionBadge?: string;
 }
 
 export function PageHeader({ 
@@ -28,10 +29,15 @@ export function PageHeader({
             {category}
           </p>
           <h1
-            className="text-xl md:text-2xl font-bold text-foreground"
+            className="flex items-center gap-3 text-xl md:text-2xl font-bold text-foreground"
             style={{ letterSpacing: '-0.025em' }}
           >
             {title}
+            {props.versionBadge && (
+              <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-sm font-semibold text-primary">
+                v{props.versionBadge}
+              </span>
+            )}
           </h1>
           {description && (
             <div className="mt-1 text-sm text-muted-foreground">

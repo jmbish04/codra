@@ -40,8 +40,8 @@ const thCls =
   'px-4 py-3 text-left text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground select-none';
 
 const COLUMN_CLASSES: Record<Column, string> = {
-  repo: 'w-[190px]',
-  pr: 'min-w-[280px]',
+  repo: 'w-[190px] max-w-[190px]',
+  pr: 'max-w-[480px]',
   status: 'w-[150px]',
   verdict: 'w-[120px]',
   files: 'hidden md:table-cell w-[76px]',
@@ -262,7 +262,7 @@ export function JobsTable({ jobs, loading, columns }: JobsTableProps) {
                   return (
                     <tr
                       key={job.id}
-                      className="group relative cursor-default transition-colors hover:bg-secondary/45"
+                      className="group relative cursor-default transition-colors hover:bg-zinc-50 dark:hover:bg-secondary/45"
                     >
                       {cols.includes('repo') && (
                         <td
@@ -293,23 +293,23 @@ export function JobsTable({ jobs, loading, columns }: JobsTableProps) {
                       {cols.includes('pr') && (
                         <td
                           className={cn(
-                            'border-t border-border/50 px-4 py-4 align-middle',
+                            'border-t border-border/50 px-4 py-4 align-middle overflow-hidden',
                             COLUMN_CLASSES.pr,
                           )}
                         >
-                          <div className="flex min-w-0 items-start gap-2.5">
+                          <div className="flex min-w-0 items-start gap-2">
                             <GitPullRequestArrow
                               size={15}
                               className="mt-0.5 shrink-0 text-muted-foreground/70"
                             />
-                            <div className="min-w-0">
-                              <div className="flex min-w-0 items-baseline gap-2">
+                            <div className="min-w-0 overflow-hidden">
+                              <div className="flex min-w-0 items-baseline gap-1.5">
                                 <span className="shrink-0 font-mono text-[11px] font-semibold text-muted-foreground">
                                   #{job.prNumber}
                                 </span>
                                 <Link
                                   to={`/jobs/${job.id}`}
-                                  className="truncate font-medium text-foreground underline-offset-2 group-hover:text-primary group-hover:underline"
+                                  className="truncate block text-sm font-medium text-foreground underline-offset-2 group-hover:text-primary group-hover:underline"
                                 >
                                   {job.prTitle ?? 'Untitled PR'}
                                 </Link>

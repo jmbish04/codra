@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import pkg from '../../../package.json';
 import { toast } from 'sonner';
 import { api, type ProviderPayload } from '@client/lib/api';
 import { PageHeader } from '@client/components/layout/page-header';
@@ -21,6 +22,9 @@ import {
   ChevronDown,
   ChevronRight,
   X,
+  Tag,
+  ExternalLink,
+  GitCommit,
 } from 'lucide-react';
 import type { LlmApiFormat, LlmProvider, ModelConfig, RepoConfig } from '@shared/schema';
 import type { ModelConfigsResponse } from '@shared/api';
@@ -1142,7 +1146,7 @@ export function SettingsPage() {
             ))}
           </div>
         ) : (
-          <div className="divide-y divide-border/50">
+          <div className="max-h-[520px] overflow-y-auto divide-y divide-border/50 scroll-smooth [scrollbar-width:thin]">
             {filteredConfigs.map((cfg) => {
               const saved = savedConfigs.find(item => item.modelId === cfg.modelId);
               const dirty = !configEqual(cfg, saved);
@@ -1279,6 +1283,50 @@ export function SettingsPage() {
             )}
           </div>
         )}
+      </SectionCard>
+
+      {/* ── System Information ────────────────────────────────────────────── */}
+      <SectionCard
+        title="System"
+        description="Codra instance details and build information"
+      >
+        <div className="divide-y divide-border/50">
+
+          {/* Version row */}
+          <div className="flex items-center gap-4 px-5 py-4">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Tag size={15} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-foreground">Version</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">Installed Codra release</p>
+            </div>
+            <code className="inline-flex items-center gap-1.5 rounded-lg border border-primary/25 bg-primary/8 px-3.5 py-1.5 text-sm font-bold tracking-tight text-primary">
+              v{pkg.version}
+            </code>
+          </div>
+
+          {/* Changelog / links row */}
+          <div className="flex items-center gap-4 px-5 py-4">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted/60 text-muted-foreground">
+              <GitCommit size={15} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-foreground">Releases</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">Browse all versions and release notes on GitHub</p>
+            </div>
+            <a
+              href="https://github.com/devarshishimpi/codra/releases/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-transparent px-3.5 py-1.5 text-xs font-semibold text-muted-foreground transition-all duration-150 hover:border-primary/40 hover:bg-primary/5 hover:text-primary hover:shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_10%,transparent)]"
+            >
+              View releases
+              <ExternalLink size={11} />
+            </a>
+          </div>
+
+        </div>
       </SectionCard>
     </section>
   );

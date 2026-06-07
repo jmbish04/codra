@@ -16,7 +16,7 @@
 :root {
   /* Surfaces - Pure & Crisp */
   /* Surfaces - High-Contrast */
-  --background:         #ffffff;
+  --background:         #f4f4f5;
   --foreground:         oklch(12%   0.02  115);
   --card:               #ffffff;
   --card-foreground:    oklch(12%   0.02  115);
@@ -27,27 +27,27 @@
   --primary:             oklch(64%   0.24  115);
   --primary-foreground:  oklch(100%  0     0);   /* White text on the deeper green */
 
-  /* Secondary / muted - Subtly cool */
-  --secondary:           oklch(96%   0.006 115);
-  --secondary-foreground:oklch(25%   0.020 115);
-  --muted:               oklch(96%   0.006 115);
-  --muted-foreground:    oklch(44%   0.015 115);
+  /* Secondary / muted - Zinc */
+  --secondary:           #f4f4f5;
+  --secondary-foreground:#27272a;
+  --muted:               #f4f4f5;
+  --muted-foreground:    #71717a;
 
-  /* Accent */
-  --accent:              oklch(94%   0.03  115);
-  --accent-foreground:   oklch(18%   0.016 115);
+  /* Accent - slightly darker zinc for visible hover on white popovers */
+  --accent:              #e4e4e7;
+  --accent-foreground:   #18181b;
 
   /* Destructive */
   --destructive:         oklch(55%   0.22  25);
   --destructive-foreground: oklch(100% 0 0);
 
   /* Border / input / ring */
-  --border:              oklch(88%   0.008 115);
-  --input:               oklch(88%   0.008 115);
+  --border:              #e4e4e7;
+  --input:               #e4e4e7;
   --ring:                oklch(72%   0.22  115);
 
   /* Radius */
-  --radius: 0.5rem;
+  --radius: 0.75rem;
   --sidebar-width: 240px;
   --sidebar-collapsed-width: 72px;
 
@@ -66,9 +66,9 @@
   --info-border:    oklch(88%   0.12  250);
 
   /* Premium Shadows */
-  --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.05);
-  --shadow-md: 0 4px 12px oklch(0% 0 0 / 0.06), 0 1px 4px oklch(0% 0 0 / 0.03);
-  --shadow-lg: 0 12px 24px -4px oklch(0% 0 0 / 0.08), 0 4px 12px -2px oklch(0% 0 0 / 0.04);
+  --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.02);
+  --shadow-md: 0 1px 4px oklch(0% 0 0 / 0.03), 0 1px 2px oklch(0% 0 0 / 0.02);
+  --shadow-lg: 0 4px 16px -4px oklch(0% 0 0 / 0.04), 0 1px 6px -2px oklch(0% 0 0 / 0.03);
 
   /* Code Blocks (Zinc) */
   --code-bg: #f4f4f5;
@@ -173,10 +173,10 @@
   --color-info-bg:        var(--info-bg);
   --color-info-border:    var(--info-border);
 
-  --radius-sm:  2px;
-  --radius-md:  4px;
-  --radius-lg:  8px;
-  --radius-xl:  16px;
+  --radius-sm:  4px;
+  --radius-md:  8px;
+  --radius-lg:  12px;
+  --radius-xl:  18px;
   --radius-2xl: 32px;
 
   /* Fluid Typography Scale (Ratio: 1.25) */
@@ -495,9 +495,8 @@
    Surface & Utilities
 ───────────────────────────────────────────────────── */
 @utility surface {
-  @apply bg-card border border-border rounded-md;
+  @apply bg-card border border-border rounded-xl;
   box-shadow: var(--shadow-md);
-  &:hover { box-shadow: var(--shadow-md); }
 }
 
 .surface-static {
@@ -657,11 +656,13 @@
 }
 
 .app-shell-content {
-  --background: #ffffff;
+  --background: #f4f4f5;
   --card: #ffffff;
-  --muted: #ffffff;
+  --muted: #f4f4f5;
   --popover: #ffffff;
-  --secondary: #ffffff;
+  --secondary: #f4f4f5;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
 }
 
 .dark .app-shell-content {
@@ -670,6 +671,8 @@
   --muted: #09090b;
   --popover: #09090b;
   --secondary: #09090b;
+  --border: oklch(22% 0.02 115);
+  --input: oklch(22% 0.02 115);
 }
 
 .dashboard-sidebar-divider {

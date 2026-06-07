@@ -16,10 +16,10 @@ const DropdownMenuSub = DropdownMenuPrimitive.Sub;
 const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
 
 const menuContentClass =
-  'z-50 min-w-[8rem] overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl shadow-black/10 dark:shadow-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 duration-200';
+  'z-50 min-w-[8rem] overflow-hidden rounded-lg border border-zinc-200 bg-white p-1 text-zinc-900 shadow-lg shadow-black/[0.06] dark:border-border dark:bg-popover dark:text-popover-foreground dark:shadow-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 duration-200';
 
 const menuItemClass =
-  'relative flex cursor-default select-none items-center rounded-md text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground dark:hover:bg-primary/[0.12] dark:focus:bg-primary/[0.12] dark:data-[highlighted]:bg-primary/[0.12] data-[disabled]:pointer-events-none data-[disabled]:opacity-50';
+  'relative flex cursor-default select-none items-center rounded-md text-sm outline-none transition-colors hover:bg-zinc-200 hover:text-zinc-900 focus:bg-zinc-200 focus:text-zinc-900 data-[highlighted]:bg-zinc-200 data-[highlighted]:text-zinc-900 dark:hover:bg-primary/[0.12] dark:hover:text-foreground dark:focus:bg-primary/[0.12] dark:focus:text-foreground dark:data-[highlighted]:bg-primary/[0.12] dark:data-[highlighted]:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50';
 
 const DropdownMenuSubTrigger = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
