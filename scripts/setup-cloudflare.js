@@ -221,7 +221,10 @@ function getEnvVars() {
       if (line.trim() && !line.startsWith('#')) {
         const [key, ...values] = line.split('=');
         if (key && values.length > 0) {
-          env[key.trim()] = values.join('=').trim().replace(/^"|"$/g, '');
+          // Strip surrounding quotes, then unescape literal \n sequences
+          // (wrangler secrets must receive real newlines, not the two chars \ and n)
+          const raw = values.join('=').trim().replace(/^"|"$/g, '');
+          env[key.trim()] = raw.replace(/\\n/g, '\n');
         }
       }
     }
