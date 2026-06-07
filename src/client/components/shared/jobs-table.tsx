@@ -8,7 +8,7 @@ import {
 import { StatusBadge } from '@client/components/ui/badge';
 import { Skeleton } from '@client/components/shared/skeleton';
 import { cn, fmtNumber } from '@client/lib/utils';
-import { useIsDarkMode } from '@client/hooks/use-is-dark-mode';
+
 import type { JobSummary } from '@shared/schema';
 
 type Column =
@@ -199,8 +199,7 @@ function JobMobileCard({ job, columns }: { job: JobSummary; columns: Column[] })
 export function JobsTable({ jobs, loading, columns }: JobsTableProps) {
   const cols: Column[] = columns ?? DEFAULT_COLUMNS;
   const tableMinWidth = cols.length > 7 ? 'min-w-[980px]' : 'min-w-[720px]';
-  const isDark = useIsDarkMode();
-  const itemBg = isDark ? '#09090b' : '#fafafa';
+  const itemBgClass = 'bg-background';
 
   return (
     <div className="min-w-0 max-w-full overflow-hidden">
@@ -275,7 +274,7 @@ export function JobsTable({ jobs, loading, columns }: JobsTableProps) {
                           )}
                         >
                           <div className="flex min-w-0 items-center gap-2.5">
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-xs font-bold text-primary shadow-sm" style={{ backgroundColor: itemBg }}>
+                            <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-xs font-bold text-primary shadow-sm", itemBgClass)}>
                               {job.repo.slice(0, 2).toUpperCase()}
                             </span>
                             <div className="min-w-0">
@@ -410,8 +409,7 @@ export function JobsTable({ jobs, loading, columns }: JobsTableProps) {
                         >
                           <Link
                             to={`/jobs/${job.id}`}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:text-primary hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                            style={{ backgroundColor: itemBg }}
+                            className={cn("inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:text-primary hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2", itemBgClass)}
                             aria-label={`Open job for ${job.owner}/${job.repo} pull request ${job.prNumber}`}
                           >
                             <ArrowUpRight size={14} />

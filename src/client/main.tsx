@@ -51,10 +51,35 @@ function ToasterWrapper() {
   );
 }
 
+class ErrorBoundary extends React.Component<{ fallback?: React.ReactNode, children: React.ReactNode }, { error: Error | null }> {
+  constructor(props: { fallback?: React.ReactNode, children: React.ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
+  }
+  render() {
+    if (this.state.error) {
+      if (this.props.fallback) return this.props.fallback;
+      return (
+        <div className="flex flex-col items-center justify-center p-8 text-destructive">
+          <p className="font-bold">An error occurred rendering this component:</p>
+          <pre className="mt-2 rounded bg-muted p-4 text-xs font-mono">{this.state.error.toString()}</pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const withSuspense = (Component: React.ComponentType, isFullPage = false) => (
-  <Suspense fallback={<div className={`flex items-center justify-center ${isFullPage ? 'h-screen' : 'h-full w-full'}`} />}>
-    <Component />
-  </Suspense>
+  <ErrorBoundary>
+    <Suspense fallback={<div role="status" aria-busy="true" className={`flex items-center justify-center ${isFullPage ? 'h-screen' : 'h-full w-full'}`} />}>
+      <Component />
+    </Suspense>
+  </ErrorBoundary>
 );
 
 const router = createBrowserRouter([

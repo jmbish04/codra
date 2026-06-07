@@ -16,11 +16,11 @@
 :root {
   /* Surfaces - Pure & Crisp */
   /* Surfaces - High-Contrast */
-  --background:         #f4f4f5;
+  --background:         oklch(96.3% 0.003 286.3); /* #f4f4f5 */
   --foreground:         oklch(12%   0.02  115);
-  --card:               #ffffff;
+  --card:               oklch(100%  0     0);     /* #ffffff */
   --card-foreground:    oklch(12%   0.02  115);
-  --popover:            #ffffff;
+  --popover:            oklch(100%  0     0);
   --popover-foreground: oklch(12%   0.02  115);
 
   /* Signature lime - darkened in light mode for AA accessibility on white */
@@ -28,22 +28,22 @@
   --primary-foreground:  oklch(100%  0     0);   /* White text on the deeper green */
 
   /* Secondary / muted - Zinc */
-  --secondary:           #f4f4f5;
-  --secondary-foreground:#27272a;
-  --muted:               #f4f4f5;
-  --muted-foreground:    #71717a;
+  --secondary:           oklch(96.3% 0.003 286.3);
+  --secondary-foreground:oklch(27.4% 0.006 286.3); /* #27272a */
+  --muted:               oklch(96.3% 0.003 286.3);
+  --muted-foreground:    oklch(55.1% 0.011 286.3); /* #71717a */
 
   /* Accent - slightly darker zinc for visible hover on white popovers */
-  --accent:              #e4e4e7;
-  --accent-foreground:   #18181b;
+  --accent:              oklch(90.9% 0.004 286.3); /* #e4e4e7 */
+  --accent-foreground:   oklch(20.5% 0.005 286.3); /* #18181b */
 
   /* Destructive */
   --destructive:         oklch(55%   0.22  25);
   --destructive-foreground: oklch(100% 0 0);
 
   /* Border / input / ring */
-  --border:              #e4e4e7;
-  --input:               #e4e4e7;
+  --border:              oklch(90.9% 0.004 286.3);
+  --input:               oklch(90.9% 0.004 286.3);
   --ring:                oklch(72%   0.22  115);
 
   /* Radius */
@@ -71,9 +71,9 @@
   --shadow-lg: 0 4px 16px -4px oklch(0% 0 0 / 0.04), 0 1px 6px -2px oklch(0% 0 0 / 0.03);
 
   /* Code Blocks (Zinc) */
-  --code-bg: #f4f4f5;
-  --code-fg: #27272a;
-  --code-border: #e4e4e7;
+  --code-bg: oklch(96.3% 0.003 286.3);
+  --code-fg: oklch(27.4% 0.006 286.3);
+  --code-border: oklch(90.9% 0.004 286.3);
 }
 
 /* ─────────────────────────────────────────────────────
@@ -125,9 +125,9 @@
   --shadow-lg: 0 12px 24px -4px oklch(0% 0 0 / 0.5), 0 4px 12px -2px oklch(0% 0 0 / 0.3);
 
   /* Code Blocks (Zinc) */
-  --code-bg: #18181b;
-  --code-fg: #d4d4d8;
-  --code-border: #27272a;
+  --code-bg: oklch(20.5% 0.005 286.3);
+  --code-fg: oklch(86.5% 0.005 286.3);
+  --code-border: oklch(27.4% 0.006 286.3);
 }
 
 /* ─────────────────────────────────────────────────────
@@ -173,11 +173,11 @@
   --color-info-bg:        var(--info-bg);
   --color-info-border:    var(--info-border);
 
-  --radius-sm:  4px;
-  --radius-md:  8px;
-  --radius-lg:  12px;
-  --radius-xl:  18px;
-  --radius-2xl: 32px;
+  --radius-sm:  0.25rem;
+  --radius-md:  0.5rem;
+  --radius-lg:  0.75rem;
+  --radius-xl:  1.125rem;
+  --radius-2xl: 2rem;
 
   /* Fluid Typography Scale (Ratio: 1.25) */
   --text-xs:   0.75rem;
@@ -656,21 +656,21 @@
 }
 
 .app-shell-content {
-  --background: #f4f4f5;
-  --card: #ffffff;
-  --muted: #f4f4f5;
-  --popover: #ffffff;
-  --secondary: #f4f4f5;
-  --border: #e4e4e7;
-  --input: #e4e4e7;
+  --background: oklch(96.3% 0.003 286.3); /* #f4f4f5 */
+  --card: oklch(100% 0 0); /* #ffffff */
+  --muted: oklch(90.9% 0.004 286.3); /* #e4e4e7 */
+  --popover: oklch(100% 0 0);
+  --secondary: oklch(88.5% 0.004 286.3); /* #e2e2e6 */
+  --border: oklch(90.9% 0.004 286.3); /* #e4e4e7 */
+  --input: oklch(90.9% 0.004 286.3); /* #e4e4e7 */
 }
 
 .dark .app-shell-content {
-  --background: #09090b;
-  --card: #09090b;
-  --muted: #09090b;
-  --popover: #09090b;
-  --secondary: #09090b;
+  --background: oklch(18% 0.018 115);
+  --card: oklch(18% 0.018 115);
+  --muted: oklch(22% 0.02 115);
+  --popover: oklch(18% 0.018 115);
+  --secondary: oklch(26% 0.02 115);
   --border: oklch(22% 0.02 115);
   --input: oklch(22% 0.02 115);
 }

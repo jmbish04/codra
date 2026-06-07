@@ -44,6 +44,7 @@ export function Select({
   triggerClassName,
   triggerStyle,
   leadingIcon,
+  variant = 'page',
 }: SelectProps) {
   const selectedOption = options.find((opt) => opt.value === value);
 
@@ -60,6 +61,7 @@ export function Select({
             variant="outline"
             className={cn(
               'h-9 w-full justify-between px-3 py-2 text-sm font-normal transition-all focus-visible:ring-0 focus-visible:ring-offset-0',
+              variant === 'page' ? 'bg-card' : 'bg-muted/50',
               !selectedOption && 'text-muted-foreground',
               triggerClassName,
             )}

@@ -119,6 +119,8 @@ async function requestWithMeta<T>(input: string, init?: RequestInit) {
 }
 
 let updatesEmailPromise: Promise<UpdatesEmailResponse> | null = null;
+let updatesEmailFetchTime = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 export const api = {
   getSession() {
@@ -130,7 +132,9 @@ export const api = {
     });
   },
   getUpdatesEmailStatus() {
-    if (!updatesEmailPromise) {
+    const now = Date.now();
+    if (!updatesEmailPromise || (now - updatesEmailFetchTime > CACHE_TTL)) {
+      updatesEmailFetchTime = now;
       updatesEmailPromise = request<UpdatesEmailResponse>('/api/auth/updates-email').catch((err) => {
         updatesEmailPromise = null;
         throw err;
