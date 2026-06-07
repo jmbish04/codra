@@ -146,6 +146,7 @@ export function AppShell() {
             className={cn(
               'flex min-w-0 items-center gap-2.5 rounded-lg p-1 -m-1',
               'transition-opacity duration-150 hover:opacity-75',
+              !sidebarCollapsed && 'lg:ml-1.5',
               sidebarCollapsed && 'lg:justify-center',
             )}
             aria-label="Codra dashboard"
