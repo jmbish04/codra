@@ -309,6 +309,7 @@ async function ensureModelCatalog() {
       FROM llm_providers provider_record
       WHERE mc.provider_id IS NULL
         AND provider_record.name = 'Cloudflare'
+        AND mc.model_id LIKE '@cf/%'
     `,
   );
 
@@ -487,6 +488,7 @@ async function main() {
 
       console.log('Running catalog and config normalizations...');
       await query('DROP INDEX IF EXISTS repositories_owner_idx');
+      await query('CREATE INDEX IF NOT EXISTS repositories_owner_idx ON repositories (owner)');
       await ensureModelCatalog();
       await normalizeRepoConfigs();
 

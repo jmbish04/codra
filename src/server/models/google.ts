@@ -12,6 +12,32 @@ function isRetryableGeminiStatus(status: number) {
   return status === 408 || status === 500 || status === 502 || status === 503 || status === 504 || status === 524;
 }
 
+function isPrivateIP(hostname: string) {
+  const privateRanges = [
+    /^127\./,
+    /^10\./,
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+    /^192\.168\./,
+    /^169\.254\./,
+    /^localhost$/,
+    /^::1$/,
+  ];
+  return privateRanges.some((regex) => regex.test(hostname));
+}
+
+function isValidPublicUrl(urlString: string) {
+  try {
+    const url = new URL(urlString);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const hostname = url.hostname;
+    if (hostname === 'metadata.google.internal' || hostname === '100.100.100.200') return false;
+    if (isPrivateIP(hostname)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function reviewWithGoogle(
   config: { apiKey: string; baseUrl?: string | null; providerName?: string },
   model: string,
@@ -19,6 +45,11 @@ export async function reviewWithGoogle(
   tracker?: { incrementSubrequests(count?: number): void },
 ): Promise<ModelResponse> {
   logger.info(`Calling Google model: ${model}`);
+  
+  if (config.baseUrl && !isValidPublicUrl(config.baseUrl)) {
+    throw new ProviderRequestError(config.providerName ?? 'Google', 400, 'Invalid provider base URL.');
+  }
+
   const startTime = Date.now();
   const baseUrl = (config.baseUrl || DEFAULT_GEMINI_BASE_URL).replace(/\/+$/, '');
   const url = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(config.apiKey)}`;

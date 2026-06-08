@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { jobsQuerySchema } from '@shared/schema';
+import { defaultRepoConfig, jobsQuerySchema } from '@shared/schema';
 import type { AppEnv } from '@server/env';
 import { bytesToHex, getJobDetail, getJobForProcessing, insertJob, listJobs, mapJob, supersedeOlderJobs } from '@server/db/jobs';
 import { jsonError } from '@server/core/http';
@@ -65,11 +65,17 @@ export function createJobsRouter() {
       return jsonError('Job not found.', 404);
     }
     const source = mapJob(rawSource);
-    const currentConfig = await loadRepoConfig(c.env, {
-      installationId: source.installationId,
-      owner: source.owner,
-      repo: source.repo,
-    });
+    let configSnapshot;
+    try {
+      const currentConfig = await loadRepoConfig(c.env, {
+        installationId: source.installationId,
+        owner: source.owner,
+        repo: source.repo,
+      });
+      configSnapshot = currentConfig?.parsedJson ?? defaultRepoConfig;
+    } catch (e) {
+      configSnapshot = defaultRepoConfig;
+    }
 
     const job = await insertJob(c.env, {
       installationId: source.installationId,
@@ -83,7 +89,7 @@ export function createJobsRouter() {
       trigger: 'retry',
       headRef: rawSource.head_ref,
       baseRef: rawSource.base_ref,
-      configSnapshot: currentConfig.parsedJson,
+      configSnapshot,
       retryOfJobId: source.id,
     });
 

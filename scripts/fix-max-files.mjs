@@ -30,24 +30,12 @@ const sql = postgres(databaseUrl, { onnotice: () => {} });
 
 async function run() {
   try {
-    const rows = await sql`SELECT repository_id, parsed_json FROM repo_configs`;
-    let count = 0;
-    for (const row of rows) {
-      let parsed = row.parsed_json;
-      if (typeof parsed === 'string') {
-        parsed = JSON.parse(parsed);
-      }
-      if (parsed?.review?.max_files === 15) {
-        parsed.review.max_files = 100;
-        await sql`
-          UPDATE repo_configs 
-          SET parsed_json = ${JSON.stringify(parsed)}::jsonb 
-          WHERE repository_id = ${row.repository_id}
-        `;
-        count++;
-      }
-    }
-    console.log(`Updated ${count} repository configurations from 15 to 100.`);
+    const result = await sql`
+      UPDATE repo_configs
+      SET parsed_json = jsonb_set(parsed_json, '{review,max_files}', '100'::jsonb)
+      WHERE parsed_json#>>'{review,max_files}' = '15'
+    `;
+    console.log(`Updated ${result.count} repository configurations from 15 to 100.`);
   } catch (err) {
     console.error(err);
   } finally {

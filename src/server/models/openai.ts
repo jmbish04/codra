@@ -31,18 +31,29 @@ function extractOpenAiText(data: OpenAIResponse) {
   return '';
 }
 
+function isPrivateIP(hostname: string) {
+  const privateRanges = [
+    /^127\./,
+    /^10\./,
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+    /^192\.168\./,
+    /^169\.254\./,
+    /^localhost$/,
+    /^::1$/,
+  ];
+  return privateRanges.some((regex) => regex.test(hostname));
+}
+
 function isValidPublicUrl(urlString: string) {
   try {
     const url = new URL(urlString);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-    // Block common cloud metadata and loopback IPs for SSRF protection
+    
     const hostname = url.hostname;
-    if (
-      hostname === '169.254.169.254' ||
-      hostname === 'metadata.google.internal' ||
-      hostname === '100.100.100.200' ||
-      hostname.startsWith('169.254.')
-    ) {
+    if (hostname === 'metadata.google.internal' || hostname === '100.100.100.200') {
+      return false;
+    }
+    if (isPrivateIP(hostname)) {
       return false;
     }
     return true;

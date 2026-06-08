@@ -443,23 +443,25 @@ async function main() {
   let wranglerConfig = fs.readFileSync(WRANGLER_JSONC_PATH, 'utf-8');
   let configChanged = false;
 
+  const escapeJson = (str) => str.replace(/"/g, '\\"');
+
   const routeRegex = /"routes"\s*:\s*\[[\s\S]*?\]|"workers_dev"\s*:\s*(true|false)/;
   wranglerConfig = wranglerConfig.replace(routeRegex, routesConfigStr);
 
   const appUrlRegex = /"APP_URL":\s*"[^"]+"/;
-  wranglerConfig = wranglerConfig.replace(appUrlRegex, `"APP_URL": "${appUrl}"`);
+  wranglerConfig = wranglerConfig.replace(appUrlRegex, `"APP_URL": "${escapeJson(appUrl)}"`);
 
   const callbackUrlRegex = /"AUTH_CALLBACK_URL":\s*"[^"]+"/;
-  wranglerConfig = wranglerConfig.replace(callbackUrlRegex, `"AUTH_CALLBACK_URL": "${appUrl}/auth/github/callback"`);
+  wranglerConfig = wranglerConfig.replace(callbackUrlRegex, `"AUTH_CALLBACK_URL": "${escapeJson(appUrl)}/auth/github/callback"`);
 
   const botUsernameRegex = /"BOT_USERNAME":\s*"[^"]+"/;
-  wranglerConfig = wranglerConfig.replace(botUsernameRegex, `"BOT_USERNAME": "${botUsername}"`);
+  wranglerConfig = wranglerConfig.replace(botUsernameRegex, `"BOT_USERNAME": "${escapeJson(botUsername)}"`);
 
   const githubAppSlugRegex = /"GITHUB_APP_SLUG":\s*"[^"]+"/;
-  wranglerConfig = wranglerConfig.replace(githubAppSlugRegex, `"GITHUB_APP_SLUG": "${githubAppSlug}"`);
+  wranglerConfig = wranglerConfig.replace(githubAppSlugRegex, `"GITHUB_APP_SLUG": "${escapeJson(githubAppSlug)}"`);
 
   const allowedUsersRegex = /"DASHBOARD_ALLOWED_USERS":\s*"[^"]+"/;
-  wranglerConfig = wranglerConfig.replace(allowedUsersRegex, `"DASHBOARD_ALLOWED_USERS": "${allowedUsers}"`);
+  wranglerConfig = wranglerConfig.replace(allowedUsersRegex, `"DASHBOARD_ALLOWED_USERS": "${escapeJson(allowedUsers)}"`);
 
   configChanged = true;
 

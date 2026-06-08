@@ -27,7 +27,7 @@ async function withRetry<T>(
       attempt++;
       const isSecondaryRateLimit = error instanceof GitHubError && 
         error.status === 403 && 
-        error.body.toLowerCase().includes('secondary rate limit');
+        error.body?.toLowerCase().includes('secondary rate limit');
 
       const isRetryable =
         isSecondaryRateLimit ||

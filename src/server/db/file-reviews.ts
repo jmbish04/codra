@@ -1,6 +1,6 @@
 import type { ParsedReviewComment } from '@shared/schema';
 import type { AppBindings } from '@server/env';
-import { parseJsonColumn, queryRows } from './client';
+import { parseJsonColumn, queryRows, queryTransaction } from './client';
 
 export async function insertFileReview(
   env: Pick<AppBindings, 'HYPERDRIVE'>,
@@ -24,73 +24,71 @@ export async function insertFileReview(
     errorMessage: string | null;
   },
 ) {
-  const [review] = await queryRows<{ id: string }>(
-    env,
-    `
-      INSERT INTO file_reviews (
-        job_id,
-        file_path,
-        file_status,
-        model_used,
-        diff_line_count,
-        diff_input,
-        raw_ai_output,
-        input_tokens,
-        output_tokens,
-        duration_ms,
-        verdict,
-        file_summary,
-        overall_correctness,
-        confidence_score,
-        error_msg,
-        model_provider
-      )
-      VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-      RETURNING id
-    `,
-    [
-      input.jobId,
-      input.filePath,
-      input.fileStatus,
-      input.modelUsed,
-      input.diffLineCount,
-      input.diffInput,
-      input.rawAiOutput,
-      input.inputTokens,
-      input.outputTokens,
-      input.durationMs,
-      input.verdict,
-      input.fileSummary,
-      input.overallCorrectness ?? null,
-      input.confidenceScore ?? null,
-      input.errorMessage,
-      input.modelProvider ?? null,
-    ],
-  );
-
-  if (input.parsedComments.length > 0) {
-    // Insert comments
-    // Using simple loop or unnest, unnest is more efficient for batch insert
-    const paths = input.parsedComments.map(c => c.path);
-    const lines = input.parsedComments.map(c => c.line ?? null);
-    const positions = input.parsedComments.map(c => c.position ?? null);
-    const severities = input.parsedComments.map(c => c.severity);
-    const categories = input.parsedComments.map(c => c.category);
-    const titles = input.parsedComments.map(c => c.title);
-    const bodies = input.parsedComments.map(c => c.body);
-    const codeSuggestions = input.parsedComments.map(c => c.codeSuggestion ?? null);
-
-    await queryRows(
-      env,
+  await queryTransaction(env, async (tx) => {
+    const [review] = await tx.query<{ id: string }>(
       `
-        INSERT INTO review_comments (
-          file_review_id, path, line, position, severity, category, title, body, code_suggestion
+        INSERT INTO file_reviews (
+          job_id,
+          file_path,
+          file_status,
+          model_used,
+          diff_line_count,
+          diff_input,
+          raw_ai_output,
+          input_tokens,
+          output_tokens,
+          duration_ms,
+          verdict,
+          file_summary,
+          overall_correctness,
+          confidence_score,
+          error_msg,
+          model_provider
         )
-        SELECT $1::uuid, * FROM UNNEST($2::text[], $3::int[], $4::int[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[])
+        VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        RETURNING id
       `,
-      [review.id, paths, lines, positions, severities, categories, titles, bodies, codeSuggestions]
+      [
+        input.jobId,
+        input.filePath,
+        input.fileStatus,
+        input.modelUsed,
+        input.diffLineCount,
+        input.diffInput,
+        input.rawAiOutput,
+        input.inputTokens,
+        input.outputTokens,
+        input.durationMs,
+        input.verdict,
+        input.fileSummary,
+        input.overallCorrectness ?? null,
+        input.confidenceScore ?? null,
+        input.errorMessage,
+        input.modelProvider ?? null,
+      ],
     );
-  }
+
+    if (input.parsedComments.length > 0) {
+      const paths = input.parsedComments.map(c => c.path);
+      const lines = input.parsedComments.map(c => c.line ?? null);
+      const positions = input.parsedComments.map(c => c.position ?? null);
+      const severities = input.parsedComments.map(c => c.severity);
+      const categories = input.parsedComments.map(c => c.category);
+      const titles = input.parsedComments.map(c => c.title);
+      const bodies = input.parsedComments.map(c => c.body);
+      const codeSuggestions = input.parsedComments.map(c => c.codeSuggestion ?? null);
+
+      await tx.query(
+        `
+          INSERT INTO review_comments (
+            file_review_id, path, line, position, severity, category, title, body, code_suggestion
+          )
+          SELECT $1::uuid, * FROM UNNEST($2::text[], $3::int[], $4::int[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[])
+        `,
+        [review.id, paths, lines, positions, severities, categories, titles, bodies, codeSuggestions]
+      );
+    }
+  });
 }
 
 export async function upsertFileReview(
@@ -115,90 +113,90 @@ export async function upsertFileReview(
     errorMessage: string | null;
   },
 ) {
-  const [review] = await queryRows<{ id: string }>(
-    env,
-    `
-      INSERT INTO file_reviews (
-        job_id,
-        file_path,
-        file_status,
-        model_used,
-        diff_line_count,
-        diff_input,
-        raw_ai_output,
-        input_tokens,
-        output_tokens,
-        duration_ms,
-        verdict,
-        file_summary,
-        overall_correctness,
-        confidence_score,
-        error_msg,
-        model_provider
-      )
-      VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-      ON CONFLICT (job_id, file_path) DO UPDATE SET
-        file_status = EXCLUDED.file_status,
-        model_used = EXCLUDED.model_used,
-        diff_line_count = EXCLUDED.diff_line_count,
-        diff_input = EXCLUDED.diff_input,
-        raw_ai_output = EXCLUDED.raw_ai_output,
-        input_tokens = EXCLUDED.input_tokens,
-        output_tokens = EXCLUDED.output_tokens,
-        duration_ms = EXCLUDED.duration_ms,
-        verdict = EXCLUDED.verdict,
-        file_summary = EXCLUDED.file_summary,
-        overall_correctness = EXCLUDED.overall_correctness,
-        confidence_score = EXCLUDED.confidence_score,
-        error_msg = EXCLUDED.error_msg,
-        model_provider = EXCLUDED.model_provider,
-        transient_error_count = 0
-      RETURNING id
-    `,
-    [
-      jobId,
-      input.filePath,
-      input.fileStatus,
-      input.modelUsed,
-      input.diffLineCount,
-      input.diffInput,
-      input.rawAiOutput,
-      input.inputTokens,
-      input.outputTokens,
-      input.durationMs,
-      input.verdict,
-      input.fileSummary,
-      input.overallCorrectness ?? null,
-      input.confidenceScore ?? null,
-      input.errorMessage,
-      input.modelProvider ?? null,
-    ],
-  );
-
-  await queryRows(env, 'DELETE FROM review_comments WHERE file_review_id = $1::uuid', [review.id]);
-
-  if (input.parsedComments.length > 0) {
-    await queryRows(
-      env,
+  await queryTransaction(env, async (tx) => {
+    const [review] = await tx.query<{ id: string }>(
       `
-        INSERT INTO review_comments (
-          file_review_id, path, line, position, severity, category, title, body, code_suggestion
+        INSERT INTO file_reviews (
+          job_id,
+          file_path,
+          file_status,
+          model_used,
+          diff_line_count,
+          diff_input,
+          raw_ai_output,
+          input_tokens,
+          output_tokens,
+          duration_ms,
+          verdict,
+          file_summary,
+          overall_correctness,
+          confidence_score,
+          error_msg,
+          model_provider
         )
-        SELECT $1::uuid, * FROM UNNEST($2::text[], $3::int[], $4::int[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[])
+        VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        ON CONFLICT (job_id, file_path) DO UPDATE SET
+          file_status = EXCLUDED.file_status,
+          model_used = EXCLUDED.model_used,
+          diff_line_count = EXCLUDED.diff_line_count,
+          diff_input = EXCLUDED.diff_input,
+          raw_ai_output = EXCLUDED.raw_ai_output,
+          input_tokens = EXCLUDED.input_tokens,
+          output_tokens = EXCLUDED.output_tokens,
+          duration_ms = EXCLUDED.duration_ms,
+          verdict = EXCLUDED.verdict,
+          file_summary = EXCLUDED.file_summary,
+          overall_correctness = EXCLUDED.overall_correctness,
+          confidence_score = EXCLUDED.confidence_score,
+          error_msg = EXCLUDED.error_msg,
+          model_provider = EXCLUDED.model_provider,
+          transient_error_count = 0
+        RETURNING id
       `,
       [
-        review.id,
-        input.parsedComments.map(c => c.path),
-        input.parsedComments.map(c => c.line ?? null),
-        input.parsedComments.map(c => c.position ?? null),
-        input.parsedComments.map(c => c.severity),
-        input.parsedComments.map(c => c.category),
-        input.parsedComments.map(c => c.title),
-        input.parsedComments.map(c => c.body),
-        input.parsedComments.map(c => c.codeSuggestion ?? null),
+        jobId,
+        input.filePath,
+        input.fileStatus,
+        input.modelUsed,
+        input.diffLineCount,
+        input.diffInput,
+        input.rawAiOutput,
+        input.inputTokens,
+        input.outputTokens,
+        input.durationMs,
+        input.verdict,
+        input.fileSummary,
+        input.overallCorrectness ?? null,
+        input.confidenceScore ?? null,
+        input.errorMessage,
+        input.modelProvider ?? null,
       ],
     );
-  }
+
+    await tx.query('DELETE FROM review_comments WHERE file_review_id = $1::uuid', [review.id]);
+
+    if (input.parsedComments.length > 0) {
+      await tx.query(
+        `
+          INSERT INTO review_comments (
+            file_review_id, path, line, position, severity, category, title, body, code_suggestion
+          )
+          SELECT $1::uuid, * FROM UNNEST($2::text[], $3::int[], $4::int[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[])
+        `,
+        [
+          review.id,
+          input.parsedComments.map(c => c.path),
+          input.parsedComments.map(c => c.line ?? null),
+          input.parsedComments.map(c => c.position ?? null),
+          input.parsedComments.map(c => c.severity),
+          input.parsedComments.map(c => c.category),
+          input.parsedComments.map(c => c.title),
+          input.parsedComments.map(c => c.body),
+          input.parsedComments.map(c => c.codeSuggestion ?? null),
+        ],
+      );
+    }
+  });
 }
 
 export async function recordRetryableFileReviewFailure(
@@ -214,61 +212,62 @@ export async function recordRetryableFileReviewFailure(
     errorMessage: string;
   },
 ) {
-  const [review] = await queryRows<{ id: string; transient_error_count: number }>(
-    env,
-    `
-      INSERT INTO file_reviews (
-        job_id,
-        file_path,
-        file_status,
-        model_used,
-        model_provider,
-        diff_line_count,
-        diff_input,
-        raw_ai_output,
-        input_tokens,
-        output_tokens,
-        duration_ms,
-        verdict,
-        file_summary,
-        overall_correctness,
-        confidence_score,
-        error_msg,
-        transient_error_count
-      )
-      VALUES ($1::uuid, $2, 'failed', $3, $4, $5, $6, NULL, NULL, NULL, $7, NULL, NULL, NULL, NULL, $8, 1)
-      ON CONFLICT (job_id, file_path) DO UPDATE SET
-        file_status = 'failed',
-        model_used = EXCLUDED.model_used,
-        model_provider = EXCLUDED.model_provider,
-        diff_line_count = EXCLUDED.diff_line_count,
-        diff_input = EXCLUDED.diff_input,
-        raw_ai_output = NULL,
-        input_tokens = NULL,
-        output_tokens = NULL,
-        duration_ms = EXCLUDED.duration_ms,
-        verdict = NULL,
-        file_summary = NULL,
-        overall_correctness = NULL,
-        confidence_score = NULL,
-        error_msg = EXCLUDED.error_msg,
-        transient_error_count = file_reviews.transient_error_count + 1
-      RETURNING id, transient_error_count
-    `,
-    [
-      jobId,
-      input.filePath,
-      input.modelUsed,
-      input.modelProvider ?? null,
-      input.diffLineCount,
-      input.diffInput,
-      input.durationMs,
-      input.errorMessage,
-    ],
-  );
+  return await queryTransaction(env, async (tx) => {
+    const [review] = await tx.query<{ id: string; transient_error_count: number }>(
+      `
+        INSERT INTO file_reviews (
+          job_id,
+          file_path,
+          file_status,
+          model_used,
+          model_provider,
+          diff_line_count,
+          diff_input,
+          raw_ai_output,
+          input_tokens,
+          output_tokens,
+          duration_ms,
+          verdict,
+          file_summary,
+          overall_correctness,
+          confidence_score,
+          error_msg,
+          transient_error_count
+        )
+        VALUES ($1::uuid, $2, 'failed', $3, $4, $5, $6, NULL, NULL, NULL, $7, NULL, NULL, NULL, NULL, $8, 1)
+        ON CONFLICT (job_id, file_path) DO UPDATE SET
+          file_status = 'failed',
+          model_used = EXCLUDED.model_used,
+          model_provider = EXCLUDED.model_provider,
+          diff_line_count = EXCLUDED.diff_line_count,
+          diff_input = EXCLUDED.diff_input,
+          raw_ai_output = NULL,
+          input_tokens = NULL,
+          output_tokens = NULL,
+          duration_ms = EXCLUDED.duration_ms,
+          verdict = NULL,
+          file_summary = NULL,
+          overall_correctness = NULL,
+          confidence_score = NULL,
+          error_msg = EXCLUDED.error_msg,
+          transient_error_count = file_reviews.transient_error_count + 1
+        RETURNING id, transient_error_count
+      `,
+      [
+        jobId,
+        input.filePath,
+        input.modelUsed,
+        input.modelProvider ?? null,
+        input.diffLineCount,
+        input.diffInput,
+        input.durationMs,
+        input.errorMessage,
+      ],
+    );
 
-  await queryRows(env, 'DELETE FROM review_comments WHERE file_review_id = $1::uuid', [review.id]);
-  return review.transient_error_count;
+    await tx.query('DELETE FROM review_comments WHERE file_review_id = $1::uuid', [review.id]);
+    return review.transient_error_count;
+  });
 }
 
 export async function getModelUsageStats(env: Pick<AppBindings, 'HYPERDRIVE'>) {
@@ -336,84 +335,83 @@ export async function batchInsertFileReviews(
   const errorMessages = reviews.map(r => r.errorMessage);
   const modelProviders = reviews.map(r => r.modelProvider ?? null);
 
-  const insertedRows = await queryRows<{ id: string; file_path: string }>(
-    env,
-    `
-      INSERT INTO file_reviews (
-        job_id, file_path, file_status, model_used, diff_line_count, diff_input,
-        raw_ai_output, input_tokens, output_tokens, duration_ms, verdict,
-        file_summary, overall_correctness, confidence_score, error_msg, model_provider
-      )
-      SELECT $1::uuid, * FROM UNNEST(
-        $2::text[], $3::text[], $4::text[], $5::int[], $6::text[],
-        $7::text[], $8::int[], $9::int[], $10::int[], $11::text[],
-        $12::text[], $13::text[], $14::real[], $15::text[], $16::text[]
-      )
-      RETURNING id, file_path
-    `,
-    [
-      jobId, filePaths, fileStatuses, modelsUsed, diffLineCounts, diffInputs,
-      rawAiOutputs, inputTokens, outputTokens, durationMs, verdicts,
-      fileSummaries, overallCorrectness, confidenceScores, errorMessages, modelProviders
-    ]
-  );
-
-  // 2. Prepare and insert comments for all reviews
-  const allComments: Array<{
-    fileReviewId: string;
-    path: string;
-    line: number | null;
-    position: number | null;
-    severity: string;
-    category: string;
-    title: string;
-    body: string;
-    codeSuggestion: string | null;
-  }> = [];
-
-  for (const review of reviews) {
-    const inserted = insertedRows.find(r => r.file_path === review.filePath);
-    if (!inserted || review.parsedComments.length === 0) continue;
-
-    for (const comment of review.parsedComments) {
-      allComments.push({
-        fileReviewId: inserted.id,
-        path: comment.path,
-        line: comment.line ?? null,
-        position: comment.position ?? null,
-        severity: comment.severity,
-        category: comment.category,
-        title: comment.title,
-        body: comment.body,
-        codeSuggestion: comment.codeSuggestion ?? null,
-      });
-    }
-  }
-
-  if (allComments.length > 0) {
-    await queryRows(
-      env,
+  await queryTransaction(env, async (tx) => {
+    const insertedRows = await tx.query<{ id: string; file_path: string }>(
       `
-        INSERT INTO review_comments (
-          file_review_id, path, line, position, severity, category, title, body, code_suggestion
+        INSERT INTO file_reviews (
+          job_id, file_path, file_status, model_used, diff_line_count, diff_input,
+          raw_ai_output, input_tokens, output_tokens, duration_ms, verdict,
+          file_summary, overall_correctness, confidence_score, error_msg, model_provider
         )
-        SELECT * FROM UNNEST(
-          $1::uuid[], $2::text[], $3::int[], $4::int[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[]
+        SELECT $1::uuid, * FROM UNNEST(
+          $2::text[], $3::text[], $4::text[], $5::int[], $6::text[],
+          $7::text[], $8::int[], $9::int[], $10::int[], $11::text[],
+          $12::text[], $13::text[], $14::real[], $15::text[], $16::text[]
         )
+        RETURNING id, file_path
       `,
       [
-        allComments.map(c => c.fileReviewId),
-        allComments.map(c => c.path),
-        allComments.map(c => c.line),
-        allComments.map(c => c.position),
-        allComments.map(c => c.severity),
-        allComments.map(c => c.category),
-        allComments.map(c => c.title),
-        allComments.map(c => c.body),
-        allComments.map(c => c.codeSuggestion),
+        jobId, filePaths, fileStatuses, modelsUsed, diffLineCounts, diffInputs,
+        rawAiOutputs, inputTokens, outputTokens, durationMs, verdicts,
+        fileSummaries, overallCorrectness, confidenceScores, errorMessages, modelProviders
       ]
     );
-  }
+
+    const allComments: Array<{
+      fileReviewId: string;
+      path: string;
+      line: number | null;
+      position: number | null;
+      severity: string;
+      category: string;
+      title: string;
+      body: string;
+      codeSuggestion: string | null;
+    }> = [];
+
+    for (const review of reviews) {
+      const inserted = insertedRows.find(r => r.file_path === review.filePath);
+      if (!inserted || review.parsedComments.length === 0) continue;
+
+      for (const comment of review.parsedComments) {
+        allComments.push({
+          fileReviewId: inserted.id,
+          path: comment.path,
+          line: comment.line ?? null,
+          position: comment.position ?? null,
+          severity: comment.severity,
+          category: comment.category,
+          title: comment.title,
+          body: comment.body,
+          codeSuggestion: comment.codeSuggestion ?? null,
+        });
+      }
+    }
+
+    if (allComments.length > 0) {
+      await tx.query(
+        `
+          INSERT INTO review_comments (
+            file_review_id, path, line, position, severity, category, title, body, code_suggestion
+          )
+          SELECT * FROM UNNEST(
+            $1::uuid[], $2::text[], $3::int[], $4::int[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[]
+          )
+        `,
+        [
+          allComments.map(c => c.fileReviewId),
+          allComments.map(c => c.path),
+          allComments.map(c => c.line),
+          allComments.map(c => c.position),
+          allComments.map(c => c.severity),
+          allComments.map(c => c.category),
+          allComments.map(c => c.title),
+          allComments.map(c => c.body),
+          allComments.map(c => c.codeSuggestion),
+        ]
+      );
+    }
+  });
 }
 
 
