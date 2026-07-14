@@ -1,230 +1,274 @@
 {
-  "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "codra",
-  "main": "./src/server/index.ts",
-  "compatibility_date": "2026-04-16",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
-  "routes": [
-    {
-      "pattern": "app.codra.devarshi.dev",
-      "custom_domain": true
-    }
-  ],
-  "observability": {
-    "enabled": true,
-    "head_sampling_rate": 1,
-    "logs": {
-      "enabled": true,
-      "invocation_logs": true
-    },
-    "traces": {
-      "enabled": true
-    }
-  },
-  "ai": {
-    "binding": "AI",
-    "remote": true
-  },
-  "hyperdrive": [
-    {
-      "binding": "HYPERDRIVE",
-      "id": "35b282fa80f24e67adfda063c3a839d1"
-    }
-  ],
-  "kv_namespaces": [
-    {
-      "binding": "APP_KV",
-      "id": "f5f88c23f1f14342b2ec2c733470921b",
-      "preview_id": "9f2cdc0fdf8d4c868ae2754f66b839b8"
-    }
-  ],
-  "queues": {
-    "producers": [
-      {
-        "binding": "REVIEW_QUEUE",
-        "queue": "codra-review-jobs"
-      }
-    ],
-    "consumers": [
-      {
-        "queue": "codra-review-jobs",
-        "dead_letter_queue": "codra-review-dlq",
-        "max_batch_size": 1,
-        "max_batch_timeout": 5,
-        "max_concurrency": 1,
-        "visibility_timeout_ms": 900000,
-        "retry_delay": 60,
-        "max_retries": 3
-      }
-    ]
-  },
-  "assets": {
-    "directory": "./dist/client",
-    "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": [
-      "/",
-      "/login",
-      "/dashboard*",
-      "/jobs*",
-      "/repos*",
-      "/stats*",
-      "/health*",
-      "/api/*",
-      "/auth/*",
-      "/webhook*",
-      "/settings*"
-    ]
-  },
-  "secrets": {
-    "required": [
-      "APP_PRIVATE_KEY",
-      "GITHUB_APP_ID",
-      "GITHUB_APP_WEBHOOK_SECRET",
-      "GITHUB_CLIENT_ID",
-      "GITHUB_CLIENT_SECRET",
-      "LLM_CONFIG_ENCRYPTION_KEY",
-      "CF_API_TOKEN",
-      "CF_ACCOUNT_ID"
-    ]
-  },
-  "vars": {
-    "APP_URL": "https://app.codra.devarshi.dev",
-    "AUTH_CALLBACK_URL": "https://app.codra.devarshi.dev/auth/github/callback",
-    "BOT_USERNAME": "codra-app",
-    "GITHUB_APP_SLUG": "codra-app-personal",
-    "DASHBOARD_ALLOWED_USERS": "devarshishimpi",
-    "ENVIRONMENT": "production",
-    "CF_DLQ_ID": "ed6f5472cbd146f49ce94d3004eddb0f"
-  },
-"secrets_store_secrets": [
-    {
-      "binding": "GITHUB_CLIENT_ID",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CORE_GITHUB_API_GITHUB_CLIENT_ID"
-    },
-    {
-      "binding": "GITHUB_CLIENT_SECRET",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CORE_GITHUB_API_GITHUB_SECRET"
-    },
-    {
-      "binding": "GITHUB_APP_ID",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CORE_GITHUB_API_GITHUB_APP_ID"
-    },
-    {
-      "binding": "CORE_GITHUB_API_GITHUB_APP_PRIVATE_KEY_PT1",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CORE_GITHUB_API_GITHUB_APP_PRIVATE_KEY_PT1"
-    },
-    {
-      "binding": "CORE_GITHUB_API_GITHUB_APP_PRIVATE_KEY_PT2",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CORE_GITHUB_API_GITHUB_APP_PRIVATE_KEY_PT2"
-    },
-    {
-      "binding": "CORE_GITHUB_API_GITHUB_APP_PRIVATE_KEY_PT3",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CORE_GITHUB_API_GITHUB_APP_PRIVATE_KEY_PT3"
-    },
-    {
-      "binding": "GITHUB_TOKEN",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GH_TOKEN"
-    },
-    {
-      "binding": "CLOUDFLARE_ACCOUNT_ID",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_ACCOUNT_ID",
-      "remote": true
-    },
-    {
-      "binding": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
-      "remote": true
-    },
-    {
-      "binding": "CF_IMAGES_TOKEN",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
-      "remote": true
-    },
-    {
-      "binding": "CLOUDFLARE_WRANGLER_API_TOKEN",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_WRANGLER_API_TOKEN",
-      "remote": true
-    },
-    {
-      "binding": "WORKER_API_KEY",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "WORKER_API_KEY",
-      "remote": true
-    },
-    {
-      "binding": "AI_GATEWAY_TOKEN",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_AI_GATEWAY_TOKEN",
-      "remote": true
-    },
-    {
-      "binding": "CF_BROWSER_RENDER_TOKEN",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_BROWSER_RENDER_TOKEN",
-      "remote": true
-    },
-    {
-      "binding": "JULES_API_KEY",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "JULES_API_KEY",
-      "remote": true
-    },
-    {
-      "binding": "GEMINI_API_KEY",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_API_KEY",
-      "remote": true
-    },
-    {
-      "binding": "CLICKUP_TOKEN",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLICKUP_TOKEN",
-      "remote": true
-    },
-    {
-      "binding": "CLICKUP_TEAM_ID",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLICKUP_TEAM_ID",
-      "remote": true
-    },
-    {
-      // Gmail comms hub (P3-07): service-account DWD. The private key exceeds
-      // the secrets-store value limit, so it is SPLIT — concatenate PT_1 + PT_2.
-      "binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
-      "remote": true
-    },
-    {
-      "binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2",
-      "remote": true
-    },
-    {
-      "binding": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
-      "remote": true
-    },
-  ],
-
-
-
-
-
+	"name": "codra",
+	"main": "./src/server/index.ts",
+	"compatibility_date": "2026-07-08",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"workers_dev": true,
+	"preview_urls": true,
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 1,
+		"logs": {
+			"enabled": true,
+			"invocation_logs": true,
+		},
+		"traces": {
+			"enabled": true,
+		},
+	},
+	"ai": {
+		"binding": "AI",
+	},
+	"browser": {
+		"binding": "BROWSER",
+	},
+	"worker_loaders": [
+		{
+			"binding": "LOADER"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "RepoAgent",
+				"class_name": "RepoAgent"
+			},
+			{
+				"name": "Chat",
+				"class_name": "Chat"
+			},
+			{
+				"name": "ReviewAgent",
+				"class_name": "ReviewAgent"
+			},
+			{
+				"name": "GitHubLikeMCP",
+				"class_name": "GitHubLikeMCP"
+			},
+			{
+				"name": "PrReviewStream",
+				"class_name": "PrReviewStream"
+			},
+		],
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"RepoAgent",
+				"Chat",
+				"ReviewAgent",
+				"GitHubLikeMCP",
+			],
+		},
+		{
+			"tag": "v2",
+			"new_sqlite_classes": [
+				"PrReviewStream"
+			],
+		},
+	],
+	"queues": {
+		"producers": [
+			{
+				"binding": "REVIEW_QUEUE",
+				"queue": "codra-review-jobs",
+			},
+		],
+		"consumers": [
+			{
+				"queue": "codra-review-jobs",
+				"dead_letter_queue": "codra-review-dlq",
+				"max_batch_size": 1,
+				"max_batch_timeout": 5,
+				"max_concurrency": 1,
+				"visibility_timeout_ms": 900000,
+				"retry_delay": 60,
+				"max_retries": 3,
+			},
+		],
+	},
+	"assets": {
+		"directory": "./dist/client",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": [
+			"/",
+			"/login",
+			"/dashboard*",
+			"/jobs*",
+			"/repos*",
+			"/stats*",
+			"/health*",
+			"/api/*",
+			"/auth/*",
+			"/webhook*",
+			"/settings*",
+			"/best-practices*",
+			"/.well-known/*",
+			"/oauth/*",
+			"/mcp*"
+		],
+	},
+	"secrets": {
+		"required": [
+			"APP_PRIVATE_KEY",
+			"LLM_CONFIG_ENCRYPTION_KEY",
+			"GITHUB_CLIENT_ID",
+			"GITHUB_CLIENT_SECRET",
+			"GITHUB_APP_ID"
+		],
+	},
+	"vars": {
+		"APP_URL": "https://codra.hacolby.workers.dev",
+		"AUTH_CALLBACK_URL": "https://codra.hacolby.workers.dev/auth/github/callback",
+		"BOT_USERNAME": "codra",
+		"GITHUB_APP_SLUG": "codra-app-personal",
+		"DASHBOARD_ALLOWED_USERS": "jmbish04",
+		"ENVIRONMENT": "production",
+		"CF_DLQ_ID": "",
+		"STANDARDIZATION_REPO": "jmbish04/core-github-standardization",
+		"AI_GATEWAY_ID": "codra",
+	},
+	"secrets_store_secrets": [
+		{
+			"binding": "CORE_GITHUB_API_GITHUB_APP_PRIVATE_KEY_PT1",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "CORE_GITHUB_API_GITHUB_APP_PRIVATE_KEY_PT1",
+		},
+		{
+			"binding": "CORE_GITHUB_API_GITHUB_APP_PRIVATE_KEY_PT2",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "CORE_GITHUB_API_GITHUB_APP_PRIVATE_KEY_PT2",
+		},
+		{
+			"binding": "CORE_GITHUB_API_GITHUB_APP_PRIVATE_KEY_PT3",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "CORE_GITHUB_API_GITHUB_APP_PRIVATE_KEY_PT3",
+		},
+		{
+			"binding": "GITHUB_TOKEN",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "GH_TOKEN",
+		},
+		{
+			"binding": "CF_ACCOUNT_ID",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "CLOUDFLARE_ACCOUNT_ID",
+		},
+		{
+			"binding": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
+		},
+		{
+			"binding": "CF_API_TOKEN",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "CLOUDFLARE_WRANGLER_API_TOKEN",
+		},
+		{
+			"binding": "WORKER_API_KEY",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "WORKER_API_KEY",
+		},
+		{
+			"binding": "AI_GATEWAY_TOKEN",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "CLOUDFLARE_AI_GATEWAY_TOKEN",
+		},
+		{
+			"binding": "CF_BROWSER_RENDER_TOKEN",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "CLOUDFLARE_BROWSER_RENDER_TOKEN",
+		},
+		{
+			"binding": "JULES_API_KEY",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "JULES_API_KEY",
+		},
+		{
+			"binding": "GEMINI_API_KEY",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "GOOGLE_API_KEY",
+		},
+		{
+			"binding": "ANTHROPIC_API_KEY",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "ANTHROPIC_API_KEY",
+		},
+		{
+			"binding": "OPENAI_API_KEY",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "OPENAI_API_KEY",
+		},
+		{
+			"binding": "CLICKUP_TOKEN",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "CLICKUP_TOKEN",
+		},
+		{
+			"binding": "CLICKUP_TEAM_ID",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "CLICKUP_TEAM_ID",
+		},
+		{
+			// Gmail comms hub (P3-07): service-account DWD. The private key exceeds
+			// the secrets-store value limit, so it is SPLIT — concatenate PT_1 + PT_2.
+			"binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
+		},
+		{
+			"binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2",
+		},
+		{
+			"binding": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
+			"store_id": "8c42fa70938644e0a8a109744467375f",
+			"secret_name": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
+		},
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "codra",
+			"database_id": "f8ff86ca-a45e-428f-b5b2-80c8e427e924",
+			"migrations_dir": "./db/migrations/d1",
+		},
+	],
+	"kv_namespaces": [
+		{
+			"binding": "APP_KV",
+			"id": "e28cad0ff8cf4929a0138fb5141960ab",
+		},
+		{
+			"binding": "PROMPTS_KV",
+			"id": "b66e31f7f0ac42d7b84b525d12b71d99",
+			"remote": true
+		},
+	],
+	"services": [
+		{
+			"binding": "EDGRAPH",
+			"service": "core-github-api-edgraph"
+		}
+	],
+	"rules": [
+		{
+			"type": "Text",
+			"globs": [
+				"**/*.md",
+				"**/*.md?raw"
+			],
+			"fallthrough": true
+		}
+	],
+	"triggers": {
+		"crons": [
+			"0 */6 * * *"
+		]
+	}
 }

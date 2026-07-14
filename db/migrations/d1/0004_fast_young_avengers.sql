@@ -1,0 +1,1 @@
+ALTER TABLE `jobs` ADD `status_comment_id` integer;

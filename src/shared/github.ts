@@ -1,4 +1,4 @@
-export const supportedGitHubWebhookEvents = ['pull_request', 'issue_comment'] as const;
+export const supportedGitHubWebhookEvents = ['pull_request', 'issue_comment', 'star', 'watch', 'fork'] as const;
 
 export type GitHubWebhookEventName = typeof supportedGitHubWebhookEvents[number];
 
@@ -38,8 +38,61 @@ export type IssueCommentWebhookPayload = {
     };
   };
   comment: {
+    id: number;
     body: string;
   };
 };
 
-export type GitHubWebhookPayload = PullRequestWebhookPayload | IssueCommentWebhookPayload;
+export type StarWebhookPayload = {
+  action: 'created' | 'deleted';
+  installation?: { id: number };
+  repository: {
+    id: number;
+    full_name: string;
+    language?: string | null;
+    topics?: string[];
+    stargazers_count?: number;
+    owner: { login: string };
+    name: string;
+  };
+};
+
+export type WatchWebhookPayload = {
+  action: 'started';
+  installation?: { id: number };
+  repository: {
+    id: number;
+    full_name: string;
+    language?: string | null;
+    topics?: string[];
+    stargazers_count?: number;
+    owner: { login: string };
+    name: string;
+  };
+};
+
+export type ForkWebhookPayload = {
+  installation?: { id: number };
+  forkee: {
+    id: number;
+    full_name: string;
+    language?: string | null;
+    topics?: string[];
+    stargazers_count?: number;
+    owner: { login: string };
+    name: string;
+  };
+  repository: {
+    id: number;
+    full_name: string;
+    owner: { login: string };
+    name: string;
+  };
+};
+
+export type GitHubWebhookPayload = 
+  | PullRequestWebhookPayload 
+  | IssueCommentWebhookPayload
+  | StarWebhookPayload
+  | WatchWebhookPayload
+  | ForkWebhookPayload;
