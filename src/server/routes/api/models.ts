@@ -17,7 +17,8 @@ import {
 } from '@server/db/model-configs';
 import { jsonError } from '@server/core/http';
 import { getGlobalConfig, updateGlobalConfig } from '@server/core/config';
-import { encryptLlmApiKey, decryptLlmApiKey } from '@server/core/llm-crypto';
+import { encryptLlmApiKey, decryptLlmApiKey, resolveLlmApiKey } from '@server/core/llm-crypto';
+import { getSecretStoreBinding } from '@server/utils/secrets';
 import { llmApiFormats } from '@shared/schema';
 import { reviewWithCloudflare } from '@server/models/cloudflare';
 import { reviewWithGoogle } from '@server/models/google';
@@ -109,13 +110,23 @@ function providerErrorStatus(error: ProviderRequestError) {
   return error.status >= 500 ? 502 : error.status;
 }
 
-function providerCanBeEnabled(apiFormat: z.infer<typeof apiFormatSchema>, encryptedApiKey: string | null | undefined) {
-  return apiFormat === 'cloudflare-workers-ai' || Boolean(encryptedApiKey);
+function providerCanBeEnabled(apiFormat: z.infer<typeof apiFormatSchema>, encryptedApiKey: string | null | undefined, env?: any) {
+  const hasBinding = env && (
+    (apiFormat === 'gemini' && env.GEMINI_API_KEY) ||
+    (apiFormat === 'openai' && env.OPENAI_API_KEY) ||
+    (apiFormat === 'anthropic' && env.ANTHROPIC_API_KEY)
+  );
+  return apiFormat === 'cloudflare-workers-ai' || Boolean(encryptedApiKey) || Boolean(hasBinding);
 }
 
-function optionalEnv(value: () => string) {
+async function optionalSecret(secret: SecretsStoreSecret | string | undefined): Promise<string | undefined> {
   try {
-    const resolved = value().trim();
+    if (!secret) return undefined;
+    if (typeof secret === 'string') {
+      const trimmed = secret.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    }
+    const resolved = (await secret.get()).trim();
     return resolved.length > 0 ? resolved : undefined;
   } catch {
     return undefined;
@@ -130,20 +141,34 @@ async function syncProviderModelCatalog(env: AppEnv['Bindings']) {
     if (!provider.enabled) {
       return;
     }
-    if (provider.apiFormat !== 'cloudflare-workers-ai' && !provider.encryptedApiKey) {
+    let hasSecretStoreBinding = false;
+    try {
+      if (provider.apiFormat === 'gemini' && env.GEMINI_API_KEY) {
+        await getSecretStoreBinding(env, 'GEMINI_API_KEY');
+        hasSecretStoreBinding = true;
+      }
+      if (provider.apiFormat === 'openai' && env.OPENAI_API_KEY) {
+        await getSecretStoreBinding(env, 'OPENAI_API_KEY');
+        hasSecretStoreBinding = true;
+      }
+      if (provider.apiFormat === 'anthropic' && env.ANTHROPIC_API_KEY) {
+        await getSecretStoreBinding(env, 'ANTHROPIC_API_KEY');
+        hasSecretStoreBinding = true;
+      }
+    } catch {}
+
+    if (provider.apiFormat !== 'cloudflare-workers-ai' && !provider.encryptedApiKey && !hasSecretStoreBinding) {
       return;
     }
 
     try {
-      const apiKey = provider.encryptedApiKey
-        ? await decryptLlmApiKey(env, provider.encryptedApiKey)
-        : undefined;
+      const apiKey = await resolveLlmApiKey(env, provider.apiFormat, provider.encryptedApiKey) ?? undefined;
       const modelNames = await listProviderModels({
         apiFormat: provider.apiFormat,
         baseUrl: provider.baseUrl,
         apiKey,
-        cloudflareAccountId: optionalEnv(() => env.CF_ACCOUNT_ID),
-        cloudflareApiToken: optionalEnv(() => env.CF_API_TOKEN),
+        cloudflareAccountId: await optionalSecret(env.CF_ACCOUNT_ID),
+        cloudflareApiToken: await optionalSecret(env.CF_API_TOKEN),
       });
       await upsertDiscoveredModelConfigs(env, {
         providerId: provider.id,
@@ -223,7 +248,7 @@ export function createModelsRouter() {
       throw error;
     }
 
-    if (input.enabled && !providerCanBeEnabled(input.apiFormat, encryptedApiKey)) {
+    if (input.enabled && !providerCanBeEnabled(input.apiFormat, encryptedApiKey, c.env)) {
       return jsonError(`Provider ${input.name} needs an API key before it can be enabled.`, 400);
     }
 
@@ -276,7 +301,8 @@ export function createModelsRouter() {
     const effectiveEncryptedApiKey = encryptedApiKey !== undefined
       ? encryptedApiKey
       : existing.encryptedApiKey;
-    if (input.enabled && !providerCanBeEnabled(input.apiFormat, effectiveEncryptedApiKey)) {
+    const effectiveApiFormat = input.apiFormat ?? existing.apiFormat;
+    if (input.enabled && !providerCanBeEnabled(effectiveApiFormat, effectiveEncryptedApiKey, c.env)) {
       return jsonError(`Provider ${input.name} needs an API key before it can be enabled.`, 400);
     }
 

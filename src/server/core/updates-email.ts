@@ -1,4 +1,3 @@
-import type { AppBindings } from '@server/env';
 
 const EMAILS_API_URL = 'https://codra.run/api/emails';
 
@@ -13,21 +12,21 @@ function updatesEmailKey(githubUserId: number) {
 }
 
 export async function getUpdatesEmailPreference(
-  env: Pick<AppBindings, 'APP_KV'>,
+  env: Pick<Env, 'APP_KV'>,
   githubUserId: number,
 ) {
   return await env.APP_KV.get(updatesEmailKey(githubUserId), 'json') as UpdatesEmailRecord | null;
 }
 
 export async function hasUpdatesEmailPreference(
-  env: Pick<AppBindings, 'APP_KV'>,
+  env: Pick<Env, 'APP_KV'>,
   githubUserId: number,
 ) {
   return Boolean(await getUpdatesEmailPreference(env, githubUserId));
 }
 
 export async function syncUpdatesEmail(
-  env: Pick<AppBindings, 'APP_KV'>,
+  env: Pick<Env, 'APP_KV'>,
   githubUserId: number,
   email: string | null | undefined,
 ) {

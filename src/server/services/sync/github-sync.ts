@@ -66,15 +66,20 @@ export async function syncStarredRepos(env: Env) {
 
   await markAllReposUnstarred(env);
 
-  for (const repo of repos) {
-    await upsertRepo(env, {
-      github_id: repo.id,
-      full_name: repo.full_name,
-      language: repo.language,
-      topics: repo.topics,
-      is_starred: true,
-      stargazers_count: repo.stargazers_count,
-    });
+  // Chunk processing into batches of 10 to avoid concurrent write limits in D1
+  const chunkSize = 10;
+  for (let i = 0; i < repos.length; i += chunkSize) {
+    const chunk = repos.slice(i, i + chunkSize);
+    await Promise.all(chunk.map((repo: any) => 
+      upsertRepo(env, {
+        github_id: repo.id,
+        full_name: repo.full_name,
+        language: repo.language,
+        topics: repo.topics,
+        is_starred: true,
+        stargazers_count: repo.stargazers_count,
+      })
+    ));
   }
   
   logger.info(`Synced ${repos.length} starred repos.`);
@@ -89,15 +94,20 @@ export async function syncWatchedRepos(env: Env) {
 
   await markAllReposUnwatched(env);
 
-  for (const repo of repos) {
-    await upsertRepo(env, {
-      github_id: repo.id,
-      full_name: repo.full_name,
-      language: repo.language,
-      topics: repo.topics,
-      is_watched: true,
-      stargazers_count: repo.stargazers_count,
-    });
+  // Chunk processing into batches of 10 to avoid concurrent write limits in D1
+  const chunkSize = 10;
+  for (let i = 0; i < repos.length; i += chunkSize) {
+    const chunk = repos.slice(i, i + chunkSize);
+    await Promise.all(chunk.map((repo: any) => 
+      upsertRepo(env, {
+        github_id: repo.id,
+        full_name: repo.full_name,
+        language: repo.language,
+        topics: repo.topics,
+        is_watched: true,
+        stargazers_count: repo.stargazers_count,
+      })
+    ));
   }
   
   logger.info(`Synced ${repos.length} watched repos.`);
@@ -112,15 +122,18 @@ export async function syncFollowing(env: Env) {
 
   await markAllUsersUnfollowed(env);
 
-  for (const user of users) {
-    // Note: the following endpoint only gives minimal user info (no followers_count or bio).
-    // A full sync might require fetching each user, but this is enough to track the relationship.
-    await upsertUser(env, {
-      github_id: user.id,
-      login: user.login,
-      avatar_url: user.avatar_url,
-      is_following: true,
-    });
+  // Chunk processing into batches of 10 to avoid concurrent write limits in D1
+  const chunkSize = 10;
+  for (let i = 0; i < users.length; i += chunkSize) {
+    const chunk = users.slice(i, i + chunkSize);
+    await Promise.all(chunk.map((user: any) => 
+      upsertUser(env, {
+        github_id: user.id,
+        login: user.login,
+        avatar_url: user.avatar_url,
+        is_following: true,
+      })
+    ));
   }
   
   logger.info(`Synced ${users.length} following users.`);

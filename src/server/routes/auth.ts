@@ -3,6 +3,7 @@ import type { AppEnv } from '@server/env';
 import { createOAuthState, consumeOAuthState, parseAllowedUsers } from '@server/core/oauth';
 import { createSession, destroySession } from '@server/core/sessions';
 import { exchangeGitHubOAuthCode, fetchGitHubOAuthProfile, toDashboardSessionUser } from '@server/core/github-oauth';
+import { getSecret } from '@server/utils/secrets';
 
 function redirectToLogin(reason: string) {
   const params = new URLSearchParams({ error: reason });
@@ -13,9 +14,11 @@ export function createAuthRouter() {
   const app = new Hono<AppEnv>();
 
   app.get('/github', async (c) => {
-    const state = await createOAuthState(c.env);
+    const next = c.req.query('next');
+    const state = await createOAuthState(c.env, { next });
+    const clientId = getSecret(c.env, 'GITHUB_CLIENT_ID');
     const url = new URL('https://github.com/login/oauth/authorize');
-    url.searchParams.set('client_id', c.env.GITHUB_CLIENT_ID);
+    url.searchParams.set('client_id', clientId);
     url.searchParams.set('redirect_uri', c.env.AUTH_CALLBACK_URL);
     url.searchParams.set('scope', 'read:user');
     url.searchParams.set('state', state);
@@ -35,8 +38,8 @@ export function createAuthRouter() {
       return c.redirect(redirectToLogin('invalid_callback'), 302);
     }
 
-    const stateMatches = await consumeOAuthState(c.env, state);
-    if (!stateMatches) {
+    const stateData = await consumeOAuthState(c.env, state);
+    if (!stateData) {
       return c.redirect(redirectToLogin('invalid_state'), 302);
     }
 
@@ -51,7 +54,9 @@ export function createAuthRouter() {
 
       await destroySession(c);
       await createSession(c, toDashboardSessionUser(profile));
-      return c.redirect('/dashboard', 302);
+      
+      const nextUrl = stateData.next || '/dashboard';
+      return c.redirect(nextUrl, 302);
     } catch {
       return c.redirect(redirectToLogin('oauth_failed'), 302);
     }

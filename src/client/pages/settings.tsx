@@ -672,26 +672,27 @@ export function SettingsPage() {
         description="Manage LLM providers, model routing, and usage limits."
       />
 
-      {error && (
-        <Alert variant="destructive">
-          <ShieldAlert className="h-4 w-4" />
-          <span className="ml-2 text-sm font-medium">{error}</span>
-        </Alert>
-      )}
 
-      {syncErrors.length > 0 && (
-        <Alert variant="warning">
-          <div className="space-y-0.5">
-            <p className="font-semibold text-sm">Some provider catalogs could not refresh</p>
-            <p className="text-xs opacity-75">
-              {syncErrors.map(item => `${item.providerName}: ${item.error}`).join(' · ')}
-            </p>
-          </div>
-        </Alert>
-      )}
+          {error && (
+            <Alert variant="destructive">
+              <ShieldAlert className="h-4 w-4" />
+              <span className="ml-2 text-sm font-medium">{error}</span>
+            </Alert>
+          )}
 
-      {/* ── LLM Providers ──────────────────────────────────────────────────── */}
-      <section className="surface min-w-0 overflow-hidden">
+          {syncErrors.length > 0 && (
+            <Alert variant="warning">
+              <div className="space-y-0.5">
+                <p className="font-semibold text-sm">Some provider catalogs could not refresh</p>
+                <p className="text-xs opacity-75">
+                  {syncErrors.map(item => `${item.providerName}: ${item.error}`).join(' · ')}
+                </p>
+              </div>
+            </Alert>
+          )}
+
+          {/* ── LLM Providers ──────────────────────────────────────────────────── */}
+          <section className="surface min-w-0 overflow-hidden">
 
         {/* Header */}
         <div className="flex items-center justify-between gap-4 border-b border-border px-4 py-4 sm:px-5">

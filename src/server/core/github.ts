@@ -1,6 +1,6 @@
-import type { AppBindings } from '@server/env';
 import { withTimeout } from '@server/core/timeout';
 import { logger } from '@server/core/logger';
+import { getSecret } from '@server/utils/secrets';
 
 export class GitHubError extends Error {
   constructor(
@@ -168,14 +168,14 @@ async function createGitHubJwt(appId: string, privateKeyPem: string) {
   return `${header}.${payload}.${signatureString}`;
 }
 
-async function readCachedInstallationToken(env: Pick<AppBindings, 'APP_KV'>, installationId: string, tracker?: { incrementSubrequests(count?: number): void }) {
+async function readCachedInstallationToken(env: Pick<Env, 'APP_KV'>, installationId: string, tracker?: { incrementSubrequests(count?: number): void }) {
   if (tracker) tracker.incrementSubrequests(1);
   const cached = await env.APP_KV.get(installationCacheKey(installationId), 'json');
   return cached as InstallationTokenCacheRecord | null;
 }
 
 async function writeCachedInstallationToken(
-  env: Pick<AppBindings, 'APP_KV'>,
+  env: Pick<Env, 'APP_KV'>,
   installationId: string,
   record: InstallationTokenCacheRecord,
   tracker?: { incrementSubrequests(count?: number): void },
@@ -189,7 +189,7 @@ async function writeCachedInstallationToken(
 export class GitHubClient {
   constructor(
     private readonly env: Pick<
-      AppBindings,
+      Env,
       'APP_KV' | 'APP_PRIVATE_KEY' | 'GITHUB_APP_ID' | 'BOT_USERNAME'
     >,
     private readonly installationId: string,
@@ -203,7 +203,8 @@ export class GitHubClient {
     }
 
     return withRetry('getInstallationToken', async () => {
-      const jwt = await createGitHubJwt(this.env.GITHUB_APP_ID, this.env.APP_PRIVATE_KEY);
+      const appId = getSecret(this.env, 'GITHUB_APP_ID');
+      const jwt = await createGitHubJwt(appId, this.env.APP_PRIVATE_KEY);
 
       const response = await withTimeout('GitHub installation token', GITHUB_TIMEOUT_MS, (signal) =>
         fetch(`https://api.github.com/app/installations/${this.installationId}/access_tokens`, {
@@ -239,10 +240,11 @@ export class GitHubClient {
   }
 
   static async listInstallations(
-    env: Pick<AppBindings, 'APP_PRIVATE_KEY' | 'GITHUB_APP_ID' | 'BOT_USERNAME'>,
+    env: Pick<Env, 'APP_PRIVATE_KEY' | 'GITHUB_APP_ID' | 'BOT_USERNAME'>,
   ): Promise<GitHubInstallation[]> {
     return withRetry('listInstallations', async () => {
-      const jwt = await createGitHubJwt(env.GITHUB_APP_ID, env.APP_PRIVATE_KEY);
+      const appId = getSecret(env, 'GITHUB_APP_ID');
+      const jwt = await createGitHubJwt(appId, env.APP_PRIVATE_KEY);
       const response = await withTimeout('GitHub list installations', GITHUB_TIMEOUT_MS, (signal) =>
         fetch('https://api.github.com/app/installations', {
           signal,
@@ -270,7 +272,7 @@ export class GitHubClient {
   }
 
   static async getAppInstallationUrl(
-    env: Pick<AppBindings, 'APP_KV' | 'APP_PRIVATE_KEY' | 'GITHUB_APP_ID' | 'BOT_USERNAME' | 'GITHUB_APP_SLUG'>,
+    env: Pick<Env, 'APP_KV' | 'APP_PRIVATE_KEY' | 'GITHUB_APP_ID' | 'BOT_USERNAME' | 'GITHUB_APP_SLUG'>,
   ): Promise<string> {
     const configuredSlug = normalizeGitHubAppSlug(env.GITHUB_APP_SLUG);
     if (configuredSlug) {
@@ -283,7 +285,8 @@ export class GitHubClient {
     }
 
     return withRetry('getAppInstallationUrl', async () => {
-      const jwt = await createGitHubJwt(env.GITHUB_APP_ID, env.APP_PRIVATE_KEY);
+      const appId = getSecret(env, 'GITHUB_APP_ID');
+      const jwt = await createGitHubJwt(appId, env.APP_PRIVATE_KEY);
       const response = await withTimeout('GitHub app lookup', GITHUB_TIMEOUT_MS, (signal) =>
         fetch('https://api.github.com/app', {
           signal,
@@ -427,31 +430,101 @@ export class GitHubClient {
     });
   }
 
-  async createCheckRun(
+  async getRepoFileWithRefOrNull(owner: string, repo: string, path: string, ref?: string) {
+    return withRetry(`getRepoFileWithRefOrNull ${owner}/${repo}/${path}`, async () => {
+      let urlPath = `${repoApiPath(owner, repo)}/contents/${encodeGitHubContentPath(path)}`;
+      if (ref) {
+        urlPath += `?ref=${encodeURIComponent(ref)}`;
+      }
+      const response = await this.request(urlPath);
+      if (response.status === 404) {
+        return null;
+      }
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new GitHubError(
+          response.status,
+          errText,
+          path,
+          `GitHub repo file fetch failed with ${response.status}: ${errText}`,
+        );
+      }
+
+      const data = (await response.json()) as { content?: string; encoding?: string; sha?: string };
+      if (!data.content) {
+        return { content: null, sha: data.sha };
+      }
+
+      const content = data.encoding === 'base64' ? atob(data.content.replace(/\n/g, '')) : data.content;
+      return { content, sha: data.sha };
+    });
+  }
+
+  async createOrUpdateFileContents(
     owner: string,
     repo: string,
-    input: { headSha: string; title: string; summary: string; detailsUrl?: string },
+    path: string,
+    input: { message: string; content: string; sha?: string; branch?: string }
   ) {
-    return withRetry(`createCheckRun ${owner}/${repo}`, async () => {
-      const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/check-runs`, {
-        method: 'POST',
+    return withRetry(`createOrUpdateFileContents ${owner}/${repo}/${path}`, async () => {
+      // Content must be base64-encoded
+      const base64Content = btoa(unescape(encodeURIComponent(input.content)));
+      const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/contents/${encodeGitHubContentPath(path)}`, {
+        method: 'PUT',
         headers: {
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          name: 'Codra',
-          head_sha: input.headSha,
-          status: 'in_progress',
-          details_url: input.detailsUrl,
-          output: {
-            title: input.title,
-            summary: input.summary,
-          },
+          message: input.message,
+          content: base64Content,
+          sha: input.sha,
+          branch: input.branch,
         }),
       });
-
-      return (await response.json()) as { id: number };
+      return await response.json();
     });
+  }
+
+  async getRepoTree(owner: string, repo: string, sha: string) {
+    return withRetry(`getRepoTree ${owner}/${repo} at ${sha}`, async () => {
+      const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/git/trees/${sha}?recursive=1`);
+      return (await response.json()) as { tree: Array<{ path: string; type: 'blob' | 'tree'; size?: number }> };
+    });
+  }
+
+  async createCheckRun(
+    owner: string,
+    repo: string,
+    input: { headSha: string; title: string; summary: string; detailsUrl?: string },
+  ): Promise<{ id: number | null }> {
+    try {
+      return await withRetry(`createCheckRun ${owner}/${repo}`, async () => {
+        const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/check-runs`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: 'Codra',
+            head_sha: input.headSha,
+            status: 'in_progress',
+            details_url: input.detailsUrl,
+            output: {
+              title: input.title,
+              summary: input.summary,
+            },
+          }),
+        });
+
+        return (await response.json()) as { id: number };
+      });
+    } catch (err) {
+      if (err instanceof GitHubError && err.status === 403) {
+        logger.warn(`Failed to create GitHub check run (403 Forbidden). The GitHub App may not have "Checks: Read & Write" permission enabled. Skipping check run updates: ${err.message}`);
+        return { id: null };
+      }
+      throw err;
+    }
   }
 
   async updateCheckRun(
@@ -464,24 +537,32 @@ export class GitHubClient {
       status?: 'in_progress' | 'completed';
       conclusion?: 'success' | 'neutral' | 'failure';
     },
-  ) {
-    return withRetry(`updateCheckRun ${owner}/${repo} ${checkRunId}`, async () => {
-      await this.requestAndCheck(`${repoApiPath(owner, repo)}/check-runs/${checkRunId}`, {
-        method: 'PATCH',
-        headers: {
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          status: input.status ?? 'in_progress',
-          conclusion: input.conclusion,
-          completed_at: input.status === 'completed' ? new Date().toISOString() : undefined,
-          output: {
-            title: input.title,
-            summary: input.summary,
+  ): Promise<void> {
+    try {
+      await withRetry(`updateCheckRun ${owner}/${repo} ${checkRunId}`, async () => {
+        await this.requestAndCheck(`${repoApiPath(owner, repo)}/check-runs/${checkRunId}`, {
+          method: 'PATCH',
+          headers: {
+            'content-type': 'application/json',
           },
-        }),
+          body: JSON.stringify({
+            status: input.status ?? 'in_progress',
+            conclusion: input.conclusion,
+            completed_at: input.status === 'completed' ? new Date().toISOString() : undefined,
+            output: {
+              title: input.title,
+              summary: input.summary,
+            },
+          }),
+        });
       });
-    });
+    } catch (err) {
+      if (err instanceof GitHubError && err.status === 403) {
+        logger.warn(`Failed to update GitHub check run (403 Forbidden). Skipping check run update: ${err.message}`);
+        return;
+      }
+      throw err;
+    }
   }
 
   async createReview(
@@ -644,6 +725,123 @@ export class GitHubClient {
           `GitHub label removal failed with ${response.status}: ${errText}`,
         );
       }
+    });
+  }
+
+  async createIssueComment(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    body: string
+  ): Promise<{ id: number }> {
+    return withRetry(`createIssueComment ${owner}/${repo}#${issueNumber}`, async () => {
+      const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/issues/${issueNumber}/comments`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ body }),
+      });
+      return await response.json() as { id: number };
+    });
+  }
+
+  async updateIssueComment(
+    owner: string,
+    repo: string,
+    commentId: number,
+    body: string,
+  ): Promise<void> {
+    return withRetry(`updateIssueComment ${owner}/${repo} comment ${commentId}`, async () => {
+      await this.requestAndCheck(`${repoApiPath(owner, repo)}/issues/comments/${commentId}`, {
+        method: 'PATCH',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ body }),
+      });
+    });
+  }
+
+   async createIssueCommentReaction(
+    owner: string,
+    repo: string,
+    commentId: number,
+    content: 'eyes' | 'rocket' | 'heart' | '+1' | '-1' | 'laugh' | 'confused' | 'hooray',
+  ) {
+    return withRetry(`createIssueCommentReaction ${owner}/${repo} comment ${commentId}`, async () => {
+      await this.requestAndCheck(`${repoApiPath(owner, repo)}/issues/comments/${commentId}/reactions`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'Accept': 'application/vnd.github+json',
+        },
+        body: JSON.stringify({ content }),
+      });
+    });
+  }
+
+  async getRepo(owner: string, repo: string) {
+    return withRetry(`getRepo ${owner}/${repo}`, async () => {
+      const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}`);
+      return (await response.json()) as { default_branch: string; full_name: string };
+    });
+  }
+
+  async getRef(owner: string, repo: string, ref: string) {
+    return withRetry(`getRef ${owner}/${repo} ${ref}`, async () => {
+      const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/git/ref/${encodeURIComponent(ref)}`);
+      return (await response.json()) as { object: { sha: string } };
+    });
+  }
+
+  async createBranch(owner: string, repo: string, branchName: string, fromSha: string) {
+    return withRetry(`createBranch ${owner}/${repo} ${branchName}`, async () => {
+      const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/git/refs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ref: `refs/heads/${branchName}`,
+          sha: fromSha,
+        }),
+      });
+      return (await response.json()) as { ref: string; object: { sha: string } };
+    });
+  }
+
+  async createPullRequest(
+    owner: string,
+    repo: string,
+    params: { title: string; body: string; head: string; base: string },
+  ) {
+    return withRetry(`createPullRequest ${owner}/${repo}`, async () => {
+      const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/pulls`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: params.title,
+          body: params.body,
+          head: params.head,
+          base: params.base,
+        }),
+      });
+      return (await response.json()) as { number: number; html_url: string };
+    });
+  }
+
+  async listPullRequests(
+    owner: string,
+    repo: string,
+    params: { state?: 'open' | 'closed' | 'all'; head?: string; base?: string; per_page?: number },
+  ) {
+    return withRetry(`listPullRequests ${owner}/${repo}`, async () => {
+      const query = new URLSearchParams();
+      if (params.state) query.set('state', params.state);
+      if (params.head) query.set('head', params.head);
+      if (params.base) query.set('base', params.base);
+      if (params.per_page) query.set('per_page', String(params.per_page));
+      const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/pulls?${query.toString()}`);
+      return (await response.json()) as Array<{ number: number; title: string; head: { ref: string } }>;
     });
   }
 }

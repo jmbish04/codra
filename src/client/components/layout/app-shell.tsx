@@ -15,6 +15,10 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  PenTool,
+  BookOpen,
+  Terminal,
+  BookMarked,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
 import { useTheme } from '@client/lib/theme';
@@ -33,6 +37,10 @@ const links = [
   { to: '/jobs', label: 'Jobs', icon: Activity, end: false },
   { to: '/repos', label: 'Repos', icon: GitBranch, end: false },
   { to: '/stats', label: 'Stats', icon: BarChart2, end: false },
+  { to: '/prompts', label: 'Prompts', icon: PenTool, end: false },
+  { to: '/best-practices', label: 'Best Practices', icon: BookMarked, end: false },
+  { to: '/setup', label: 'Setup Guide', icon: BookOpen, end: false },
+  { to: '/commands', label: 'Commands', icon: Terminal, end: false },
   { to: '/settings', label: 'Settings', icon: Settings, end: false },
 ];
 

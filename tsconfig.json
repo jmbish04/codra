@@ -7,8 +7,9 @@
     "paths": {
       "@client/*": ["./src/client/*"],
       "@server/*": ["./src/server/*"],
+      "@/backend/*": ["./src/server/*"],
       "@shared/*": ["./src/shared/*"],
-      "@/*": ["./src/client/*"]
+      "@/*": ["./src/*"]
     },
     "jsx": "react-jsx",
     "strict": true,
@@ -18,11 +19,9 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "types": ["vite/client", "node", "vitest/globals"]
+    "types": ["vite/client", "vitest/globals"]
   },
   "include": [
-    "worker-configuration.d.ts",
     "src/server/worker-env.d.ts",
     "vite.config.ts",
     "vitest.config.mts",

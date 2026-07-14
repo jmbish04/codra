@@ -1,6 +1,7 @@
 import { logger } from '@server/core/logger';
 import { withTimeout } from '@server/core/timeout';
 import { ProviderRequestError, providerErrorMessage, type ModelResponse } from './types';
+import { REVIEW_RESPONSE_SCHEMA } from './schemas';
 
 const OPENAI_TIMEOUT_MS = 180_000;
 const OPENAI_MAX_OUTPUT_TOKENS = 4096;
@@ -96,7 +97,14 @@ export async function reviewWithOpenAI(
         ],
         temperature: 0,
         max_tokens: OPENAI_MAX_OUTPUT_TOKENS,
-        response_format: { type: 'json_object' },
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'codra_file_review',
+            strict: true,
+            schema: REVIEW_RESPONSE_SCHEMA,
+          },
+        },
       }),
     }),
   );

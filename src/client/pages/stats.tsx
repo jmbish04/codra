@@ -34,6 +34,7 @@ import { usePolling } from '@client/hooks/use-polling';
 import { api } from '@client/lib/api';
 import { fmtNumber } from '@client/lib/utils';
 import type { StatsPayload } from '@shared/schema';
+import { AiUsage } from '@client/components/features/ai-usage';
 
 const CHART = {
   primary: '#84cc16',
@@ -443,6 +444,7 @@ function ReviewFlowSkeleton() {
 
 export function StatsPage() {
   const [stats, setStats] = useState<StatsPayload | null>(null);
+  const [usageLogs, setUsageLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -452,8 +454,12 @@ export function StatsPage() {
   const load = async (manual = false) => {
     if (manual) setRefreshing(true);
     try {
-      const res = await api.getStats(days);
-      setStats(res.stats);
+      const [statsRes, usageRes] = await Promise.all([
+        api.getStats(days),
+        api.getApiUsage(),
+      ]);
+      setStats(statsRes.stats);
+      setUsageLogs(usageRes.logs || []);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load stats.');
@@ -464,6 +470,73 @@ export function StatsPage() {
   };
 
   usePolling(load, 30_000, [days]);
+
+  // Process API usage logs
+  const usageStats = {
+    totalRequests: usageLogs.length,
+    avgLatency: usageLogs.reduce((sum, log) => sum + log.prompt_tokens, 0),
+    errorRate: usageLogs.reduce((sum, log) => sum + log.completion_tokens, 0),
+    activeUsers: usageLogs.reduce((sum, log) => sum + log.total_tokens, 0),
+  };
+
+  const groupedUsageMap = new Map<string, {
+    endpoint: string;
+    method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+    requests: number;
+    avgLatency: number;
+    errorRate: number;
+    trend: "up" | "down" | "stable";
+    trendPercent: number;
+  }>();
+
+  for (const log of usageLogs) {
+    const key = `${log.provider}:${log.model}:${log.source}`;
+    let method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" = "POST";
+    const pLower = log.provider.toLowerCase();
+    if (pLower.includes('google') || pLower.includes('gemini')) {
+      method = "GET";
+    } else if (pLower.includes('anthropic') || pLower.includes('claude')) {
+      method = "PATCH";
+    } else if (pLower.includes('cloudflare')) {
+      method = "PUT";
+    } else if (log.source === 'gateway') {
+      method = "DELETE";
+    }
+
+    const existing = groupedUsageMap.get(key);
+    const label = `${log.model} (${log.source})`;
+    if (existing) {
+      existing.requests += 1;
+      existing.avgLatency += log.prompt_tokens;
+      existing.errorRate += log.completion_tokens;
+    } else {
+      groupedUsageMap.set(key, {
+        endpoint: label,
+        method,
+        requests: 1,
+        avgLatency: log.prompt_tokens,
+        errorRate: log.completion_tokens,
+        trend: "stable",
+        trendPercent: 0,
+      });
+    }
+  }
+
+  const processedEndpoints = Array.from(groupedUsageMap.values()).sort(
+    (a, b) => b.avgLatency + b.errorRate - (a.avgLatency + a.errorRate)
+  );
+
+  const devtoolsLabels = {
+    totalRequests: "Total Requests",
+    avgLatency: "Input Tokens",
+    errorRate: "Output Tokens",
+    activeUsers: "Total Tokens",
+    endpoint: "Model (Source)",
+    requests: "Requests",
+    latency: "Input Tokens",
+    errors: "Output Tokens",
+    trend: "Trend",
+  };
 
   return (
     <section className="page-enter flex flex-col gap-6">
@@ -487,6 +560,19 @@ export function StatsPage() {
         <>
           <ReviewFlowCard stats={stats} days={days} isDark={isDark} />
           <GraphCardGallery stats={stats} days={days} isDark={isDark} />
+          
+          <div className="mt-4">
+            <AiUsage
+              badge={{ label: "LLM API Analytics", variant: "outline" }}
+              heading="API Usage & Tokens"
+              description="Track prompt and completion token consumption tracked locally and synced from Cloudflare AI Gateway."
+              period={`Last ${days} days`}
+              stats={usageStats}
+              endpoints={processedEndpoints}
+              labels={devtoolsLabels}
+              className="py-6 md:py-8"
+            />
+          </div>
         </>
       ) : (
         loading && <ReviewFlowSkeleton />

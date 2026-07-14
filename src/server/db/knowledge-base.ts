@@ -33,13 +33,13 @@ export async function upsertRepo(env: Pick<Env, 'DB'>, data: {
     target: kb_repos.github_id,
     set: {
       full_name: data.full_name,
-      language: data.language ?? sql`${kb_repos.language}`,
-      topics: data.topics ? JSON.stringify(data.topics) : sql`${kb_repos.topics}`,
-      is_starred: data.is_starred ?? sql`${kb_repos.is_starred}`,
-      is_watched: data.is_watched ?? sql`${kb_repos.is_watched}`,
-      is_forked_by_me: data.is_forked_by_me ?? sql`${kb_repos.is_forked_by_me}`,
-      stargazers_count: data.stargazers_count ?? sql`${kb_repos.stargazers_count}`,
-      starred_at: data.starred_at ?? sql`${kb_repos.starred_at}`,
+      language: data.language !== undefined ? data.language : sql`${kb_repos.language}`,
+      topics: data.topics !== undefined ? (data.topics ? JSON.stringify(data.topics) : '[]') : sql`${kb_repos.topics}`,
+      is_starred: data.is_starred !== undefined ? data.is_starred : sql`${kb_repos.is_starred}`,
+      is_watched: data.is_watched !== undefined ? data.is_watched : sql`${kb_repos.is_watched}`,
+      is_forked_by_me: data.is_forked_by_me !== undefined ? data.is_forked_by_me : sql`${kb_repos.is_forked_by_me}`,
+      stargazers_count: data.stargazers_count !== undefined ? data.stargazers_count : sql`${kb_repos.stargazers_count}`,
+      starred_at: data.starred_at !== undefined ? data.starred_at : sql`${kb_repos.starred_at}`,
       updated_at: now,
     }
   }).returning();
@@ -81,10 +81,10 @@ export async function upsertUser(env: Pick<Env, 'DB'>, data: {
     target: kb_users.github_id,
     set: {
       login: data.login,
-      avatar_url: data.avatar_url ?? sql`${kb_users.avatar_url}`,
-      bio: data.bio ?? sql`${kb_users.bio}`,
-      is_following: data.is_following ?? sql`${kb_users.is_following}`,
-      followers_count: data.followers_count ?? sql`${kb_users.followers_count}`,
+      avatar_url: data.avatar_url !== undefined ? data.avatar_url : sql`${kb_users.avatar_url}`,
+      bio: data.bio !== undefined ? data.bio : sql`${kb_users.bio}`,
+      is_following: data.is_following !== undefined ? data.is_following : sql`${kb_users.is_following}`,
+      followers_count: data.followers_count !== undefined ? data.followers_count : sql`${kb_users.followers_count}`,
       updated_at: now,
     }
   }).returning();

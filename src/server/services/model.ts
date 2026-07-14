@@ -1,4 +1,3 @@
-import type { AppBindings } from '../env';
 import { reviewWithGoogle } from '../models/google';
 import { reviewWithCloudflare } from '../models/cloudflare';
 import { reviewWithOpenAI } from '../models/openai';
@@ -13,7 +12,10 @@ import type { ModelResponse } from '../models/types';
 import { logger } from '../core/logger';
 import { normalizeModelId } from '@shared/schema';
 import { getResolvedModelConfig, type ResolvedModelConfig } from '@server/db/model-configs';
-import { decryptLlmApiKey } from '@server/core/llm-crypto';
+import { decryptLlmApiKey, resolveLlmApiKey } from '@server/core/llm-crypto';
+import { getMatchingBestPractices, convertPlateToMarkdown } from '@server/db/best-practices';
+import { getSecretStoreBinding } from '@server/utils/secrets';
+import { logApiUsage } from '@server/db/api-usage';
 
 const PROVIDER_UNAVAILABLE_TTL_SECONDS = 24 * 60 * 60;
 const COMPACT_REVIEW_PROMPT_LINE_CAP = 400;
@@ -85,7 +87,7 @@ function isTransientModelFailure(error: unknown) {
 
 export class ModelService {
   constructor(
-    private env: AppBindings,
+    private env: Env,
     private tracker?: TokenTracker,
     private options: { jobId?: string } = {},
   ) {}
@@ -173,11 +175,12 @@ export class ModelService {
     return resolved;
   }
 
-  private async decryptApiKey(config: ResolvedModelConfig) {
-    if (!config.encryptedApiKey) {
-      throw new Error(`Provider ${config.providerName} does not have a saved API key.`);
+  private async resolveApiKey(config: ResolvedModelConfig) {
+    const key = await resolveLlmApiKey(this.env, config.apiFormat, config.encryptedApiKey);
+    if (!key) {
+      throw new Error(`Provider ${config.providerName} does not have an API key configured.`);
     }
-    return decryptLlmApiKey(this.env, config.encryptedApiKey);
+    return key;
   }
 
   private async callResolvedModel(
@@ -188,37 +191,68 @@ export class ModelService {
       return reviewWithCloudflare(this.env, config.modelName, input, this.tracker, config.providerName);
     }
 
+    let resolvedBaseUrl = config.baseUrl;
+    if (this.env.AI_GATEWAY_ID) {
+      try {
+        const accountId = await getSecretStoreBinding(this.env, 'CF_ACCOUNT_ID');
+        resolvedBaseUrl = `https://gateway.ai.cloudflare.com/v1/${accountId}/${this.env.AI_GATEWAY_ID}`;
+        if (accountId) {
+          if (config.apiFormat === 'openai') {
+            resolvedBaseUrl = `${resolvedBaseUrl}/openai`;
+          } else if (config.apiFormat === 'gemini') {
+            resolvedBaseUrl = `${resolvedBaseUrl}/google-ai-studio`;
+          } else if (config.apiFormat === 'anthropic') {
+            resolvedBaseUrl = `${resolvedBaseUrl}/anthropic`;
+          }
+        }
+      } catch (err) {
+        logger.warn('Failed to resolve CF_ACCOUNT_ID for AI Gateway routing', err);
+      }
+    }
+
+    let result: ModelResponse;
+
     if (config.apiFormat === 'gemini') {
-      return reviewWithGoogle(
-        { apiKey: await this.decryptApiKey(config), baseUrl: config.baseUrl, providerName: config.providerName },
+      result = await reviewWithGoogle(
+        { apiKey: await this.resolveApiKey(config), baseUrl: resolvedBaseUrl, providerName: config.providerName },
         config.modelName,
         input,
         this.tracker,
       );
-    }
-
-    if (config.apiFormat === 'openai') {
-      return reviewWithOpenAI(
+    } else if (config.apiFormat === 'openai') {
+      result = await reviewWithOpenAI(
         {
-          apiKey: await this.decryptApiKey(config),
-          baseUrl: config.baseUrl || 'https://api.openai.com/v1',
+          apiKey: await this.resolveApiKey(config),
+          baseUrl: resolvedBaseUrl || 'https://api.openai.com/v1',
           providerName: config.providerName,
         },
         config.modelName,
         input,
         this.tracker,
       );
+    } else {
+      result = await reviewWithAnthropic(
+        { apiKey: await this.resolveApiKey(config), baseUrl: resolvedBaseUrl, providerName: config.providerName },
+        config.modelName,
+        input,
+        this.tracker,
+      );
     }
 
-    return reviewWithAnthropic(
-      { apiKey: await this.decryptApiKey(config), baseUrl: config.baseUrl, providerName: config.providerName },
-      config.modelName,
-      input,
-      this.tracker,
-    );
+    // Log the API usage locally in the database
+    await logApiUsage(this.env, {
+      provider: config.providerName,
+      model: config.modelName,
+      promptTokens: result.inputTokens || 0,
+      completionTokens: result.outputTokens || 0,
+      source: 'local',
+      gatewayId: this.env.AI_GATEWAY_ID || '',
+    });
+
+    return result;
   }
 
-  private async callModel(model: string, input: { systemPrompt: string; userPrompt: string }): Promise<ModelResponse> {
+  async callModel(model: string, input: { systemPrompt: string; userPrompt: string }): Promise<ModelResponse> {
     return this.callResolvedModel(await this.resolveModel(model), input);
   }
 
@@ -235,10 +269,37 @@ export class ModelService {
       ? Math.min(configuredLineCap, COMPACT_REVIEW_PROMPT_LINE_CAP)
       : configuredLineCap;
     const reviewFile = truncateFileDiff(params.file, modelLineCap);
+
+    const diffContent = params.file.hunks
+      ? params.file.hunks.flatMap((h: any) => h.lines.map((l: any) => l.content)).join('\n')
+      : '';
+    const matchedPractices = await getMatchingBestPractices(this.env, params.file.path, diffContent);
+    const lessons = await fetchLessonsLearned(this.env, params.file.path);
+    const customRules = [
+      ...params.config.review.custom_rules,
+      ...matchedPractices.map(p => `Best Practice [${p.name}]:\n${convertPlateToMarkdown(p.instructions)}`),
+    ];
+
+    if (lessons && lessons.length > 0) {
+      customRules.push(`
+=== Lessons Learned from Past Incorrect Code Review Comments on this file ===
+Coding agents previously marked the following comments as INCORRECT. You must follow these guidelines:
+${lessons.map((lesson, idx) => `
+Lesson #${idx + 1}:
+- Wrong comment previously made: "${lesson.commentText}"
+- Correction/Feedback provided: "${lesson.feedbackText}"
+- Action required: If you are going to make a similar comment, you MUST include a solid justification explaining why it is still relevant in this specific context. If you agree the comment would be wrong, you MUST skip making the comment. In either case, be transparent. If you skip making a comment because of this lesson, you can declare that in a skipped-comment log, or if you include it, specify the justification.
+`).join('\n')}
+`);
+    }
+
     const { systemPrompt, userPrompt } = buildFileReviewPrompts({
       ...params,
       file: reviewFile,
-      config: params.config.review,
+      config: {
+        ...params.config.review,
+        custom_rules: customRules,
+      },
     });
 
     const { primary, fallbacks } = this.selectModel({
@@ -391,5 +452,18 @@ export class ModelService {
     }
 
     throw lastError;
+  }
+}
+
+async function fetchLessonsLearned(env: any, filePath: string): Promise<any[]> {
+  if (!env.EDGRAPH) return [];
+  try {
+    const res = await env.EDGRAPH.fetch(`https://github.com/jmbish04/core-github-api-edgraph/api/lessons?file=${encodeURIComponent(filePath)}`);
+    if (!res.ok) return [];
+    const data = await res.json() as any;
+    return data.lessons || [];
+  } catch (err) {
+    console.error('Failed to fetch lessons learned from EDGRAPH service binding', err);
+    return [];
   }
 }

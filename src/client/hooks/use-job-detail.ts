@@ -8,6 +8,7 @@ export function useJobDetail(id: string) {
   const [job, setJob] = useState<JobDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isForceRestarting, setIsForceRestarting] = useState(false);
   const pollTimeout = useRef<number | null>(null);
   const etag = useRef<string | null>(null);
   const latestJob = useRef<JobDetail | null>(null);
@@ -87,11 +88,27 @@ export function useJobDetail(id: string) {
     }
   };
 
+  const handleForceRestart = async () => {
+    if (!job) return;
+    setIsForceRestarting(true);
+    try {
+      const response = await api.forceRestartJob(job.id);
+      setJob(response.job);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to force restart job.');
+    } finally {
+      setIsForceRestarting(false);
+    }
+  };
+
   return {
     job,
     error,
     isRetrying,
+    isForceRestarting,
     handleRetry,
+    handleForceRestart,
     fetchJob
   };
 }

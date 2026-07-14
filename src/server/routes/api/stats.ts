@@ -12,5 +12,14 @@ export function createStatsRouter() {
     return c.json({ stats });
   });
 
+  app.get('/usage', async (c) => {
+    const { syncGatewayUsage, getApiUsageStats } = await import('@server/db/api-usage');
+    try {
+      await syncGatewayUsage(c.env);
+    } catch {}
+    const logs = await getApiUsageStats(c.env);
+    return c.json({ logs });
+  });
+
   return app;
 }

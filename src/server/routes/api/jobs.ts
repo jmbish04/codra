@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { defaultRepoConfig, jobsQuerySchema } from '@shared/schema';
 import type { AppEnv } from '@server/env';
-import { bytesToHex, getJobDetail, getJobForProcessing, insertJob, listJobs, mapJob, supersedeOlderJobs } from '@server/db/jobs';
+import { bytesToHex, getJobDetail, getJobForProcessing, insertJob, listJobs, mapJob, supersedeOlderJobs, forceRestartJob } from '@server/db/jobs';
 import { jsonError } from '@server/core/http';
 import { scheduleBestEffortJobMaintenance } from '@server/core/job-recovery';
 import { loadRepoConfig } from '@server/core/config';
@@ -111,6 +111,25 @@ export function createJobsRouter() {
     });
 
     return c.json({ job }, 202);
+  });
+
+  app.post('/:id/force-restart', async (c) => {
+    const jobId = c.req.param('id');
+    const success = await forceRestartJob(c.env, jobId);
+    if (!success) {
+      return jsonError('Job not found.', 404);
+    }
+
+    // Immediately queue the message to review
+    await c.env.REVIEW_QUEUE.send({
+      jobId,
+      deliveryId: crypto.randomUUID(),
+      phase: 'review',
+      requestId: c.get('requestId'),
+    });
+
+    const job = await getJobDetail(c.env, jobId);
+    return c.json({ job }, 200);
   });
 
   return app;

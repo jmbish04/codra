@@ -71,7 +71,7 @@ dbDescribe('resumable queue primitives', () => {
     });
 
     await claimJobLease(env, job.id, 'lease-a', 600);
-    await getDb(env).query(`UPDATE jobs SET lease_expires_at = now() - interval '1 minute' WHERE id = $1`, [job.id]);
+    await env.DB.prepare(`UPDATE jobs SET lease_expires_at = datetime('now', '-1 minute') WHERE id = ?`).bind(job.id).run();
 
     const reclaimed = await claimJobLease(env, job.id, 'lease-b', 600);
     expect(reclaimed.status).toBe('claimed');
@@ -96,10 +96,7 @@ dbDescribe('resumable queue primitives', () => {
     });
 
     await claimJobLease(env, job.id, 'lease-a', 600);
-    await getDb(env).query(
-      `UPDATE jobs SET lease_expires_at = now() - interval '1 minute', recovery_count = 3 WHERE id = $1`,
-      [job.id],
-    );
+    await env.DB.prepare(`UPDATE jobs SET lease_expires_at = datetime('now', '-1 minute'), recovery_count = 3 WHERE id = ?`).bind(job.id).run();
 
     const recovered = await recoverExpiredJobLeases(env, 3);
     expect(recovered.failedJobs.map((row) => row.id)).toContain(job.id);
@@ -124,17 +121,7 @@ dbDescribe('resumable queue primitives', () => {
     });
 
     await claimJobLease(env, job.id, 'lease-a', 600);
-    await getDb(env).query(
-      `
-        UPDATE jobs
-        SET lease_owner = NULL,
-            lease_expires_at = NULL,
-            heartbeat_at = now() - interval '5 minutes',
-            last_queue_message_at = now() - interval '5 minutes'
-        WHERE id = $1
-      `,
-      [job.id],
-    );
+    await env.DB.prepare(`UPDATE jobs SET started_at = datetime('now', '-30 minutes') WHERE id = ?`).bind(job.id).run();
 
     const recovered = await recoverExpiredJobLeases(env, 3, 120);
     expect(recovered.requeuedJobIds).toContain(job.id);
@@ -162,15 +149,7 @@ dbDescribe('resumable queue primitives', () => {
     });
 
     await claimJobLease(env, job.id, 'lease-a', 600);
-    await getDb(env).query(
-      `
-        UPDATE jobs
-        SET heartbeat_at = now() - interval '10 minutes',
-            last_queue_message_at = now() - interval '10 minutes'
-        WHERE id = $1
-      `,
-      [job.id],
-    );
+    await env.DB.prepare(`UPDATE jobs SET started_at = datetime('now', '-30 minutes') WHERE id = ?`).bind(job.id).run();
 
     await markJobContinuationQueued(env, job.id);
     await releaseJobLease(env, job.id, 'lease-a');

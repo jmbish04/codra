@@ -1,4 +1,5 @@
-import type { AppBindings, DashboardSessionUser } from '@server/env';
+import type { DashboardSessionUser } from '@server/env';
+import { getSecret } from '@server/utils/secrets';
 
 export type GitHubOAuthProfile = {
   id: number;
@@ -17,9 +18,12 @@ function githubHeaders(token?: string) {
 }
 
 export async function exchangeGitHubOAuthCode(
-  env: Pick<AppBindings, 'GITHUB_CLIENT_ID' | 'GITHUB_CLIENT_SECRET' | 'AUTH_CALLBACK_URL'>,
+  env: Pick<Env, 'GITHUB_CLIENT_ID' | 'GITHUB_CLIENT_SECRET' | 'AUTH_CALLBACK_URL'>,
   code: string,
 ) {
+  const clientId = getSecret(env, 'GITHUB_CLIENT_ID');
+  const clientSecret = getSecret(env, 'GITHUB_CLIENT_SECRET');
+
   const response = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: {
@@ -27,8 +31,8 @@ export async function exchangeGitHubOAuthCode(
       'content-type': 'application/x-www-form-urlencoded',
     },
     body: new URLSearchParams({
-      client_id: env.GITHUB_CLIENT_ID,
-      client_secret: env.GITHUB_CLIENT_SECRET,
+      client_id: clientId,
+      client_secret: clientSecret,
       code,
       redirect_uri: env.AUTH_CALLBACK_URL,
     }),

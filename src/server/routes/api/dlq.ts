@@ -72,8 +72,10 @@ export function createDlqRouter() {
     const { limit = '20' } = c.req.query();
     const batchSize = Math.min(Number(limit) || 20, 100);
 
-    const apiToken = c.env.CF_API_TOKEN;
-    const accountId = c.env.CF_ACCOUNT_ID;
+    const [apiToken, accountId] = await Promise.all([
+      c.env.CF_API_TOKEN.get(),
+      c.env.CF_ACCOUNT_ID.get(),
+    ]);
     const dlqId = c.env.CF_DLQ_ID;
 
     if (!apiToken || !accountId || !dlqId) {
@@ -118,8 +120,10 @@ export function createDlqRouter() {
       return jsonError('lease_ids must be a non-empty array of strings.', 400);
     }
 
-    const apiToken = c.env.CF_API_TOKEN;
-    const accountId = c.env.CF_ACCOUNT_ID;
+    const [apiToken, accountId] = await Promise.all([
+      c.env.CF_API_TOKEN.get(),
+      c.env.CF_ACCOUNT_ID.get(),
+    ]);
     const dlqId = c.env.CF_DLQ_ID;
 
     if (!apiToken || !accountId || !dlqId) {
@@ -203,8 +207,10 @@ export function createDlqRouter() {
       return jsonError('lease_ids must be a non-empty array of strings.', 400);
     }
 
-    const apiToken = c.env.CF_API_TOKEN;
-    const accountId = c.env.CF_ACCOUNT_ID;
+    const [apiToken, accountId] = await Promise.all([
+      c.env.CF_API_TOKEN.get(),
+      c.env.CF_ACCOUNT_ID.get(),
+    ]);
     const dlqId = c.env.CF_DLQ_ID;
 
     if (!apiToken || !accountId || !dlqId) {

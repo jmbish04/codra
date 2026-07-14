@@ -11,7 +11,7 @@ import type {
   SyncReposResponse,
   UpdatesEmailResponse,
 } from '@shared/api';
-import type { LlmApiFormat, LlmProvider, ModelConfig, RepoConfig } from '@shared/schema';
+import type { LlmApiFormat, LlmProvider, ModelConfig, RepoConfig, JobDetail } from '@shared/schema';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -174,6 +174,11 @@ export const api = {
       method: 'POST',
     });
   },
+  forceRestartJob(id: string) {
+    return request<{ job: JobDetail }>(`/api/jobs/${id}/force-restart`, {
+      method: 'POST',
+    });
+  },
   getRepos() {
     return request<RepoConfigsResponse>('/api/repos');
   },
@@ -183,6 +188,22 @@ export const api = {
   getStats(days?: number) {
     const query = days ? `?days=${days}` : '';
     return request<StatsResponse>(`/api/stats${query}`);
+  },
+  getApiUsage() {
+    return request<{
+      logs: Array<{
+        id: string;
+        provider: string;
+        model: string;
+        prompt_tokens: number;
+        completion_tokens: number;
+        total_tokens: number;
+        source: string;
+        gateway_id: string;
+        datetime_hour: string;
+        created_at: string;
+      }>;
+    }>('/api/stats/usage');
   },
   syncRepos() {
     return request<SyncReposResponse>('/api/repos/sync', {

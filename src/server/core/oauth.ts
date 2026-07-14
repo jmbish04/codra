@@ -1,4 +1,3 @@
-import type { AppBindings } from '@server/env';
 
 const OAUTH_STATE_TTL_SECONDS = 60 * 10;
 
@@ -20,23 +19,27 @@ export function parseAllowedUsers(input: string) {
   );
 }
 
-export async function createOAuthState(env: Pick<AppBindings, 'APP_KV'>) {
+export async function createOAuthState(env: Pick<Env, 'APP_KV'>, payload: Record<string, any> = {}) {
   const state = randomHex();
   await env.APP_KV.put(
     oauthStateKey(state),
-    JSON.stringify({ createdAt: new Date().toISOString() }),
+    JSON.stringify({ ...payload, createdAt: new Date().toISOString() }),
     { expirationTtl: OAUTH_STATE_TTL_SECONDS },
   );
   return state;
 }
 
-export async function consumeOAuthState(env: Pick<AppBindings, 'APP_KV'>, state: string) {
+export async function consumeOAuthState(env: Pick<Env, 'APP_KV'>, state: string) {
   const key = oauthStateKey(state);
   const value = await env.APP_KV.get(key);
   if (!value) {
-    return false;
+    return null;
   }
 
   await env.APP_KV.delete(key);
-  return true;
+  try {
+    return JSON.parse(value) as Record<string, any>;
+  } catch {
+    return {};
+  }
 }

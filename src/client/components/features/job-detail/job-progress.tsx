@@ -1,5 +1,6 @@
 import { FileCode2, Hourglass } from 'lucide-react';
 import type { JobDetail } from '@shared/schema';
+import { Progress } from '@client/components/ui/progress';
 
 interface JobProgressProps {
   job: JobDetail;
@@ -59,19 +60,11 @@ export function JobProgress({ job }: JobProgressProps) {
         </div>
 
         {/* Progress track */}
-        <div
-          className="h-[3px] rounded-full bg-primary-foreground/15 overflow-hidden"
-          role="progressbar"
-          aria-valuenow={isQueued ? 0 : pct}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-label={isQueued ? 'Review waiting in queue' : 'File review progress'}
-        >
-          <div
-            className="h-full rounded-full bg-primary-foreground transition-[width] duration-700 ease-out"
-            style={{ width: isQueued ? '0%' : `${pct}%` }}
-          />
-        </div>
+        <Progress 
+          value={isQueued ? 0 : pct} 
+          className="h-2.5 bg-primary-foreground/20 border-none"
+          indicatorClassName="bg-gradient-to-r from-primary-foreground/80 via-primary-foreground to-primary-foreground/90"
+        />
 
         {/* Active file + percent */}
         {!isQueued && (

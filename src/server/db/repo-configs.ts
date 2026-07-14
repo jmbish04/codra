@@ -1,26 +1,13 @@
-import type { AppBindings } from '@server/env';
-import { parseJsonColumn, queryRows } from './client';
+import { getDb, parseJsonColumn } from './client';
 import { defaultRepoConfig, normalizeRepoConfig, repoConfigRecordSchema, repoConfigSchema, type RepoConfig } from '@shared/schema';
 import { getOrCreateRepository } from './repositories';
+import { repoConfigs, repositories, jobs } from './schemas';
+import { eq, and, sql } from 'drizzle-orm';
 
-type RepoConfigRow = {
-  installation_id: string;
-  owner: string;
-  repo: string;
-  parsed_json: RepoConfig | string | null;
-  updated_at: string;
-  main_model: string | null;
-  fallback_models: string[] | string | null;
-  size_overrides: any | string | null;
-  enabled: boolean;
-  last_job_created_at: string | null;
-  last_job_verdict: 'approve' | 'comment' | null;
-};
-
-function mapRepo(row: RepoConfigRow) {
+function mapRepo(row: any) {
   const parsedJson = normalizeRepoConfig(repoConfigSchema.parse(parseJsonColumn(row.parsed_json, defaultRepoConfig)));
   return repoConfigRecordSchema.parse({
-    installationId: row.installation_id,
+    installationId: String(row.installation_id),
     owner: row.owner,
     repo: row.repo,
     parsedJson,
@@ -30,12 +17,12 @@ function mapRepo(row: RepoConfigRow) {
     mainModel: row.main_model,
     fallbackModels: parseJsonColumn(row.fallback_models, null),
     sizeOverrides: parseJsonColumn(row.size_overrides, null),
-    enabled: row.enabled,
+    enabled: Boolean(row.enabled),
   });
 }
 
 export async function upsertRepoConfig(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   input: {
     installationId: string;
     owner: string;
@@ -44,6 +31,7 @@ export async function upsertRepoConfig(
     enabled?: boolean;
   },
 ) {
+  const db = getDb(env);
   const repositoryId = await getOrCreateRepository(env, {
     installationId: input.installationId,
     owner: input.owner,
@@ -52,144 +40,140 @@ export async function upsertRepoConfig(
 
   const parsedJson = normalizeRepoConfig(input.parsedJson);
   const model = parsedJson.model;
-  await queryRows(
-    env,
-    `
-      INSERT INTO repo_configs (repository_id, parsed_json, updated_at, main_model, fallback_models, size_overrides, enabled)
-      VALUES ($1, $2::jsonb, now(), $3, $4::jsonb, $5::jsonb, COALESCE($6, TRUE))
-      ON CONFLICT (repository_id)
-      DO UPDATE
-      SET parsed_json = EXCLUDED.parsed_json,
-          updated_at = EXCLUDED.updated_at,
-          main_model = EXCLUDED.main_model,
-          fallback_models = EXCLUDED.fallback_models,
-          size_overrides = EXCLUDED.size_overrides,
-          enabled = COALESCE($6, repo_configs.enabled)
-    `,
-    [
-      repositoryId,
-      JSON.stringify(parsedJson),
-      model?.main ?? null,
-      model?.fallbacks ? JSON.stringify(model.fallbacks) : null,
-      model?.size_overrides ? JSON.stringify(model.size_overrides) : null,
-      input.enabled ?? null
-    ],
-  );
+
+  await db.insert(repoConfigs)
+    .values({
+      repository_id: repositoryId,
+      parsed_json: parsedJson,
+      updated_at: sql`CURRENT_TIMESTAMP`,
+      main_model: model?.main ?? null,
+      fallback_models: model?.fallbacks ?? null,
+      size_overrides: model?.size_overrides ?? null,
+      enabled: input.enabled ?? true,
+    })
+    .onConflictDoUpdate({
+      target: repoConfigs.repository_id,
+      set: {
+        parsed_json: parsedJson,
+        updated_at: sql`CURRENT_TIMESTAMP`,
+        main_model: model?.main ?? null,
+        fallback_models: model?.fallbacks ?? null,
+        size_overrides: model?.size_overrides ?? null,
+        enabled: input.enabled ?? sql`repo_configs.enabled`,
+      }
+    });
 }
 
-// Used during sync — only creates the record if it doesn't exist.
-// Preserves all existing model overrides if the repo is already configured.
 export async function syncRepoConfig(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   input: {
     installationId: string;
     owner: string;
     repo: string;
   },
 ) {
+  const db = getDb(env);
   const repositoryId = await getOrCreateRepository(env, {
     installationId: input.installationId,
     owner: input.owner,
     repo: input.repo,
   });
 
-  // Insert with null model overrides (global strategy) but DO NOTHING if already exists
-  await queryRows(
-    env,
-    `
-      INSERT INTO repo_configs (repository_id, parsed_json, updated_at, main_model, fallback_models, size_overrides, enabled)
-      VALUES ($1, $2::jsonb, now(), NULL, NULL, NULL, TRUE)
-      ON CONFLICT (repository_id) DO NOTHING
-    `,
-    [repositoryId, JSON.stringify(defaultRepoConfig)],
-  );
+  await db.insert(repoConfigs)
+    .values({
+      repository_id: repositoryId,
+      parsed_json: defaultRepoConfig,
+      updated_at: sql`CURRENT_TIMESTAMP`,
+      enabled: true,
+    })
+    .onConflictDoNothing();
 }
 
 export async function updateRepoConfigEnabled(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   input: {
     owner: string;
     repo: string;
     enabled: boolean;
   },
 ) {
-  await queryRows(
-    env,
-    `
-      UPDATE repo_configs rc
-      SET enabled = $3,
-          updated_at = now()
-      FROM repositories r
-      WHERE rc.repository_id = r.id
-        AND r.owner = $1
-        AND r.repo = $2
-    `,
-    [input.owner, input.repo, input.enabled],
-  );
+  const db = getDb(env);
+  const repoRow = await db.select({ id: repositories.id }).from(repositories)
+    .where(and(eq(repositories.owner, input.owner), eq(repositories.repo, input.repo)))
+    .limit(1).get();
+
+  if (repoRow) {
+    await db.update(repoConfigs)
+      .set({ enabled: input.enabled, updated_at: sql`CURRENT_TIMESTAMP` })
+      .where(eq(repoConfigs.repository_id, repoRow.id));
+  }
 }
 
-export async function listRepoConfigs(env: Pick<AppBindings, 'HYPERDRIVE'>) {
-  const rows = await queryRows<RepoConfigRow>(
-    env,
-    `
-      SELECT
-        r.installation_id,
-        r.owner,
-        r.repo,
-        rc.parsed_json,
-        rc.updated_at,
-        rc.main_model,
-        rc.fallback_models,
-        rc.size_overrides,
-        rc.enabled,
-        lj.created_at AS last_job_created_at,
-        lj.verdict AS last_job_verdict
-      FROM repo_configs rc
-      JOIN repositories r ON rc.repository_id = r.id
-      LEFT JOIN LATERAL (
-        SELECT created_at, verdict
-        FROM jobs
-        WHERE repository_id = r.id
-        ORDER BY created_at DESC
-        LIMIT 1
-      ) lj ON true
-      ORDER BY r.owner ASC, r.repo ASC
-    `,
-  );
+export async function listRepoConfigs(env: Pick<Env, 'DB'>) {
+  const db = getDb(env);
+  
+  const lastJobsSq = db.select({
+    repository_id: jobs.repository_id,
+    last_job_created_at: sql<string>`MAX(${jobs.created_at})`.as('last_job_created_at'),
+    last_job_verdict: jobs.verdict,
+  })
+  .from(jobs)
+  .groupBy(jobs.repository_id)
+  .as('lj');
+
+  const rows = await db.select({
+    installation_id: repositories.installation_id,
+    owner: repositories.owner,
+    repo: repositories.repo,
+    parsed_json: repoConfigs.parsed_json,
+    updated_at: repoConfigs.updated_at,
+    main_model: repoConfigs.main_model,
+    fallback_models: repoConfigs.fallback_models,
+    size_overrides: repoConfigs.size_overrides,
+    enabled: repoConfigs.enabled,
+    last_job_created_at: lastJobsSq.last_job_created_at,
+    last_job_verdict: lastJobsSq.last_job_verdict,
+  })
+  .from(repoConfigs)
+  .innerJoin(repositories, eq(repoConfigs.repository_id, repositories.id))
+  .leftJoin(lastJobsSq, eq(lastJobsSq.repository_id, repositories.id))
+  .orderBy(repositories.owner, repositories.repo)
+  .all();
 
   return rows.map(mapRepo);
 }
 
-export async function getRepoConfigRecord(env: Pick<AppBindings, 'HYPERDRIVE'>, owner: string, repo: string) {
-  const [row] = await queryRows<RepoConfigRow>(
-    env,
-    `
-      SELECT
-        r.installation_id,
-        r.owner,
-        r.repo,
-        rc.parsed_json,
-        rc.updated_at,
-        rc.main_model,
-        rc.fallback_models,
-        rc.size_overrides,
-        rc.enabled,
-        lj.created_at AS last_job_created_at,
-        lj.verdict AS last_job_verdict
-      FROM repo_configs rc
-      JOIN repositories r ON rc.repository_id = r.id
-      LEFT JOIN LATERAL (
-        SELECT created_at, verdict
-        FROM jobs
-        WHERE repository_id = r.id
-        ORDER BY created_at DESC
-        LIMIT 1
-      ) lj ON true
-      WHERE r.owner = $1 AND r.repo = $2
-      LIMIT 1
-    `,
-    [owner, repo],
-  );
+export async function getRepoConfigRecord(env: Pick<Env, 'DB'>, owner: string, repo: string) {
+  const db = getDb(env);
+  
+  const lastJobsSq = db.select({
+    repository_id: jobs.repository_id,
+    last_job_created_at: sql<string>`MAX(${jobs.created_at})`.as('last_job_created_at'),
+    last_job_verdict: jobs.verdict,
+  })
+  .from(jobs)
+  .groupBy(jobs.repository_id)
+  .as('lj');
+
+  const row = await db.select({
+    installation_id: repositories.installation_id,
+    owner: repositories.owner,
+    repo: repositories.repo,
+    parsed_json: repoConfigs.parsed_json,
+    updated_at: repoConfigs.updated_at,
+    main_model: repoConfigs.main_model,
+    fallback_models: repoConfigs.fallback_models,
+    size_overrides: repoConfigs.size_overrides,
+    enabled: repoConfigs.enabled,
+    last_job_created_at: lastJobsSq.last_job_created_at,
+    last_job_verdict: lastJobsSq.last_job_verdict,
+  })
+  .from(repoConfigs)
+  .innerJoin(repositories, eq(repoConfigs.repository_id, repositories.id))
+  .leftJoin(lastJobsSq, eq(lastJobsSq.repository_id, repositories.id))
+  .where(and(eq(repositories.owner, owner), eq(repositories.repo, repo)))
+  .limit(1)
+  .get();
 
   return row ? mapRepo(row) : null;
 }

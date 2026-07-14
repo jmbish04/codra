@@ -118,7 +118,8 @@
 			"LLM_CONFIG_ENCRYPTION_KEY",
 			"GITHUB_CLIENT_ID",
 			"GITHUB_CLIENT_SECRET",
-			"GITHUB_APP_ID"
+			"GITHUB_APP_ID",
+			"GITHUB_WEBHOOK_SECRET"
 		],
 	},
 	"vars": {
@@ -268,6 +269,8 @@
 	],
 	"triggers": {
 		"crons": [
+			// Fires every 6 hours (at minute 0 past every 6th hour)
+			// Triggers the scheduled() handler in src/server/index.ts to run a full GitHub Knowledge Base sync
 			"0 */6 * * *"
 		]
 	}

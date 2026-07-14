@@ -1,11 +1,10 @@
-import type { AppBindings } from '@server/env';
 import { getTerminalJobsNeedingCheckRunCompletion, markJobCheckRunCompleted, recoverExpiredJobLeases } from '@server/db/jobs';
 import { logger } from '@server/core/logger';
 import { GitHubService } from '@server/services/github';
 
 const MAX_RECOVERY_COUNT = 3;
 
-export async function recoverJobs(env: AppBindings) {
+export async function recoverJobs(env: Env) {
   try {
     const recovered = await recoverExpiredJobLeases(env, MAX_RECOVERY_COUNT);
     for (const jobId of recovered.requeuedJobIds) {
@@ -27,13 +26,13 @@ export async function recoverJobs(env: AppBindings) {
   }
 }
 
-export async function completeTerminalCheckRuns(env: AppBindings) {
+export async function completeTerminalCheckRuns(env: Env) {
   const jobs = await getTerminalJobsNeedingCheckRunCompletion(env);
   for (const job of jobs) {
     if (!job.check_run_id) continue;
 
     try {
-      const github = new GitHubService(env, job.installation_id);
+      const github = new GitHubService(env, String(job.installation_id));
       await github.updateCheckRun(job.owner, job.repo, job.check_run_id, {
         status: 'completed',
         conclusion: job.status === 'superseded' ? 'neutral' : 'failure',
@@ -47,12 +46,12 @@ export async function completeTerminalCheckRuns(env: AppBindings) {
   }
 }
 
-export async function runOpportunisticJobMaintenance(env: AppBindings) {
+export async function runOpportunisticJobMaintenance(env: Env) {
   await recoverJobs(env);
   await completeTerminalCheckRuns(env);
 }
 
-export async function runBestEffortJobMaintenance(env: AppBindings) {
+export async function runBestEffortJobMaintenance(env: Env) {
   try {
     await runOpportunisticJobMaintenance(env);
   } catch (error) {
@@ -61,7 +60,7 @@ export async function runBestEffortJobMaintenance(env: AppBindings) {
 }
 
 export function scheduleBestEffortJobMaintenance(
-  env: AppBindings,
+  env: Env,
   executionCtx?: Pick<ExecutionContext, 'waitUntil'>,
 ) {
   const task = runBestEffortJobMaintenance(env);

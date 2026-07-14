@@ -8,7 +8,7 @@ import { verifyGitHubWebhookSignature } from '@server/core/verify';
 import { jsonError } from '@server/core/http';
 import { findExistingJobForHead, insertJob, supersedeOlderJobs } from '@server/db/jobs';
 import { recordWebhookDelivery } from '@server/db/webhook-deliveries';
-import { getWorkerApiKey } from '@server/utils/secrets';
+import { getSecret } from '@server/utils/secrets';
 import { GitHubClient } from '@server/core/github';
 
 export async function handleGitHubWebhook(c: Context<AppEnv>) {
@@ -21,7 +21,7 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
       return jsonError('Missing GitHub webhook headers.', 400);
     }
 
-    const webhookSecret = await getWorkerApiKey(c.env);
+    const webhookSecret = getSecret(c.env, 'GITHUB_WEBHOOK_SECRET');
     const verified = await verifyGitHubWebhookSignature(webhookSecret, signature ?? null, rawBody);
     if (!verified) {
       return jsonError('Invalid webhook signature.', 401);
@@ -178,7 +178,9 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
         repoAgent.fetch(new Request('https://repoagent/webhook', {
           method: 'POST',
           body: JSON.stringify(payload)
-        }))
+        })).catch((err: unknown) => {
+          console.error('Failed to dispatch webhook to RepoAgent DO:', err);
+        })
       );
 
       return c.json({ ok: true, message: 'delegated_to_repo_agent', job }, 202);

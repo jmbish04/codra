@@ -4,16 +4,37 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { AppShell } from './components/layout/app-shell';
 
-const LandingPage = React.lazy(() => import('./pages/landing').then(m => ({ default: m.LandingPage })));
-const DashboardPage = React.lazy(() => import('./pages/dashboard').then(m => ({ default: m.DashboardPage })));
-const LoginPage = React.lazy(() => import('./pages/login').then(m => ({ default: m.LoginPage })));
-const JobsPage = React.lazy(() => import('./pages/jobs').then(m => ({ default: m.JobsPage })));
-const JobDetailPage = React.lazy(() => import('./pages/job-detail').then(m => ({ default: m.JobDetailPage })));
-const JobLogsPage = React.lazy(() => import('./pages/job-logs').then(m => ({ default: m.JobLogsPage })));
-const ReposPage = React.lazy(() => import('./pages/repos').then(m => ({ default: m.ReposPage })));
-const StatsPage = React.lazy(() => import('./pages/stats').then(m => ({ default: m.StatsPage })));
-const SettingsPage = React.lazy(() => import('./pages/settings').then(m => ({ default: m.SettingsPage })));
-const NotFoundPage = React.lazy(() => import('./pages/not-found').then(m => ({ default: m.NotFoundPage })));
+function safeLazy<T extends React.ComponentType<any>>(
+  importFn: () => Promise<{ default: T }>
+): React.LazyExoticComponent<T> {
+  return React.lazy(() =>
+    importFn().catch((err) => {
+      console.error('Failed to fetch dynamically imported module:', err);
+      const isChunkError =
+        err instanceof TypeError ||
+        /failed to fetch|dynamically imported|loading chunk/i.test(err.message || '');
+      if (isChunkError) {
+        window.location.reload();
+      }
+      throw err;
+    })
+  );
+}
+
+const LandingPage = safeLazy(() => import('./pages/landing').then(m => ({ default: m.LandingPage })));
+const DashboardPage = safeLazy(() => import('./pages/dashboard').then(m => ({ default: m.DashboardPage })));
+const LoginPage = safeLazy(() => import('./pages/login').then(m => ({ default: m.LoginPage })));
+const JobsPage = safeLazy(() => import('./pages/jobs').then(m => ({ default: m.JobsPage })));
+const JobDetailPage = safeLazy(() => import('./pages/job-detail').then(m => ({ default: m.JobDetailPage })));
+const JobLogsPage = safeLazy(() => import('./pages/job-logs').then(m => ({ default: m.JobLogsPage })));
+const ReposPage = safeLazy(() => import('./pages/repos').then(m => ({ default: m.ReposPage })));
+const StatsPage = safeLazy(() => import('./pages/stats').then(m => ({ default: m.StatsPage })));
+const SettingsPage = safeLazy(() => import('./pages/settings').then(m => ({ default: m.SettingsPage })));
+const PromptsPage = safeLazy(() => import('./pages/prompts').then(m => ({ default: m.PromptsPage })));
+const BestPracticesPage = safeLazy(() => import('./pages/best-practices').then(m => ({ default: m.BestPracticesPage })));
+const SetupGuidePage = safeLazy(() => import('./pages/setup-guide').then(m => ({ default: m.SetupGuidePage })));
+const CommandsPage = safeLazy(() => import('./pages/commands').then(m => ({ default: m.CommandsPage })));
+const NotFoundPage = safeLazy(() => import('./pages/not-found').then(m => ({ default: m.NotFoundPage })));
 
 import './app.css';
 
@@ -101,6 +122,10 @@ const router = createBrowserRouter([
       { path: 'repos', element: withSuspense(ReposPage) },
       { path: 'stats', element: withSuspense(StatsPage) },
       { path: 'settings', element: withSuspense(SettingsPage) },
+      { path: 'prompts', element: withSuspense(PromptsPage) },
+      { path: 'best-practices', element: withSuspense(BestPracticesPage) },
+      { path: 'setup', element: withSuspense(SetupGuidePage) },
+      { path: 'commands', element: withSuspense(CommandsPage) },
     ],
   },
   {

@@ -1,4 +1,5 @@
-import type { AppBindings } from '@server/env';
+
+import { getSecretStoreBinding } from '@server/utils/secrets';
 
 const KEY_VERSION = 'v1';
 const encoder = new TextEncoder();
@@ -21,7 +22,7 @@ async function importEncryptionKey(secret: string) {
   return crypto.subtle.importKey('raw', digest, 'AES-GCM', false, ['encrypt', 'decrypt']);
 }
 
-export async function encryptLlmApiKey(env: Pick<AppBindings, 'LLM_CONFIG_ENCRYPTION_KEY'>, apiKey: string) {
+export async function encryptLlmApiKey(env: Pick<Env, 'LLM_CONFIG_ENCRYPTION_KEY'>, apiKey: string) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await importEncryptionKey(env.LLM_CONFIG_ENCRYPTION_KEY);
   const ciphertext = await crypto.subtle.encrypt(
@@ -33,7 +34,7 @@ export async function encryptLlmApiKey(env: Pick<AppBindings, 'LLM_CONFIG_ENCRYP
   return `${KEY_VERSION}:${toBase64(iv)}:${toBase64(new Uint8Array(ciphertext))}`;
 }
 
-export async function decryptLlmApiKey(env: Pick<AppBindings, 'LLM_CONFIG_ENCRYPTION_KEY'>, encrypted: string) {
+export async function decryptLlmApiKey(env: Pick<Env, 'LLM_CONFIG_ENCRYPTION_KEY'>, encrypted: string) {
   const [version, ivBase64, ciphertextBase64] = encrypted.split(':');
   if (version !== KEY_VERSION || !ivBase64 || !ciphertextBase64) {
     throw new Error('Unsupported encrypted LLM API key format.');
@@ -47,4 +48,46 @@ export async function decryptLlmApiKey(env: Pick<AppBindings, 'LLM_CONFIG_ENCRYP
   );
 
   return decoder.decode(plaintext);
+}
+
+export async function resolveLlmApiKey(
+  env: {
+    LLM_CONFIG_ENCRYPTION_KEY: string;
+    GEMINI_API_KEY?: any;
+    OPENAI_API_KEY?: any;
+    ANTHROPIC_API_KEY?: any;
+  },
+  apiFormat: string,
+  encryptedKey: string | null | undefined,
+): Promise<string | null> {
+  let decrypted: string | null = null;
+  if (encryptedKey) {
+    try {
+      decrypted = await decryptLlmApiKey(env, encryptedKey);
+    } catch (err) {
+      // Ignore decryption failure and fall back
+    }
+  }
+
+  const isPlaceholder = decrypted && (decrypted.startsWith('placeholder-') || decrypted.trim() === '');
+  if (!decrypted || isPlaceholder) {
+    try {
+      if (apiFormat === 'gemini' && env.GEMINI_API_KEY) {
+        const key = await getSecretStoreBinding(env as any, 'GEMINI_API_KEY');
+        if (key && key.trim().length > 0) return key.trim();
+      }
+      if (apiFormat === 'openai' && env.OPENAI_API_KEY) {
+        const key = await getSecretStoreBinding(env as any, 'OPENAI_API_KEY');
+        if (key && key.trim().length > 0) return key.trim();
+      }
+      if (apiFormat === 'anthropic' && env.ANTHROPIC_API_KEY) {
+        const key = await getSecretStoreBinding(env as any, 'ANTHROPIC_API_KEY');
+        if (key && key.trim().length > 0) return key.trim();
+      }
+    } catch (err) {
+      // Fall back to decrypted if secret retrieval fails
+    }
+  }
+
+  return decrypted;
 }

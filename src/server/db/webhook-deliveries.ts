@@ -1,8 +1,9 @@
-import type { AppBindings } from '@server/env';
-import { parseJsonColumn, queryRows } from './client';
+import { getDb, parseJsonColumn } from './client';
+import { repositories, webhookDeliveries } from './schemas';
+import { eq, and } from 'drizzle-orm';
 
 export async function recordWebhookDelivery(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   input: {
     deliveryId: string;
     eventName: string;
@@ -11,51 +12,47 @@ export async function recordWebhookDelivery(
     payload: unknown;
   },
 ) {
+  const db = getDb(env);
   let repositoryId: number | null = null;
 
   if (input.owner && input.repo) {
-    const [repoRow] = await queryRows<{ id: number }>(
-      env,
-      'SELECT id FROM repositories WHERE owner = $1 AND repo = $2',
-      [input.owner, input.repo]
-    );
+    const repoRow = await db.select({ id: repositories.id })
+      .from(repositories)
+      .where(and(eq(repositories.owner, input.owner), eq(repositories.repo, input.repo)))
+      .limit(1)
+      .get();
     if (repoRow) {
       repositoryId = repoRow.id;
     }
   }
 
-  const rows = await queryRows<{ id: string }>(
-    env,
-    `
-      INSERT INTO webhook_deliveries (delivery_id, event_name, repository_id, payload)
-      VALUES ($1, $2, $3, $4::jsonb)
-      ON CONFLICT (delivery_id) DO NOTHING
-      RETURNING id
-    `,
-    [input.deliveryId, input.eventName, repositoryId, JSON.stringify(input.payload)],
-  );
+  const result = await db.insert(webhookDeliveries)
+    .values({
+      delivery_id: input.deliveryId,
+      event_name: input.eventName,
+      repository_id: repositoryId,
+      payload: input.payload,
+    })
+    .onConflictDoNothing()
+    .returning({ id: webhookDeliveries.id });
 
-  return rows.length > 0;
+  return result.length > 0;
 }
 
 export async function getWebhookDelivery(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   deliveryId: string,
 ) {
-  const [row] = await queryRows<{
-    delivery_id: string;
-    event_name: string;
-    payload: unknown;
-  }>(
-    env,
-    `
-      SELECT delivery_id, event_name, payload
-      FROM webhook_deliveries
-      WHERE delivery_id = $1
-      LIMIT 1
-    `,
-    [deliveryId],
-  );
+  const db = getDb(env);
+  const row = await db.select({
+    delivery_id: webhookDeliveries.delivery_id,
+    event_name: webhookDeliveries.event_name,
+    payload: webhookDeliveries.payload,
+  })
+  .from(webhookDeliveries)
+  .where(eq(webhookDeliveries.delivery_id, deliveryId))
+  .limit(1)
+  .get();
 
   return row ? { ...row, payload: parseJsonColumn(row.payload, null) } : null;
 }

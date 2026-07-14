@@ -1,6 +1,7 @@
 import { logger } from '@server/core/logger';
 import { withTimeout } from '@server/core/timeout';
 import { ProviderRequestError, providerErrorMessage, type ModelResponse } from './types';
+import { REVIEW_RESPONSE_SCHEMA } from './schemas';
 
 /** Max wall-clock time allowed for a single Google AI Studio call. */
 const GEMINI_TIMEOUT_MS = 180_000;
@@ -84,6 +85,7 @@ export async function reviewWithGoogle(
             ],
             generationConfig: {
               responseMimeType: 'application/json',
+              responseSchema: REVIEW_RESPONSE_SCHEMA,
               maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
             },
           }),
