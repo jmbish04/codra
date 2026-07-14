@@ -22,7 +22,7 @@
     "types": ["vite/client", "vitest/globals"]
   },
   "include": [
-    "src/server/worker-env.d.ts",
+    "worker-configuration.d.ts",
     "vite.config.ts",
     "vitest.config.mts",
     "src/**/*.ts",
