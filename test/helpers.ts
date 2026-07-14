@@ -1,6 +1,6 @@
-import type { AppBindings } from '@server/env';
+
 import { encryptLlmApiKey } from '@server/core/llm-crypto';
-import { queryRows } from '@server/db/client';
+
 
 export class MemoryKV {
   private readonly store = new Map<string, string>();
@@ -80,7 +80,7 @@ export function hasConfiguredTestDatabaseUrl() {
   return Boolean(usableEnvValue(process.env.TEST_DATABASE_URL));
 }
 
-export function createTestEnv(overrides: Partial<AppBindings> = {}): AppBindings {
+export function createTestEnv(overrides: Partial<Record<keyof Env, unknown>> = {}): Env {
   return {
     AI: {
       async run() {
@@ -88,41 +88,43 @@ export function createTestEnv(overrides: Partial<AppBindings> = {}): AppBindings
       },
     },
     APP_KV: new MemoryKV() as unknown as KVNamespace,
+    PROMPTS_KV: new MemoryKV() as unknown as KVNamespace,
     REVIEW_QUEUE: new MockQueue() as any,
     ASSETS: new MockAssets() as any,
-    HYPERDRIVE: {
-      connectionString: getTestDatabaseUrl(),
-    },
-    get APP_PRIVATE_KEY() { return unusedEnv('APP_PRIVATE_KEY'); },
-    get GITHUB_APP_ID() { return unusedEnv('GITHUB_APP_ID'); },
-    GITHUB_APP_SLUG: requiredEnv('GITHUB_APP_SLUG'),
-    GITHUB_APP_WEBHOOK_SECRET: requiredEnv('GITHUB_APP_WEBHOOK_SECRET'),
-    GITHUB_CLIENT_ID: requiredEnv('GITHUB_CLIENT_ID'),
-    GITHUB_CLIENT_SECRET: requiredEnv('GITHUB_CLIENT_SECRET'),
-    AUTH_CALLBACK_URL: requiredEnv('AUTH_CALLBACK_URL'),
-    APP_URL: requiredEnv('APP_URL'),
-    DASHBOARD_ALLOWED_USERS: requiredEnv('DASHBOARD_ALLOWED_USERS'),
+    DB: {} as any,
+    APP_PRIVATE_KEY: 'test-private-key',
+    GITHUB_APP_ID: 'test-app-id',
+    GITHUB_APP_SLUG: 'codra-app-personal',
+    WORKER_API_KEY: { get: async () => 'test-webhook-secret' },
+    GITHUB_CLIENT_ID: 'test-client-id',
+    GITHUB_CLIENT_SECRET: 'test-client-secret',
+    AUTH_CALLBACK_URL: 'https://codra.hacolby.workers.dev/auth/github/callback',
+    APP_URL: 'https://codra.hacolby.workers.dev',
+    DASHBOARD_ALLOWED_USERS: 'jmbish04',
     LLM_CONFIG_ENCRYPTION_KEY: 'test-llm-config-encryption-key',
-    BOT_USERNAME: requiredEnv('BOT_USERNAME'),
-    get ENVIRONMENT() { return unusedEnv('ENVIRONMENT'); },
-    get CF_API_TOKEN() { return unusedEnv('CF_API_TOKEN'); },
-    get CF_ACCOUNT_ID() { return unusedEnv('CF_ACCOUNT_ID'); },
-    get CF_DLQ_ID() { return unusedEnv('CF_DLQ_ID'); },
+    BOT_USERNAME: 'codra-app',
+    ENVIRONMENT: 'production',
+    CF_API_TOKEN: { get: async () => '' },
+    CF_ACCOUNT_ID: { get: async () => '' },
+    CF_DLQ_ID: '',
+    RepoAgent: {} as any,
+    Chat: {} as any,
+    ReviewAgent: {} as any,
+    GitHubLikeMCP: {} as any,
+    LOADER: {} as any,
+    BROWSER: {} as any,
     ...overrides,
-  };
+  } as unknown as Env;
 }
 
-export async function saveTestProviderApiKey(env: AppBindings, providerName = 'Google', apiKey = 'test-key') {
+export async function saveTestProviderApiKey(env: Env, providerName = 'Google', apiKey = 'test-key') {
   const encrypted = await encryptLlmApiKey(env, apiKey);
-  await queryRows(
-    env,
-    `
+  const db = require('@server/db/client').getDb(env);
+  await db.run(require('drizzle-orm').sql`
     UPDATE llm_providers
-    SET encrypted_api_key = $1, enabled = TRUE, updated_at = now()
-    WHERE name = $2
-    `,
-    [encrypted, providerName],
-  );
+    SET encrypted_api_key = ${encrypted}, enabled = 1, updated_at = CURRENT_TIMESTAMP
+    WHERE name = ${providerName}
+  `);
 }
 
 /**

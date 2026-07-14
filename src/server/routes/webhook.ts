@@ -8,6 +8,8 @@ import { verifyGitHubWebhookSignature } from '@server/core/verify';
 import { jsonError } from '@server/core/http';
 import { findExistingJobForHead, insertJob, supersedeOlderJobs } from '@server/db/jobs';
 import { recordWebhookDelivery } from '@server/db/webhook-deliveries';
+import { getSecret } from '@server/utils/secrets';
+import { GitHubClient } from '@server/core/github';
 
 export async function handleGitHubWebhook(c: Context<AppEnv>) {
     const eventName = c.req.header('x-github-event');
@@ -19,7 +21,8 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
       return jsonError('Missing GitHub webhook headers.', 400);
     }
 
-    const verified = await verifyGitHubWebhookSignature(c.env.GITHUB_APP_WEBHOOK_SECRET, signature ?? null, rawBody);
+    const webhookSecret = getSecret(c.env, 'GITHUB_WEBHOOK_SECRET');
+    const verified = await verifyGitHubWebhookSignature(webhookSecret, signature ?? null, rawBody);
     if (!verified) {
       return jsonError('Invalid webhook signature.', 401);
     }
@@ -44,12 +47,56 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
     }
 
     const installationId = String(payload.installation?.id ?? '');
-    if (!installationId || !('repository' in payload) || !payload.repository) {
+    if (!('repository' in payload) || !payload.repository) {
       return c.json({ ok: true, ignored: true }, 202);
     }
 
     if (!isSupportedGitHubWebhookEvent(eventName)) {
       return c.json({ ok: true, ignored: true, eventName }, 202);
+    }
+
+    if (['star', 'watch', 'fork'].includes(eventName)) {
+      const { upsertRepo } = await import('@server/db/knowledge-base');
+      
+      if (eventName === 'star') {
+        const starPayload = payload as import('@shared/github').StarWebhookPayload;
+        await upsertRepo(c.env, {
+          github_id: starPayload.repository.id,
+          full_name: starPayload.repository.full_name,
+          language: starPayload.repository.language,
+          topics: starPayload.repository.topics,
+          is_starred: starPayload.action === 'created',
+          stargazers_count: starPayload.repository.stargazers_count,
+        });
+      } else if (eventName === 'watch') {
+        const watchPayload = payload as import('@shared/github').WatchWebhookPayload;
+        if (watchPayload.action === 'started') {
+          await upsertRepo(c.env, {
+            github_id: watchPayload.repository.id,
+            full_name: watchPayload.repository.full_name,
+            language: watchPayload.repository.language,
+            topics: watchPayload.repository.topics,
+            is_watched: true,
+            stargazers_count: watchPayload.repository.stargazers_count,
+          });
+        }
+      } else if (eventName === 'fork') {
+        const forkPayload = payload as import('@shared/github').ForkWebhookPayload;
+        await upsertRepo(c.env, {
+          github_id: forkPayload.forkee.id,
+          full_name: forkPayload.forkee.full_name,
+          language: forkPayload.forkee.language,
+          topics: forkPayload.forkee.topics,
+          is_forked_by_me: true,
+          stargazers_count: forkPayload.forkee.stargazers_count,
+        });
+      }
+
+      return c.json({ ok: true, message: 'kb_updated' }, 202);
+    }
+
+    if (!installationId) {
+      return c.json({ ok: true, ignored: true }, 202);
     }
 
     const repoConfig = await loadRepoConfig(c.env, {
@@ -68,6 +115,20 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
       botUsername: c.env.BOT_USERNAME,
       config: repoConfig.parsedJson,
     });
+
+    if (extracted?.trigger === 'mention' && eventName === 'issue_comment' && 'comment' in payload && payload.comment?.id) {
+      try {
+        const gh = new GitHubClient(c.env, installationId);
+        await gh.createIssueCommentReaction(
+          extracted.owner,
+          extracted.repo,
+          payload.comment.id,
+          'eyes'
+        );
+      } catch (err) {
+        console.error('Failed to add emoji reaction to comment:', err);
+      }
+    }
 
     if (extracted?.commitSha && extracted.baseSha) {
       const existingJob = await findExistingJobForHead(c.env, {
@@ -110,14 +171,19 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
         newJobId: job.id,
       });
 
-      await c.env.REVIEW_QUEUE.send({
-        jobId: job.id,
-        deliveryId,
-        phase: 'prepare',
-        requestId: c.get('requestId'),
-      });
+      const repoAgentId = c.env.RepoAgent.idFromName(`${extracted.owner}/${extracted.repo}`);
+      const repoAgent = c.env.RepoAgent.get(repoAgentId);
+      
+      c.executionCtx.waitUntil(
+        repoAgent.fetch(new Request('https://repoagent/webhook', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        })).catch((err: unknown) => {
+          console.error('Failed to dispatch webhook to RepoAgent DO:', err);
+        })
+      );
 
-      return c.json({ ok: true, message: 'queued', job }, 202);
+      return c.json({ ok: true, message: 'delegated_to_repo_agent', job }, 202);
     }
 
     // Events that do not produce a concrete job, such as PR close cleanup or

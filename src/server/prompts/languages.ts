@@ -17,6 +17,8 @@ export const LANGUAGE_GUIDELINES: LanguageGuideline[] = [
       'Check for common security pitfalls like "eval()" or insecure regex.',
       'Suggest using optional chaining and nullish coalescing for cleaner code.',
       'Verify that async/await is used correctly and errors are handled.',
+      'Flag exported functions and classes missing JSDoc comments. Suggest a /** ... */ docstring with @param and @returns tags.',
+      'Flag confusing or non-obvious code blocks that lack inline comments explaining the logic.',
     ],
   },
   {
@@ -25,11 +27,12 @@ export const LANGUAGE_GUIDELINES: LanguageGuideline[] = [
     extensions: ['py'],
     guidelines: [
       'Ensure adherence to PEP 8 style guidelines.',
-      'Check for proper docstrings (PEP 257).',
+      'Check for proper docstrings (PEP 257). Flag any public function, class, or method missing a docstring.',
       'Look for efficient use of list comprehensions and generators.',
       'Verify correct exception handling (avoid bare "except:").',
       'Ensure type hints are used where appropriate.',
       'Check for mutable default arguments in functions.',
+      'Flag confusing or non-obvious code blocks that lack inline comments explaining the logic.',
     ],
   },
   {

@@ -1,47 +1,10 @@
-import type { AppBindings } from '@server/env';
-import { parseJsonColumn, queryRows } from './client';
+import { getDb, parseJsonColumn } from './client';
 import { defaultRepoConfig, jobDetailSchema, jobSummarySchema, repoConfigSchema, type RepoConfig } from '@shared/schema';
 import { getOrCreateRepository } from './repositories';
+import { jobs, repositories, fileReviews, reviewComments } from './schemas';
+import { eq, and, sql, or, lt, gt, like, desc, asc, inArray, isNull, isNotNull, ne } from 'drizzle-orm';
 
-export type JobRow = {
-  id: string;
-  installation_id: string;
-  owner: string;
-  repo: string;
-  pr_number: number;
-  pr_title: string | null;
-  pr_author: string | null;
-  commit_sha: ByteaValue;
-  base_sha: ByteaValue;
-  trigger: 'auto' | 'mention' | 'retry';
-  status: 'queued' | 'running' | 'done' | 'failed' | 'superseded';
-  config_snapshot: { review?: RepoConfig['review']; model?: RepoConfig['model'] } | string | null;
-  check_run_id: number | null;
-  check_run_completed_at: string | null;
-  created_at: string;
-  started_at: string | null;
-  finished_at: string | null;
-  lease_owner: string | null;
-  lease_expires_at: string | null;
-  heartbeat_at: string | null;
-  recovery_count: number | null;
-  last_queue_message_at: string | null;
-  total_input_tokens: number | null;
-  total_output_tokens: number | null;
-  verdict: 'approve' | 'comment' | null;
-  file_count: number | null;
-  comment_count: number | null;
-  error_msg: string | null;
-  head_ref: string | null;
-  base_ref: string | null;
-  summary_markdown: string | null;
-  review_id: number | null;
-  retry_of_job_id: string | null;
-  summary_model: string | null;
-  overall_confidence_score: number | null;
-  steps: JobStep[] | string | null;
-};
-
+export type JobRow = typeof jobs.$inferSelect;
 type JobStep = {
   name: string;
   status: 'pending' | 'running' | 'done' | 'failed';
@@ -50,16 +13,10 @@ type JobStep = {
   error?: string | null;
 };
 
-type JobDetailRow = JobRow & {
-  files_json: unknown[] | string | null;
-};
-
-type ByteaValue = ArrayBuffer | ArrayBufferView | string;
-
 export type JobLeaseClaim =
-  | { status: 'claimed'; row: JobRow }
-  | { status: 'busy'; row: JobRow; retryAfterSeconds: number }
-  | { status: 'terminal'; row: JobRow }
+  | { status: 'claimed'; row: any }
+  | { status: 'busy'; row: any; retryAfterSeconds: number }
+  | { status: 'terminal'; row: any }
   | { status: 'missing' };
 
 function hexToBytes(hex: string) {
@@ -70,15 +27,13 @@ function hexToBytes(hex: string) {
   return bytes;
 }
 
-export function bytesToHex(value: ByteaValue) {
+export function bytesToHex(value: any) {
   if (typeof value === 'string') {
     return value.startsWith('\\x') ? value.slice(2).toLowerCase() : value.toLowerCase();
   }
-
   const bytes = ArrayBuffer.isView(value)
     ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
     : new Uint8Array(value);
-
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
@@ -92,7 +47,7 @@ function latestTimestamp(...values: Array<string | null | undefined>) {
   }, null);
 }
 
-export function mapJob(row: JobRow) {
+export function mapJob(row: any) {
   const lastQueueMessageAt = row.last_queue_message_at ? new Date(row.last_queue_message_at).getTime() : null;
   const nextRetryAt =
     row.status === 'running' &&
@@ -110,38 +65,50 @@ export function mapJob(row: JobRow) {
     row.last_queue_message_at,
   ) ?? row.created_at;
 
-  return jobSummarySchema.parse({
-    id: row.id,
-    owner: row.owner,
-    repo: row.repo,
-    installationId: row.installation_id,
-    prNumber: row.pr_number,
-    prTitle: row.pr_title,
-    prAuthor: row.pr_author,
-    commitSha: bytesToHex(row.commit_sha),
-    trigger: row.trigger,
-    status: row.status,
-    verdict: row.verdict,
-    fileCount: row.file_count ?? 0,
-    commentCount: row.comment_count ?? 0,
-    totalInputTokens: row.total_input_tokens ?? 0,
-    totalOutputTokens: row.total_output_tokens ?? 0,
-    createdAt: row.created_at,
-    updatedAt,
-    nextRetryAt,
-    startedAt: row.started_at,
-    finishedAt: row.finished_at,
-    errorMessage: row.error_msg,
-    overallConfidenceScore: row.overall_confidence_score,
-    steps: parseJsonColumn(row.steps, []),
-    checkRunId: row.check_run_id,
-    configSnapshot: row.config_snapshot ? repoConfigSchema.parse(parseJsonColumn(row.config_snapshot, defaultRepoConfig)) : null,
-    retryOfJobId: row.retry_of_job_id,
-  });
+  return {
+    ...jobSummarySchema.parse({
+      id: row.id,
+      owner: row.owner,
+      repo: row.repo,
+      installationId: String(row.installation_id),
+      prNumber: row.pr_number,
+      prTitle: row.pr_title,
+      prAuthor: row.pr_author,
+      commitSha: bytesToHex(row.commit_sha),
+      trigger: row.trigger,
+      status: row.status,
+      verdict: row.verdict,
+      fileCount: row.file_count ?? 0,
+      commentCount: row.comment_count ?? 0,
+      totalInputTokens: row.total_input_tokens ?? 0,
+      totalOutputTokens: row.total_output_tokens ?? 0,
+      createdAt: row.created_at,
+      updatedAt,
+      nextRetryAt,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+      errorMessage: row.error_msg,
+      overallConfidenceScore: row.overall_confidence_score,
+      steps: parseJsonColumn(row.steps, []),
+      checkRunId: row.check_run_id,
+      configSnapshot: row.config_snapshot ? repoConfigSchema.parse(parseJsonColumn(row.config_snapshot, defaultRepoConfig)) : null,
+      retryOfJobId: row.retry_of_job_id,
+    }),
+    statusCommentId: (row.status_comment_id as number | null) ?? null,
+  };
+}
+
+function mergeRow(res: { jobs: typeof jobs.$inferSelect; repositories: typeof repositories.$inferSelect }) {
+  return {
+    ...res.jobs,
+    owner: res.repositories.owner,
+    repo: res.repositories.repo,
+    installation_id: res.repositories.installation_id,
+  };
 }
 
 export async function insertJob(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   input: {
     installationId: string;
     owner: string;
@@ -158,57 +125,33 @@ export async function insertJob(
     retryOfJobId?: string | null;
   },
 ) {
+  const db = getDb(env);
   const repositoryId = await getOrCreateRepository(env, {
     installationId: input.installationId,
     owner: input.owner,
     repo: input.repo,
   });
 
-  const [row] = await queryRows<JobRow>(
-    env,
-    `
-      WITH inserted AS (
-        INSERT INTO jobs (
-          repository_id,
-          pr_number,
-          pr_title,
-          pr_author,
-          commit_sha,
-          base_sha,
-          trigger,
-          status,
-          config_snapshot,
-          head_ref,
-          base_ref,
-          retry_of_job_id
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8::jsonb, $9, $10, $11::uuid)
-        RETURNING *
-      )
-      SELECT i.*, r.owner, r.repo, r.installation_id
-      FROM inserted i
-      JOIN repositories r ON i.repository_id = r.id
-    `,
-    [
-      repositoryId,
-      input.prNumber,
-      input.prTitle,
-      input.prAuthor,
-      hexToBytes(input.commitSha),
-      hexToBytes(input.baseSha),
-      input.trigger,
-      JSON.stringify(input.configSnapshot ?? defaultRepoConfig),
-      input.headRef,
-      input.baseRef,
-      input.retryOfJobId ?? null,
-    ],
-  );
+  const [row] = await db.insert(jobs).values({
+    repository_id: repositoryId,
+    pr_number: input.prNumber,
+    pr_title: input.prTitle,
+    pr_author: input.prAuthor,
+    commit_sha: Array.from(hexToBytes(input.commitSha)),
+    base_sha: Array.from(hexToBytes(input.baseSha)),
+    trigger: input.trigger,
+    status: 'queued',
+    config_snapshot: input.configSnapshot ?? defaultRepoConfig,
+    head_ref: input.headRef,
+    base_ref: input.baseRef,
+    retry_of_job_id: input.retryOfJobId ?? null,
+  }).returning();
 
-  return mapJob(row);
+  return mapJob({ ...row, owner: input.owner, repo: input.repo, installation_id: input.installationId });
 }
 
 export async function listJobs(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   query: {
     owner?: string;
     repo?: string;
@@ -219,235 +162,188 @@ export async function listJobs(
     offset: number;
   },
 ) {
-  const conditions: string[] = [];
-  const params: any[] = [];
+  const db = getDb(env);
+  const conditions = [];
 
-  if (query.owner) {
-    params.push(query.owner);
-    conditions.push(`r.owner = $${params.length}`);
-  }
-  if (query.repo) {
-    params.push(query.repo);
-    conditions.push(`r.repo = $${params.length}`);
-  }
-  if (query.status) {
-    params.push(query.status);
-    conditions.push(`j.status = $${params.length}`);
-  }
-  if (query.verdict) {
-    params.push(query.verdict);
-    conditions.push(`j.verdict = $${params.length}`);
-  }
+  if (query.owner) conditions.push(eq(repositories.owner, query.owner));
+  if (query.repo) conditions.push(eq(repositories.repo, query.repo));
+  if (query.status) conditions.push(eq(jobs.status, query.status));
+  if (query.verdict) conditions.push(eq(jobs.verdict, query.verdict));
   if (query.search) {
-    params.push(`%${query.search}%`);
-    conditions.push(`(j.pr_title ILIKE $${params.length} OR CAST(j.pr_number AS TEXT) LIKE $${params.length})`);
+    const s = `%${query.search}%`;
+    conditions.push(or(
+      like(sql`lower(${jobs.pr_title})`, s.toLowerCase()),
+      like(sql`CAST(${jobs.pr_number} AS TEXT)`, s)
+    ));
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-  params.push(query.limit);
-  const limitIdx = params.length;
-  params.push(query.offset);
-  const offsetIdx = params.length;
+  const rows = await db.select()
+    .from(jobs)
+    .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
+    .where(whereClause)
+    .orderBy(desc(jobs.created_at))
+    .limit(query.limit)
+    .offset(query.offset)
+    .all();
 
-  const rows = await queryRows<JobRow>(
-    env,
-    `
-      SELECT j.*, r.owner, r.repo, r.installation_id
-      FROM jobs j
-      JOIN repositories r ON j.repository_id = r.id
-      ${whereClause}
-      ORDER BY j.created_at DESC
-      LIMIT $${limitIdx} OFFSET $${offsetIdx}
-    `,
-    params,
-  );
-
-  const [totalResult] = await queryRows<{ count: string }>(
-    env,
-    `
-      SELECT COUNT(*) as count
-      FROM jobs j
-      JOIN repositories r ON j.repository_id = r.id
-      ${whereClause}
-    `,
-    params.slice(0, -2),
-  );
+  const [{ count: total }] = await db.select({ count: sql<number>`count(*)` })
+    .from(jobs)
+    .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
+    .where(whereClause)
+    .all();
 
   return {
-    jobs: rows.map(mapJob),
-    total: parseInt(totalResult.count, 10),
+    jobs: rows.map(r => mapJob(mergeRow(r))),
+    total,
   };
 }
 
-export async function getJobForProcessing(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string) {
+export async function getJobForProcessing(env: Pick<Env, 'DB'>, jobId: string) {
   if (!jobId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
     return null;
   }
-  const [row] = await queryRows<JobRow>(
-    env,
-    `
-      SELECT j.*, r.owner, r.repo, r.installation_id
-      FROM jobs j
-      JOIN repositories r ON j.repository_id = r.id
-      WHERE j.id = $1
-      LIMIT 1
-    `,
-    [jobId],
-  );
+  const db = getDb(env);
+  const row = await db.select()
+    .from(jobs)
+    .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
+    .where(eq(jobs.id, jobId))
+    .get();
 
-  return row ?? null;
+  return row ? mergeRow(row) : null;
 }
 
-export async function getJobDetail(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string) {
+export async function getJobDetail(env: Pick<Env, 'DB'>, jobId: string) {
   if (!jobId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
     return null;
   }
+  const db = getDb(env);
+  
+  const jobResult = await db.select()
+    .from(jobs)
+    .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
+    .where(eq(jobs.id, jobId))
+    .get();
 
-  const [row] = await queryRows<JobDetailRow>(
-    env,
-    `
-      SELECT
-        j.*,
-        r.owner,
-        r.repo,
-        r.installation_id,
-        COALESCE(
-          (
-            SELECT JSON_AGG(
-              JSON_BUILD_OBJECT(
-                'id', fr.id,
-                'jobId', fr.job_id,
-                'filePath', fr.file_path,
-                'fileStatus', fr.file_status,
-                'modelUsed', fr.model_used,
-                'diffLineCount', fr.diff_line_count,
-                'diffInput', fr.diff_input,
-                'rawAiOutput', fr.raw_ai_output,
-                'inputTokens', fr.input_tokens,
-                'outputTokens', fr.output_tokens,
-                'durationMs', fr.duration_ms,
-                'verdict', fr.verdict,
-                'fileSummary', fr.file_summary,
-                'errorMessage', fr.error_msg,
-                'createdAt', fr.created_at,
-                'parsedComments', COALESCE(
-                  (
-                    SELECT JSON_AGG(
-                      JSON_BUILD_OBJECT(
-                        'path', rc.path,
-                        'line', rc.line,
-                        'position', rc.position,
-                        'severity', rc.severity,
-                        'category', rc.category,
-                        'title', rc.title,
-                        'body', rc.body,
-                        'codeSuggestion', rc.code_suggestion
-                      )
-                      ORDER BY rc.id ASC
-                    ) FROM review_comments rc WHERE rc.file_review_id = fr.id
-                  ),
-                  '[]'::json
-                )
-              )
-              ORDER BY fr.created_at ASC
-            )
-            FROM file_reviews fr
-            WHERE fr.job_id = j.id
-          ),
-          '[]'::json
-        ) AS files_json
-      FROM jobs j
-      JOIN repositories r ON j.repository_id = r.id
-      WHERE j.id = $1
-    `,
-    [jobId],
-  );
+  if (!jobResult) return null;
+  const jobRow = mergeRow(jobResult);
 
-  if (!row) return null;
+  const reviews = await db.select().from(fileReviews).where(eq(fileReviews.job_id, jobId)).orderBy(asc(fileReviews.created_at)).all();
+  
+  let files: any[] = [];
+  if (reviews.length > 0) {
+    const comments = await db.select().from(reviewComments).where(inArray(reviewComments.file_review_id, reviews.map(r => r.id!))).orderBy(asc(reviewComments.id)).all();
+    const commentsByReviewId = new Map<string, any[]>();
+    for (const c of comments) {
+      if (!commentsByReviewId.has(c.file_review_id)) commentsByReviewId.set(c.file_review_id, []);
+      commentsByReviewId.get(c.file_review_id)!.push({
+        path: c.path,
+        line: c.line,
+        position: c.position,
+        severity: c.severity,
+        category: c.category,
+        title: c.title,
+        body: c.body,
+        codeSuggestion: c.code_suggestion
+      });
+    }
+
+    files = reviews.map(fr => ({
+      id: fr.id,
+      jobId: fr.job_id,
+      filePath: fr.file_path,
+      fileStatus: fr.file_status,
+      modelUsed: fr.model_used,
+      diffLineCount: fr.diff_line_count,
+      diffInput: fr.diff_input,
+      rawAiOutput: fr.raw_ai_output,
+      inputTokens: fr.input_tokens,
+      outputTokens: fr.output_tokens,
+      durationMs: fr.duration_ms,
+      verdict: fr.verdict,
+      fileSummary: fr.file_summary,
+      errorMessage: fr.error_msg,
+      createdAt: fr.created_at,
+      parsedComments: commentsByReviewId.get(fr.id!) || []
+    }));
+  }
 
   return jobDetailSchema.parse({
-    ...mapJob(row),
-    baseSha: bytesToHex(row.base_sha),
-    headRef: row.head_ref,
-    baseRef: row.base_ref,
-    summaryMarkdown: row.summary_markdown,
-    configSnapshot: repoConfigSchema.parse(parseJsonColumn(row.config_snapshot, defaultRepoConfig)),
-    reviewId: row.review_id,
-    retryOfJobId: row.retry_of_job_id,
-    summaryModel: row.summary_model,
-    files: parseJsonColumn(row.files_json, []),
+    ...mapJob(jobRow),
+    baseSha: bytesToHex(jobRow.base_sha),
+    headRef: jobRow.head_ref,
+    baseRef: jobRow.base_ref,
+    summaryMarkdown: jobRow.summary_markdown,
+    configSnapshot: repoConfigSchema.parse(parseJsonColumn(jobRow.config_snapshot, defaultRepoConfig)),
+    reviewId: jobRow.review_id,
+    retryOfJobId: jobRow.retry_of_job_id,
+    summaryModel: jobRow.summary_model,
+    files,
   });
 }
 
-export async function startJobProcessing(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string, stepName: string) {
+export async function startJobProcessing(env: Pick<Env, 'DB'>, jobId: string, stepName: string) {
+  const db = getDb(env);
   const now = new Date().toISOString();
-  const rows = await queryRows<{ id: string }>(
-    env,
-    `
-      UPDATE jobs
-      SET status = 'running',
-          started_at = COALESCE(started_at, now()),
-          steps = COALESCE(steps, '[]'::jsonb) || jsonb_build_array(
-            jsonb_build_object(
-              'name', $2::text,
-              'status', 'running',
-              'startedAt', $3::text,
-              'finishedAt', NULL,
-              'error', NULL
-            )
-          )
-      WHERE id = $1
-        AND status = 'queued'
-      RETURNING id
-    `,
-    [jobId, stepName, now],
-  );
-
-  return rows.length > 0;
+  
+  const jobRow = await db.select({ started_at: jobs.started_at, steps: jobs.steps }).from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.status, 'queued'))).get();
+  if (!jobRow) return false;
+  
+  const steps = parseJsonColumn(jobRow.steps, []) as any[];
+  steps.push({
+    name: stepName,
+    status: 'running',
+    startedAt: now,
+    finishedAt: null,
+    error: null,
+  });
+  
+  const [updated] = await db.update(jobs)
+    .set({
+      status: 'running',
+      started_at: (jobRow.started_at as any) ?? now,
+      steps,
+    })
+    .where(and(eq(jobs.id, jobId), eq(jobs.status, 'queued')))
+    .returning({ id: jobs.id });
+    
+  return !!updated;
 }
 
 export async function claimJobLease(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   jobId: string,
   leaseOwner: string,
   leaseSeconds: number,
 ): Promise<JobLeaseClaim> {
-  const [claimed] = await queryRows<JobRow>(
-    env,
-    `
-      WITH claimed AS (
-        UPDATE jobs
-        SET status = CASE WHEN status = 'queued' THEN 'running' ELSE status END,
-            started_at = COALESCE(started_at, now()),
-            lease_owner = $2,
-            lease_expires_at = now() + ($3 || ' seconds')::interval,
-            heartbeat_at = now(),
-            last_queue_message_at = now()
-        WHERE id = $1
-          AND status IN ('queued', 'running')
-          AND (
-            lease_expires_at IS NULL
-            OR lease_expires_at < now()
-            OR lease_owner = $2
-          )
-          AND NOT (
-            status = 'running'
-            AND lease_owner IS NULL
-            AND last_queue_message_at IS NOT NULL
-            AND last_queue_message_at > now()
-          )
-        RETURNING *
-      )
-      SELECT c.*, r.owner, r.repo, r.installation_id
-      FROM claimed c
-      JOIN repositories r ON c.repository_id = r.id
-    `,
-    [jobId, leaseOwner, String(leaseSeconds)],
-  );
+  const db = getDb(env);
+  const now = new Date().toISOString();
+  
+  const updatedRows = await db.update(jobs)
+    .set({
+      status: 'running',
+      started_at: sql`COALESCE(${jobs.started_at}, ${now})`,
+      lease_owner: leaseOwner,
+      lease_expires_at: sql`datetime('now', '+' || ${leaseSeconds} || ' seconds')`,
+      heartbeat_at: now,
+      last_queue_message_at: now,
+    })
+    .where(and(
+      eq(jobs.id, jobId),
+      inArray(jobs.status, ['queued', 'running']),
+      or(
+        isNull(jobs.lease_expires_at),
+        lt(jobs.lease_expires_at, now),
+        eq(jobs.lease_owner, leaseOwner)
+      ),
+      sql`NOT (${jobs.status} = 'running' AND ${jobs.lease_owner} IS NULL AND ${jobs.last_queue_message_at} IS NOT NULL AND ${jobs.last_queue_message_at} > ${now})`
+    ))
+    .returning();
 
-  if (claimed) {
-    return { status: 'claimed', row: claimed };
+  if (updatedRows.length > 0) {
+    const row = await getJobForProcessing(env, jobId);
+    return { status: 'claimed', row };
   }
 
   const row = await getJobForProcessing(env, jobId);
@@ -471,70 +367,61 @@ export async function claimJobLease(
 }
 
 export async function heartbeatJobLease(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   jobId: string,
   leaseOwner: string,
   leaseSeconds: number,
 ) {
-  await queryRows(
-    env,
-    `
-      UPDATE jobs
-      SET heartbeat_at = now(),
-          lease_expires_at = now() + ($3 || ' seconds')::interval
-      WHERE id = $1
-        AND lease_owner = $2
-        AND status = 'running'
-    `,
-    [jobId, leaseOwner, String(leaseSeconds)],
-  );
+  const db = getDb(env);
+  const now = new Date().toISOString();
+  await db.update(jobs)
+    .set({
+      heartbeat_at: now,
+      lease_expires_at: sql`datetime('now', '+' || ${leaseSeconds} || ' seconds')`,
+    })
+    .where(and(
+      eq(jobs.id, jobId),
+      eq(jobs.lease_owner, leaseOwner),
+      eq(jobs.status, 'running')
+    ));
 }
 
-export async function releaseJobLease(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string, leaseOwner: string) {
-  await queryRows(
-    env,
-    `
-      UPDATE jobs
-      SET lease_owner = NULL,
-          lease_expires_at = NULL
-      WHERE id = $1
-        AND lease_owner = $2
-    `,
-    [jobId, leaseOwner],
-  );
+export async function releaseJobLease(env: Pick<Env, 'DB'>, jobId: string, leaseOwner: string) {
+  const db = getDb(env);
+  await db.update(jobs)
+    .set({
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+    .where(and(
+      eq(jobs.id, jobId),
+      eq(jobs.lease_owner, leaseOwner)
+    ));
 }
 
-export async function markJobContinuationQueued(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string, delaySeconds = 0) {
-  await queryRows(
-    env,
-    `
-      UPDATE jobs
-      SET heartbeat_at = now(),
-          last_queue_message_at = CASE
-            WHEN $2::int > 0 THEN now() + ($2::text || ' seconds')::interval
-            ELSE now()
-          END
-      WHERE id = $1
-        AND status = 'running'
-    `,
-    [jobId, delaySeconds],
-  );
+export async function markJobContinuationQueued(env: Pick<Env, 'DB'>, jobId: string, delaySeconds = 0) {
+  const db = getDb(env);
+  const now = new Date().toISOString();
+  await db.update(jobs)
+    .set({
+      heartbeat_at: now,
+      last_queue_message_at: delaySeconds > 0 ? sql`datetime('now', '+' || ${delaySeconds} || ' seconds')` : now,
+    })
+    .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running')));
 }
 
-export async function updateJobCheckRun(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string, checkRunId: number) {
-  await queryRows(
-    env,
-    `
-      UPDATE jobs
-      SET check_run_id = $2
-      WHERE id = $1
-    `,
-    [jobId, checkRunId],
-  );
+export async function updateJobCheckRun(env: Pick<Env, 'DB'>, jobId: string, checkRunId: number) {
+  const db = getDb(env);
+  await db.update(jobs).set({ check_run_id: checkRunId }).where(eq(jobs.id, jobId));
+}
+
+export async function updateJobStatusComment(env: Pick<Env, 'DB'>, jobId: string, statusCommentId: number) {
+  const db = getDb(env);
+  await db.update(jobs).set({ status_comment_id: statusCommentId }).where(eq(jobs.id, jobId));
 }
 
 export async function completeJob(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   jobId: string,
   input: {
     verdict: 'approve' | 'comment';
@@ -549,166 +436,124 @@ export async function completeJob(
     errorMessage?: string | null;
   },
 ) {
+  const db = getDb(env);
   const now = new Date().toISOString();
-  await queryRows(
-    env,
-    `
-      UPDATE jobs
-      SET status = 'done',
-          finished_at = now(),
-          check_run_completed_at = now(),
-          lease_owner = NULL,
-          lease_expires_at = NULL,
-          verdict = $2,
-          file_count = $3,
-          comment_count = $4,
-          total_input_tokens = $5,
-          total_output_tokens = $6,
-          summary_markdown = $7,
-          review_id = $8,
-          summary_model = $9,
-          overall_confidence_score = $10,
-          error_msg = $11,
-          steps = CASE
-            WHEN EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(steps, '[]'::jsonb)) s WHERE s->>'name' = 'Completing')
-            THEN (
-              SELECT jsonb_agg(
-                CASE
-                  WHEN s->>'name' = 'Completing'
-                  THEN s || jsonb_build_object('status', 'done', 'finishedAt', $12::text, 'error', NULL)
-                  ELSE s
-                END
-              ) FROM jsonb_array_elements(COALESCE(steps, '[]'::jsonb)) s
-            )
-            ELSE COALESCE(steps, '[]'::jsonb) || jsonb_build_array(
-              jsonb_build_object(
-                'name', 'Completing',
-                'status', 'done',
-                'startedAt', $12::text,
-                'finishedAt', $12::text,
-                'error', NULL
-              )
-            )
-          END
-      WHERE id = $1
-    `,
-    [
-      jobId,
-      input.verdict,
-      input.fileCount,
-      input.commentCount,
-      input.totalInputTokens,
-      input.totalOutputTokens,
-      input.summaryMarkdown,
-      input.reviewId,
-      input.summaryModel,
-      input.overallConfidenceScore ?? null,
-      input.errorMessage ?? null,
-      now
-    ],
-  );
+  
+  const jobRow = await db.select({ steps: jobs.steps }).from(jobs).where(eq(jobs.id, jobId)).get();
+  const steps = parseJsonColumn(jobRow?.steps, []) as any[];
+  
+  const existingStep = steps.find((s: any) => s.name === 'Completing');
+  if (existingStep) {
+    existingStep.status = 'done';
+    existingStep.finishedAt = now;
+  } else {
+    steps.push({
+      name: 'Completing',
+      status: 'done',
+      startedAt: now,
+      finishedAt: now,
+      error: null,
+    });
+  }
+
+  await db.update(jobs).set({
+    status: 'done',
+    finished_at: now,
+    check_run_completed_at: now,
+    lease_owner: null,
+    lease_expires_at: null,
+    verdict: input.verdict,
+    file_count: input.fileCount,
+    comment_count: input.commentCount,
+    total_input_tokens: input.totalInputTokens,
+    total_output_tokens: input.totalOutputTokens,
+    summary_markdown: input.summaryMarkdown,
+    review_id: input.reviewId,
+    summary_model: input.summaryModel,
+    overall_confidence_score: input.overallConfidenceScore ?? null,
+    error_msg: input.errorMessage ?? null,
+    steps,
+  }).where(eq(jobs.id, jobId));
 }
 
-export async function failJob(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string, errorMessage: string) {
-  await queryRows(
-    env,
-    `
-      UPDATE jobs
-      SET status = 'failed',
-          finished_at = now(),
-          lease_owner = NULL,
-          lease_expires_at = NULL,
-          error_msg = $2,
-          steps = CASE
-            WHEN steps IS NOT NULL THEN (
-              SELECT jsonb_agg(
-                CASE
-                  WHEN s->>'status' = 'running'
-                  THEN s || jsonb_build_object('status', 'failed', 'finishedAt', now(), 'error', $2::text)
-                  ELSE s
-                END
-              ) FROM jsonb_array_elements(steps) s
-            )
-            ELSE steps
-          END
-      WHERE id = $1
-    `,
-    [jobId, errorMessage],
-  );
-}
-
-export async function markJobCheckRunCompleted(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string) {
-  await queryRows(
-    env,
-    `
-      UPDATE jobs
-      SET check_run_completed_at = now()
-      WHERE id = $1
-    `,
-    [jobId],
-  );
-}
-
-export async function updateJobFileCount(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string, fileCount: number) {
-  await queryRows(
-    env,
-    `
-      UPDATE jobs
-      SET file_count = $2
-      WHERE id = $1
-    `,
-    [jobId, fileCount],
-  );
-}
-
-export async function completePreparationStep(env: Pick<AppBindings, 'HYPERDRIVE'>, jobId: string, fileCount: number) {
+export async function failJob(env: Pick<Env, 'DB'>, jobId: string, errorMessage: string) {
+  const db = getDb(env);
   const now = new Date().toISOString();
-  await queryRows(
-    env,
-    `
-      UPDATE jobs
-      SET file_count = $2,
-          steps = (
-            SELECT jsonb_agg(
-              CASE
-                WHEN s->>'name' = 'Preparation'
-                THEN s || jsonb_build_object('status', 'done', 'finishedAt', $3::text)
-                ELSE s
-              END
-            ) FROM jsonb_array_elements(steps) s
-          )
-      WHERE id = $1
-    `,
-    [jobId, fileCount, now],
-  );
+
+  const jobRow = await db.select({ steps: jobs.steps }).from(jobs).where(eq(jobs.id, jobId)).get();
+  const steps = parseJsonColumn(jobRow?.steps, []) as any[];
+
+  for (const step of steps) {
+    if (step.status === 'running') {
+      step.status = 'failed';
+      step.finishedAt = now;
+      step.error = errorMessage;
+    }
+  }
+
+  await db.update(jobs).set({
+    status: 'failed',
+    finished_at: now,
+    lease_owner: null,
+    lease_expires_at: null,
+    error_msg: errorMessage,
+    steps,
+  }).where(eq(jobs.id, jobId));
+}
+
+export async function markJobCheckRunCompleted(env: Pick<Env, 'DB'>, jobId: string) {
+  const db = getDb(env);
+  await db.update(jobs).set({ check_run_completed_at: new Date().toISOString() }).where(eq(jobs.id, jobId));
+}
+
+export async function updateJobFileCount(env: Pick<Env, 'DB'>, jobId: string, fileCount: number) {
+  const db = getDb(env);
+  await db.update(jobs).set({ file_count: fileCount }).where(eq(jobs.id, jobId));
+}
+
+export async function completePreparationStep(env: Pick<Env, 'DB'>, jobId: string, fileCount: number) {
+  const db = getDb(env);
+  const now = new Date().toISOString();
+
+  const jobRow = await db.select({ steps: jobs.steps }).from(jobs).where(eq(jobs.id, jobId)).get();
+  const steps = parseJsonColumn(jobRow?.steps, []) as any[];
+
+  const prepStep = steps.find((s: any) => s.name === 'Preparation');
+  if (prepStep) {
+    prepStep.status = 'done';
+    prepStep.finishedAt = now;
+  }
+
+  await db.update(jobs).set({
+    file_count: fileCount,
+    steps,
+  }).where(eq(jobs.id, jobId));
 }
 
 export async function findExistingJobForHead(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   input: { owner: string; repo: string; prNumber: number; commitSha: string; trigger: 'auto' | 'mention' },
 ) {
-  const [row] = await queryRows<JobRow>(
-    env,
-    `
-      SELECT j.*, r.owner, r.repo, r.installation_id
-      FROM jobs j
-      JOIN repositories r ON j.repository_id = r.id
-      WHERE r.owner = $1
-        AND r.repo = $2
-        AND j.pr_number = $3
-        AND j.commit_sha = $4
-        AND j.trigger = $5
-      ORDER BY j.created_at DESC
-      LIMIT 1
-    `,
-    [input.owner, input.repo, input.prNumber, hexToBytes(input.commitSha), input.trigger],
-  );
+  const db = getDb(env);
+  const res = await db.select()
+  .from(jobs)
+  .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
+  .where(and(
+    eq(repositories.owner, input.owner),
+    eq(repositories.repo, input.repo),
+    eq(jobs.pr_number, input.prNumber),
+    eq(jobs.commit_sha, Array.from(hexToBytes(input.commitSha))),
+    eq(jobs.trigger, input.trigger)
+  ))
+  .orderBy(desc(jobs.created_at))
+  .limit(1)
+  .get();
 
-  return row ? mapJob(row) : null;
+  return res ? mapJob(mergeRow(res)) : null;
 }
 
 export async function updateJobStep(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   jobId: string,
   stepName: string,
   update: {
@@ -718,188 +563,147 @@ export async function updateJobStep(
     error?: string | null;
   },
 ) {
+  const db = getDb(env);
   const now = new Date().toISOString();
+
   const startedAt = update.status === 'running' ? now : (update.startedAt ?? null);
   const finishedAt = update.status === 'done' || update.status === 'failed' ? now : (update.finishedAt ?? null);
   const error = update.error ?? null;
 
-  // Single query that either updates existing step or appends a new one
-  await queryRows(
-    env,
-    `
-      UPDATE jobs
-      SET heartbeat_at = now(),
-          steps = CASE
-        WHEN EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(steps, '[]'::jsonb)) s WHERE s->>'name' = $2)
-        THEN (
-          SELECT jsonb_agg(
-            CASE
-              WHEN s->>'name' = $2
-              THEN s || jsonb_build_object(
-                'status', $3::text,
-                'startedAt', COALESCE($4::text, s->>'startedAt'),
-                'finishedAt', COALESCE($5::text, s->>'finishedAt'),
-                'error', COALESCE($6::text, s->>'error')
-              )
-              ELSE s
-            END
-          ) FROM jsonb_array_elements(COALESCE(steps, '[]'::jsonb)) s
-        )
-        ELSE COALESCE(steps, '[]'::jsonb) || jsonb_build_array(
-          jsonb_build_object(
-            'name', $2::text,
-            'status', $3::text,
-            'startedAt', $4::text,
-            'finishedAt', $5::text,
-            'error', $6::text
-          )
-        )
-      END
-      WHERE id = $1
-    `,
-    [jobId, stepName, update.status, startedAt, finishedAt, error],
-  );
+  const jobRow = await db.select({ steps: jobs.steps }).from(jobs).where(eq(jobs.id, jobId)).get();
+  if (!jobRow) return;
+
+  const steps = parseJsonColumn(jobRow.steps, []) as any[];
+  const step = steps.find((s: any) => s.name === stepName);
+  
+  if (step) {
+    step.status = update.status;
+    step.startedAt = startedAt ?? step.startedAt;
+    step.finishedAt = finishedAt ?? step.finishedAt;
+    step.error = error ?? step.error;
+  } else {
+    steps.push({
+      name: stepName,
+      status: update.status,
+      startedAt,
+      finishedAt,
+      error,
+    });
+  }
+
+  await db.update(jobs).set({
+    heartbeat_at: now,
+    steps,
+  }).where(eq(jobs.id, jobId));
 }
 
 export async function recoverStaleJobs(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   thresholdMinutes = 20,
 ): Promise<number> {
-  const rows = await queryRows<{ id: string }>(env, `
-    UPDATE jobs
-    SET status     = 'failed',
-        finished_at = now(),
-        error_msg  = 'Job timed out: worker crashed or was evicted.'
-    WHERE status = 'running'
-      AND started_at < now() - ($1 || ' minutes')::interval
-    RETURNING id
-  `, [String(thresholdMinutes)]);
+  const db = getDb(env);
+  const rows = await db.update(jobs)
+    .set({
+      status: 'failed',
+      finished_at: sql`CURRENT_TIMESTAMP`,
+      error_msg: 'Job timed out: worker crashed or was evicted.'
+    })
+    .where(and(
+      eq(jobs.status, 'running'),
+      lt(jobs.started_at, sql`datetime('now', '-' || ${thresholdMinutes} || ' minutes')`)
+    ))
+    .returning({ id: jobs.id });
 
   return rows.length;
 }
 
 export async function recoverExpiredJobLeases(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   maxRecoveryCount = 3,
   unleasedGraceSeconds = 300,
 ) {
-  const requeued = await queryRows<{ id: string }>(
-    env,
-    `
-      WITH expired AS (
-        SELECT id
-        FROM jobs
-        WHERE status = 'running'
-          AND (
-            (
-              lease_expires_at IS NOT NULL
-              AND lease_expires_at < now()
-            )
-            OR (
-              lease_expires_at IS NULL
-              AND COALESCE(last_queue_message_at, heartbeat_at, started_at, created_at) < now() - ($2 || ' seconds')::interval
-            )
-          )
-          AND recovery_count < $1
-        ORDER BY COALESCE(lease_expires_at, last_queue_message_at, heartbeat_at, started_at, created_at) ASC
-        LIMIT 25
-        FOR UPDATE SKIP LOCKED
+  const db = getDb(env);
+  
+  const expiredJobs = await db.select({ id: jobs.id, recovery_count: jobs.recovery_count, steps: jobs.steps })
+    .from(jobs)
+    .where(and(
+      eq(jobs.status, 'running'),
+      or(
+        and(isNotNull(jobs.lease_expires_at), lt(jobs.lease_expires_at, sql`CURRENT_TIMESTAMP`)),
+        and(isNull(jobs.lease_expires_at), lt(sql`COALESCE(last_queue_message_at, heartbeat_at, started_at, created_at)`, sql`datetime('now', '-' || ${unleasedGraceSeconds} || ' seconds')`))
       )
-      UPDATE jobs j
-      SET lease_owner = NULL,
-          lease_expires_at = NULL,
-          heartbeat_at = NULL,
-          recovery_count = recovery_count + 1,
-          last_queue_message_at = now(),
-          error_msg = NULL
-      FROM expired
-      WHERE j.id = expired.id
-      RETURNING j.id
-    `,
-    [maxRecoveryCount, String(unleasedGraceSeconds)],
-  );
+    ))
+    .limit(50)
+    .all();
 
-  const failed = await queryRows<JobRow>(
-    env,
-    `
-      WITH expired AS (
-        SELECT id
-        FROM jobs
-        WHERE status = 'running'
-          AND (
-            (
-              lease_expires_at IS NOT NULL
-              AND lease_expires_at < now()
-            )
-            OR (
-              lease_expires_at IS NULL
-              AND COALESCE(last_queue_message_at, heartbeat_at, started_at, created_at) < now() - ($2 || ' seconds')::interval
-            )
-          )
-          AND recovery_count >= $1
-        ORDER BY COALESCE(lease_expires_at, last_queue_message_at, heartbeat_at, started_at, created_at) ASC
-        LIMIT 25
-        FOR UPDATE SKIP LOCKED
-      ),
-      updated AS (
-        UPDATE jobs j
-        SET status = 'failed',
-            finished_at = now(),
-            lease_owner = NULL,
-            lease_expires_at = NULL,
-            heartbeat_at = NULL,
-            error_msg = 'Job timed out: worker crashed or was evicted.',
-            steps = CASE
-              WHEN steps IS NOT NULL THEN (
-                SELECT jsonb_agg(
-                  CASE
-                    WHEN s->>'status' = 'running'
-                    THEN s || jsonb_build_object('status', 'failed', 'finishedAt', now(), 'error', 'Job timed out: worker crashed or was evicted.')
-                    ELSE s
-                  END
-                ) FROM jsonb_array_elements(steps) s
-              )
-              ELSE steps
-            END
-        FROM expired
-        WHERE j.id = expired.id
-        RETURNING j.*
-      )
-      SELECT u.*, r.owner, r.repo, r.installation_id
-      FROM updated u
-      JOIN repositories r ON u.repository_id = r.id
-    `,
-    [maxRecoveryCount, String(unleasedGraceSeconds)],
-  );
+  const toRequeue = expiredJobs.filter(j => (j.recovery_count || 0) < maxRecoveryCount);
+  const toFail = expiredJobs.filter(j => (j.recovery_count || 0) >= maxRecoveryCount);
 
-  return {
-    requeuedJobIds: requeued.map((row) => row.id),
-    failedJobs: failed,
-  };
+  const requeuedJobIds: string[] = [];
+  if (toRequeue.length > 0) {
+    for (const j of toRequeue) {
+      await db.update(jobs).set({
+        lease_owner: null,
+        lease_expires_at: null,
+        heartbeat_at: null,
+        recovery_count: (j.recovery_count || 0) + 1,
+        last_queue_message_at: sql`CURRENT_TIMESTAMP`,
+        error_msg: null,
+      }).where(eq(jobs.id, j.id!));
+      requeuedJobIds.push(j.id!);
+    }
+  }
+
+  const failedJobs: any[] = [];
+  if (toFail.length > 0) {
+    for (const j of toFail) {
+      const steps = (parseJsonColumn(j.steps, []) as any[]).map((s: any) => {
+        if (s.status === 'running') {
+          return { ...s, status: 'failed', finishedAt: new Date().toISOString(), error: 'Job timed out: worker crashed or was evicted.' };
+        }
+        return s;
+      });
+
+      const [failed] = await db.update(jobs).set({
+        status: 'failed',
+        finished_at: sql`CURRENT_TIMESTAMP`,
+        lease_owner: null,
+        lease_expires_at: null,
+        heartbeat_at: null,
+        error_msg: 'Job timed out: worker crashed or was evicted.',
+        steps,
+      }).where(eq(jobs.id, j.id!)).returning();
+
+      const repo = await db.select().from(repositories).where(eq(repositories.id, failed.repository_id!)).get();
+      failedJobs.push({ ...failed, owner: repo?.owner, repo: repo?.repo, installation_id: repo?.installation_id });
+    }
+  }
+
+  return { requeuedJobIds, failedJobs };
 }
 
 export async function getTerminalJobsNeedingCheckRunCompletion(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   limit = 25,
 ) {
-  return queryRows<JobRow>(
-    env,
-    `
-      SELECT j.*, r.owner, r.repo, r.installation_id
-      FROM jobs j
-      JOIN repositories r ON j.repository_id = r.id
-      WHERE j.status IN ('failed', 'superseded')
-        AND j.check_run_id IS NOT NULL
-        AND j.check_run_completed_at IS NULL
-      ORDER BY COALESCE(j.finished_at, j.started_at, j.created_at) ASC
-      LIMIT $1
-    `,
-    [limit],
-  );
+  const db = getDb(env);
+  const rows = await db.select()
+  .from(jobs)
+  .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
+  .where(and(
+    inArray(jobs.status, ['failed', 'superseded']),
+    isNotNull(jobs.check_run_id),
+    isNull(jobs.check_run_completed_at)
+  ))
+  .orderBy(sql`COALESCE(${jobs.finished_at}, ${jobs.started_at}, ${jobs.created_at}) ASC`)
+  .limit(limit)
+  .all();
+
+  return rows.map(r => mergeRow(r));
 }
 
 export async function supersedeOlderJobs(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   input: {
     installationId: string;
     owner: string;
@@ -908,27 +712,47 @@ export async function supersedeOlderJobs(
     newJobId: string;
   },
 ): Promise<number> {
-  const rows = await queryRows<{ id: string }>(
-    env,
-    `
-      UPDATE jobs j
-      SET status = 'superseded',
-          finished_at = now(),
-          lease_owner = NULL,
-          lease_expires_at = NULL,
-          error_msg = 'Superseded by a newer commit or job.'
-      FROM repositories r
-      WHERE j.repository_id = r.id
-        AND r.installation_id = $1
-        AND r.owner = $2
-        AND r.repo = $3
-        AND j.pr_number = $4
-        AND j.id != $5
-        AND j.status IN ('queued', 'running')
-      RETURNING j.id
-    `,
-    [input.installationId, input.owner, input.repo, input.prNumber, input.newJobId],
-  );
+  const db = getDb(env);
+  const repo = await getOrCreateRepository(env, {
+    installationId: input.installationId,
+    owner: input.owner,
+    repo: input.repo,
+  });
+
+  const rows = await db.update(jobs).set({
+    status: 'superseded',
+    finished_at: sql`CURRENT_TIMESTAMP`,
+    lease_owner: null,
+    lease_expires_at: null,
+    error_msg: 'Superseded by a newer commit or job.',
+  }).where(and(
+    eq(jobs.repository_id, repo),
+    eq(jobs.pr_number, input.prNumber),
+    ne(jobs.id, input.newJobId),
+    inArray(jobs.status, ['queued', 'running'])
+  )).returning({ id: jobs.id });
 
   return rows.length;
+}
+
+export async function forceRestartJob(
+  env: Pick<Env, 'DB'>,
+  jobId: string,
+): Promise<boolean> {
+  const db = getDb(env);
+
+  const existing = await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.id, jobId)).get();
+  if (!existing) return false;
+
+  await db.update(jobs).set({
+    status: 'running',
+    lease_owner: null,
+    lease_expires_at: null,
+    heartbeat_at: null,
+    recovery_count: 0,
+    last_queue_message_at: sql`CURRENT_TIMESTAMP`,
+    error_msg: null,
+  }).where(eq(jobs.id, jobId));
+
+  return true;
 }

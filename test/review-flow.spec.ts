@@ -4,7 +4,7 @@ import { vi } from 'vitest';
 import { findExistingJobForHead, getJobForProcessing, insertJob, updateJobFileCount, updateJobStep } from '@server/db/jobs';
 import { getFileReviewsForJobs, upsertFileReview } from '@server/db/file-reviews';
 import { defaultRepoConfig } from '@shared/schema';
-import { runWithDb } from '@server/db/client';
+
 
 const sha = (char: string) => char.repeat(40);
 
@@ -84,7 +84,7 @@ dbDescribe('Review Flow Lifecycle', () => {
   const env = createTestEnv();
 
   async function runAndDrain(message: Parameters<typeof runReviewJob>[1]) {
-    await runWithDb(env, async () => {
+    await (async () => {
       (env.REVIEW_QUEUE as any).sent.length = 0;
       await runReviewJob(env, message);
       const queue = env.REVIEW_QUEUE as any;
@@ -139,19 +139,7 @@ dbDescribe('Review Flow Lifecycle', () => {
       
       getDiffSpy.mockImplementationOnce(async () => {
           const { getDb } = await import('@server/db/client');
-          const sql = getDb(env);
-          await sql.query(
-            `
-              UPDATE jobs j
-              SET status = 'superseded'
-              FROM repositories r
-              WHERE j.repository_id = r.id
-                AND r.owner = $1
-                AND r.repo = $2
-                AND j.pr_number = $3
-            `,
-            ['test-owner', repo, 2],
-          );
+          await require('@server/db/jobs').supersedeOlderJobs(env, { installationId: 'mock-installation-id', owner: 'owner', repo: 'repo', prNumber: 42, newJobId: 'dummy' });
           return generateMockDiff([{ path: 'test.ts', content: 'a' }]);
       });
 
@@ -378,7 +366,7 @@ dbDescribe('Review Flow Lifecycle', () => {
     await updateJobFileCount(env, job.id, 1);
     await updateJobStep(env, job.id, 'Preparation', { status: 'done' });
 
-    await runWithDb(env, async () => {
+    await (async () => {
       (env.REVIEW_QUEUE as any).sent.length = 0;
       const result = await runReviewJob(env, {
         jobId: job.id,
@@ -457,7 +445,7 @@ dbDescribe('Review Flow Lifecycle', () => {
     await updateJobFileCount(env, job.id, 3);
     await updateJobStep(env, job.id, 'Preparation', { status: 'done' });
 
-    await runWithDb(env, async () => {
+    await (async () => {
       (env.REVIEW_QUEUE as any).sent.length = 0;
       const result = await runReviewJob(env, {
         jobId: job.id,
@@ -541,7 +529,7 @@ dbDescribe('Review Flow Lifecycle', () => {
       errorMessage: 'Review skipped after 3 repeated model provider outages.',
     });
 
-    await runWithDb(env, async () => {
+    await (async () => {
       (env.REVIEW_QUEUE as any).sent.length = 0;
       const result = await runReviewJob(env, {
         jobId: job.id,

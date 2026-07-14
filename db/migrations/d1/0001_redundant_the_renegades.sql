@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `repositories_owner_repo_unique` ON `repositories` (`owner`,`repo`);

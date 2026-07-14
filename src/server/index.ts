@@ -1,20 +1,18 @@
 import { createApp } from './app';
 import { runReviewJob } from './core/review';
-import type { AppBindings } from './env';
 import { reviewJobMessageSchema } from '@shared/schema';
 import { logger } from '@server/core/logger';
-import { runWithDb } from '@server/db/client';
+
 import { runBestEffortJobMaintenance } from '@server/core/job-recovery';
 
 const app = createApp();
 
 export default {
-  fetch(request: Request, env: AppBindings, ctx: ExecutionContext) {
-    return runWithDb(env, () => app.fetch(request, env, ctx));
+  fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    return app.fetch(request, env, ctx);
   },
 
-  async queue(batch: MessageBatch<unknown>, env: AppBindings, _ctx: ExecutionContext) {
-    return runWithDb(env, async () => {
+  async queue(batch: MessageBatch<unknown>, env: Env, _ctx: ExecutionContext) {
       try {
         await runBestEffortJobMaintenance(env);
       } catch (error) {
@@ -51,6 +49,19 @@ export default {
       } catch (error) {
         logger.error('Post-batch maintenance task failed', error instanceof Error ? error : new Error(String(error)));
       }
-    });
   },
-} satisfies ExportedHandler<AppBindings>;
+
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    const { runFullSync } = await import('@server/services/sync/github-sync');
+    ctx.waitUntil(
+      runFullSync(env).catch((error) => {
+        logger.error('Scheduled full sync failed', error instanceof Error ? error : new Error(String(error)));
+      })
+    );
+  },
+} satisfies ExportedHandler<Env>;
+
+export { RepoAgent } from './agents/repo';
+export { ReviewAgent } from './agents/review';
+export { Chat, GitHubLikeMCP } from './agents/orchestrator';
+export { PrReviewStream } from './agents/pr-stream';

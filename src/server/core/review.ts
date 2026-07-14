@@ -1,10 +1,9 @@
 import { logger } from './logger';
 import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHubWebhookPayload, type IssueCommentWebhookPayload, type PullRequestWebhookPayload } from '@shared/github';
 import { defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
-import type { AppBindings } from '@server/env';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview } from '@server/db/file-reviews';
 import { getResolvedModelConfig } from '@server/db/model-configs';
-import { claimJobLease, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStep } from '@server/db/jobs';
+import { claimJobLease, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
 import { filterReviewableFiles, parseUnifiedDiff } from './diff';
 
 import { GitHubService } from '../services/github';
@@ -93,7 +92,7 @@ function canInheritParentFileReview(config: RepoConfig, review: { model_used: st
   return configuredModelSet(config).has(normalizeModelId(review.model_used));
 }
 
-async function resolveModelProviderName(env: Pick<AppBindings, 'HYPERDRIVE'>, modelId: string | null | undefined) {
+async function resolveModelProviderName(env: Pick<Env, 'DB'>, modelId: string | null | undefined) {
   if (!modelId || modelId === 'unconfigured') return null;
 
   try {
@@ -185,7 +184,7 @@ export function extractReviewRequest(input: {
   return null;
 }
 
-export async function runReviewJob(env: AppBindings, message: ReviewJobMessage): Promise<ReviewJobRunResult> {
+export async function runReviewJob(env: Env, message: ReviewJobMessage): Promise<ReviewJobRunResult> {
   const resolved = await resolveQueuedJob(env, message);
   if (!resolved) {
     return { action: 'ack' };
@@ -252,7 +251,7 @@ export async function runReviewJob(env: AppBindings, message: ReviewJobMessage):
 }
 
 async function resolveQueuedJob(
-  env: AppBindings,
+  env: Env,
   message: ReviewJobMessage,
 ): Promise<{ job: PersistedReviewJob; phase: 'prepare' | 'review' | 'finalize' } | null> {
   if (message.jobId) {
@@ -384,7 +383,7 @@ async function resolveQueuedJob(
 }
 
 async function runPreparePhase(
-  env: AppBindings,
+  env: Env,
   job: PersistedReviewJob,
   leaseOwner: string,
   github: GitHubService,
@@ -400,8 +399,21 @@ async function runPreparePhase(
       title: 'Review queued',
       summary: 'Codra has started reviewing this pull request.',
     });
-    checkRunId = checkRun.id;
-    await updateJobCheckRun(env, job.id, checkRun.id);
+    checkRunId = checkRun.id ?? undefined;
+    if (checkRun.id) {
+      await updateJobCheckRun(env, job.id, checkRun.id);
+    }
+  }
+
+  // Post a status comment to the PR so the team knows Codra is active
+  if (!job.statusCommentId) {
+    try {
+      const statusBody = `## \u{1F50D} Code Review\n\nCodra is reviewing this pull request. A summary will be posted here when the review is complete.`;
+      const comment = await github.createIssueComment(job.owner, job.repo, job.prNumber, statusBody);
+      await updateJobStatusComment(env, job.id, comment.id);
+    } catch (err) {
+      logger.error('Failed to post status comment', err);
+    }
   }
 
   const rawDiff = await github.getPullRequestDiff(job.owner, job.repo, job.prNumber);
@@ -425,7 +437,7 @@ async function runPreparePhase(
 }
 
 async function runReviewPhase(
-  env: AppBindings,
+  env: Env,
   job: PersistedReviewJob,
   leaseOwner: string,
   github: GitHubService,
@@ -434,6 +446,18 @@ async function runReviewPhase(
   if (!hasCompletedStep(job, 'Preparation')) {
     await runPreparePhase(env, job, leaseOwner, github);
     return;
+  }
+
+  if (!hasCompletedStep(job, 'Standardization')) {
+    try {
+      await updateJobStep(env, job.id, 'Standardization', { status: 'running' });
+      const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
+      await standardizeRepository(env, job, github, model, config);
+      await updateJobStep(env, job.id, 'Standardization', { status: 'done' });
+    } catch (err) {
+      logger.error('Failed to run repository standardization checks', err);
+      await updateJobStep(env, job.id, 'Standardization', { status: 'failed', error: String(err) });
+    }
   }
 
   await updateJobStep(env, job.id, 'Reviewing Files', { status: 'running' });
@@ -482,14 +506,14 @@ async function runReviewPhase(
           fileStatus: 'done',
           modelUsed: inherited.model_used,
           modelProvider: inherited.model_provider,
-          diffLineCount: inherited.diff_line_count,
+          diffLineCount: inherited.diff_line_count ?? 0,
           diffInput: inherited.diff_input,
           rawAiOutput: inherited.raw_ai_output,
           parsedComments: inherited.parsed_comments as ParsedReviewComment[],
           inputTokens: inherited.input_tokens,
           outputTokens: inherited.output_tokens,
           durationMs: inherited.duration_ms,
-          verdict: inherited.verdict,
+          verdict: inherited.verdict as any,
           fileSummary: inherited.file_summary,
           overallCorrectness: inherited.overall_correctness,
           confidenceScore: inherited.confidence_score,
@@ -540,7 +564,7 @@ async function runReviewPhase(
 }
 
 async function reviewAndPersistFile(
-  env: AppBindings,
+  env: Env,
   job: PersistedReviewJob,
   file: ReturnType<typeof parseUnifiedDiff>[number],
   pr: Awaited<ReturnType<GitHubService['getPullRequest']>>,
@@ -580,6 +604,22 @@ async function reviewAndPersistFile(
       confidenceScore: response.parsed.confidenceScore,
       errorMessage: null,
     });
+
+    if (response.parsed.comments && response.parsed.comments.length > 0) {
+      try {
+        const streamId = (env as any).PrReviewStream.idFromName(`${job.owner}/${job.repo}/${job.prNumber}`);
+        const streamStub = (env as any).PrReviewStream.get(streamId);
+        for (const comment of response.parsed.comments) {
+          await streamStub.fetch(new Request('http://do/comment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(comment),
+          }));
+        }
+      } catch (streamErr) {
+        logger.error('Failed to stream real-time comment to Durable Object', streamErr);
+      }
+    }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown file review error';
     const modelId = config.model?.main ?? 'unconfigured';
@@ -663,7 +703,7 @@ async function reviewAndPersistFile(
 }
 
 async function runFinalizePhase(
-  env: AppBindings,
+  env: Env,
   job: PersistedReviewJob,
   leaseOwner: string,
   github: GitHubService,
@@ -777,9 +817,42 @@ async function runFinalizePhase(
     errorMessage: partialErrorMessage,
   });
   logger.info(`Review job completed: ${job.owner}/${job.repo} PR #${job.prNumber}`);
+
+  // Update the status comment with a narrative review summary
+  if (job.statusCommentId) {
+    try {
+      const successSummaries = fileSummaries
+        .filter(f => f.verdict !== 'failed' && f.summary)
+        .map(f => f.summary);
+      const changeSummary = successSummaries.length > 0
+        ? successSummaries.join(' ').replace(/\s+/g, ' ').trim()
+        : `This pull request modifies ${files.length} file${files.length === 1 ? '' : 's'}.`;
+
+      const topFindings = finalComments.slice(0, 3).map(c => c.title).filter(Boolean);
+      const findingsText = topFindings.length > 0
+        ? ` The review feedback ${topFindings.length === 1 ? 'points out' : 'highlights'} ${topFindings.map(t => t.toLowerCase()).join(', and ')}.`
+        : '';
+
+      const failureNote = hasFailures
+        ? `\n\n> [!WARNING]\n> ${failedFileCount} file${failedFileCount === 1 ? '' : 's'} could not be reviewed due to provider outages.`
+        : '';
+
+      const narrativeBody = [
+        `## Code Review`,
+        ``,
+        `${changeSummary}${findingsText}${failureNote}`,
+        ``,
+        `**Reviewed commit:** \`${pr.head.sha.slice(0, 10)}\` · **Files:** ${files.length} · **Comments:** ${finalComments.length}`,
+      ].join('\n');
+
+      await github.updateIssueComment(job.owner, job.repo, job.statusCommentId, narrativeBody);
+    } catch (err) {
+      logger.error('Failed to update status comment with summary', err);
+    }
+  }
 }
 
-async function heartbeatAndCheckSuperseded(env: AppBindings, jobId: string, leaseOwner: string) {
+async function heartbeatAndCheckSuperseded(env: Env, jobId: string, leaseOwner: string) {
   await heartbeatJobLease(env, jobId, leaseOwner, JOB_LEASE_SECONDS);
   const currentJob = await getJobForProcessing(env, jobId);
   if (currentJob?.status === 'superseded') {
@@ -788,7 +861,7 @@ async function heartbeatAndCheckSuperseded(env: AppBindings, jobId: string, leas
 }
 
 async function enqueueJobPhase(
-  env: AppBindings,
+  env: Env,
   jobId: string,
   phase: 'prepare' | 'review' | 'finalize',
   delaySeconds = 0,
@@ -809,7 +882,7 @@ function hasCompletedStep(job: PersistedReviewJob, stepName: string) {
 }
 
 async function failJobAndCheckRun(
-  env: AppBindings,
+  env: Env,
   job: PersistedReviewJob,
   github: GitHubService,
   message: string,
@@ -829,5 +902,248 @@ async function failJobAndCheckRun(
     }
   } catch (innerError) {
     logger.error('Failed to record job failure in DB/GitHub', innerError);
+  }
+}
+
+async function fetchReferenceSettings(env: Env): Promise<string> {
+  const repo = (env as any).STANDARDIZATION_REPO || 'jmbish04/core-github-standardization';
+  const url = `https://raw.githubusercontent.com/${repo}/main/.vscode/settings.json`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch reference VS Code settings from ${url}: ${res.statusText}`);
+  }
+  return res.text();
+}
+
+function cleanJsonc(content: string): string {
+  return content
+    // Remove single line comments
+    .replace(/\/\/.*$/gm, '')
+    // Remove multi-line comments
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    // Remove trailing commas
+    .replace(/,(\s*[\]}])/g, '$1')
+    .trim();
+}
+
+function mergeSettings(existingStr: string, referenceStr: string): { mergedContent: string; changed: boolean } {
+  try {
+    const existingClean = cleanJsonc(existingStr);
+    const referenceClean = cleanJsonc(referenceStr);
+    
+    const existing = JSON.parse(existingClean);
+    const reference = JSON.parse(referenceClean);
+    
+    let changed = false;
+    const merged = { ...existing };
+    
+    for (const [key, value] of Object.entries(reference)) {
+      if (JSON.stringify(existing[key]) !== JSON.stringify(value)) {
+        merged[key] = value;
+        changed = true;
+      }
+    }
+    
+    return {
+      mergedContent: JSON.stringify(merged, null, 2),
+      changed,
+    };
+  } catch {
+    // If parsing fails (e.g. invalid existing JSON), we overwrite with reference settings
+    return {
+      mergedContent: referenceStr,
+      changed: true,
+    };
+  }
+}
+
+type HousekeepingChange = {
+  path: string;
+  content: string;
+  message: string;
+  /** SHA of the existing file (for updates), undefined for new files. */
+  existingSha?: string;
+};
+
+async function standardizeRepository(
+  env: Env,
+  job: PersistedReviewJob,
+  github: GitHubService,
+  model: ModelService,
+  config: RepoConfig
+) {
+  const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
+  const defaultBranch = (await github.getRepo(job.owner, job.repo)).default_branch;
+  const changes: HousekeepingChange[] = [];
+
+  // 1. VS Code settings check (against default branch, not the PR branch)
+  try {
+    const referenceSettingsText = await fetchReferenceSettings(env);
+    const existingFile = (await github.getRepoFileWithRefOrNull(job.owner, job.repo, '.vscode/settings.jsonc', defaultBranch))
+      || (await github.getRepoFileWithRefOrNull(job.owner, job.repo, '.vscode/settings.json', defaultBranch));
+
+    if (!existingFile) {
+      changes.push({
+        path: '.vscode/settings.jsonc',
+        content: referenceSettingsText,
+        message: 'chore: add standardized VS Code settings',
+      });
+    } else {
+      const { mergedContent, changed } = mergeSettings(existingFile.content || '', referenceSettingsText);
+      if (changed) {
+        const fileToUpdate = (await github.getRepoFileWithRefOrNull(job.owner, job.repo, '.vscode/settings.jsonc', defaultBranch))
+          ? '.vscode/settings.jsonc'
+          : '.vscode/settings.json';
+        const fileInfo = await github.getRepoFileWithRefOrNull(job.owner, job.repo, fileToUpdate, defaultBranch);
+        changes.push({
+          path: fileToUpdate,
+          content: mergedContent,
+          message: 'chore: update VS Code settings with standardized keys',
+          existingSha: fileInfo?.sha,
+        });
+      }
+    }
+  } catch (err) {
+    logger.error('Failed to evaluate VS Code settings', err);
+  }
+
+  // 2. AGENTS.md check (against default branch)
+  try {
+    const agentsFileInfo = await github.getRepoFileWithRefOrNull(job.owner, job.repo, 'AGENTS.md', defaultBranch);
+
+    const repoTree = await github.getRepoTree(job.owner, job.repo, pr.head.sha);
+    const filesList = repoTree.tree
+      .filter(node => node.type === 'blob')
+      .map(node => node.path)
+      .filter(path => !path.includes('node_modules') && !path.includes('.git') && !path.includes('.wrangler') && !path.includes('dist') && !path.includes('.next') && !path.includes('build'))
+      .slice(0, 150);
+
+    const configFiles = ['package.json', 'wrangler.jsonc', 'wrangler.toml', 'tsconfig.json', 'README.md'];
+    const configDetails: string[] = [];
+    for (const conf of configFiles) {
+      if (filesList.includes(conf)) {
+        const fileContentInfo = await github.getRepoFileWithRefOrNull(job.owner, job.repo, conf, defaultBranch);
+        if (fileContentInfo && fileContentInfo.content) {
+          configDetails.push(`=== File: ${conf} ===\n${fileContentInfo.content.slice(0, 1500)}`);
+        }
+      }
+    }
+
+    const codebaseInfo = [
+      `Files in repository (truncated to first 150):\n${filesList.map(f => `- ${f}`).join('\n')}`,
+      `Configuration Files:\n${configDetails.join('\n\n')}`
+    ].join('\n\n');
+
+    // Detect tech stack for skill-aware prompting
+    const hasWrangler = filesList.some(f => f === 'wrangler.jsonc' || f === 'wrangler.toml');
+    const hasPython = filesList.some(f => f.endsWith('.py') || f === 'pyproject.toml' || f === 'requirements.txt');
+    const skillContext: string[] = [];
+    if (hasWrangler) {
+      skillContext.push('This is a Cloudflare Workers project. Apply the following best practice skills when writing AGENTS.md:');
+      try {
+        const { default: cfJedi } = await import('../skills/cloudflare-jedi/SKILL.md?raw') as { default: string };
+        const { default: agentsSdk } = await import('../skills/agents-sdk/SKILL.md?raw') as { default: string };
+        const { default: workersBp } = await import('../skills/workers-best-practices/SKILL.md?raw') as { default: string };
+        skillContext.push(
+          '=== CLOUDFLARE JEDI SKILL (excerpt) ===',
+          cfJedi.slice(0, 3000),
+          '=== AGENTS SDK SKILL (excerpt) ===',
+          agentsSdk.slice(0, 3000),
+          '=== WORKERS BEST PRACTICES SKILL (excerpt) ===',
+          workersBp.slice(0, 3000),
+        );
+      } catch {
+        // Skills may not be available in all builds
+      }
+    }
+    if (hasPython) {
+      skillContext.push('This project includes Python code. Ensure AGENTS.md covers Python conventions (SQLAlchemy for DB access, type hints, formatting with ruff/black).');
+    }
+
+    const skillBlock = skillContext.length > 0 ? `\n\nTech Stack Skills:\n${skillContext.join('\n')}` : '';
+
+    if (!agentsFileInfo || !agentsFileInfo.content) {
+      const systemPrompt = `You are a Principal Software Architect. Your task is to evaluate the provided codebase structure and configurations and write a complete, premium, custom AGENTS.md instruction file.
+The AGENTS.md file must establish project guidelines, style standards, behavioral constraints, and instructions tailored specifically to the project's tech stack to guide other AI agents working on this project.
+Be precise and descriptive. DO NOT write any conversational text; return ONLY the Markdown content for AGENTS.md.`;
+      const userPrompt = `Here is the codebase evaluation:\n\n${codebaseInfo}${skillBlock}`;
+
+      const res = await model.callModel(config.model?.main || 'claude-3-5-sonnet-latest', { systemPrompt, userPrompt });
+      const generatedContent = res.rawText.trim();
+      if (generatedContent.length > 50) {
+        changes.push({
+          path: 'AGENTS.md',
+          content: generatedContent,
+          message: 'docs: create standardized AGENTS.md system instructions',
+        });
+      }
+    } else {
+      const systemPrompt = `You are a Principal Software Architect. Your task is to review the existing AGENTS.md instruction file for this repository, compare it against the codebase structure and configurations, and improve/update it.
+Ensure that the instructions are complete and cover all relevant project constraints. If any considerations, style patterns, or configurations are missing, integrate them to make AGENTS.md comprehensive.
+Maintain the existing structure but improve details. DO NOT write any conversational text; return ONLY the updated Markdown content for AGENTS.md.`;
+      const userPrompt = `Codebase Info:\n${codebaseInfo}${skillBlock}\n\nExisting AGENTS.md:\n${agentsFileInfo.content}`;
+
+      const res = await model.callModel(config.model?.main || 'claude-3-5-sonnet-latest', { systemPrompt, userPrompt });
+      const updatedContent = res.rawText.trim();
+
+      if (updatedContent !== agentsFileInfo.content.trim() && updatedContent.length > 50) {
+        changes.push({
+          path: 'AGENTS.md',
+          content: updatedContent,
+          message: 'docs: verify and improve AGENTS.md system instructions',
+          existingSha: agentsFileInfo.sha,
+        });
+      }
+    }
+  } catch (err) {
+    logger.error('Failed to evaluate AGENTS.md', err);
+  }
+
+  // 3. If there are changes, open a separate housekeeping PR
+  if (changes.length === 0) {
+    logger.info(`No housekeeping changes needed for ${job.owner}/${job.repo}`);
+    return;
+  }
+
+  try {
+    // Dedup: check if an open housekeeping PR already exists
+    const existingPRs = await github.listPullRequests(job.owner, job.repo, {
+      state: 'open',
+      per_page: 30,
+    });
+    const existingHousekeepingPR = existingPRs.find(pr => pr.head.ref.startsWith('codra/housekeeping'));
+    if (existingHousekeepingPR) {
+      logger.info(`Skipping housekeeping PR: open PR #${existingHousekeepingPR.number} already exists on branch ${existingHousekeepingPR.head.ref}`);
+      return;
+    }
+
+    // Create a new branch from the default branch's HEAD
+    const defaultRef = await github.getRef(job.owner, job.repo, `heads/${defaultBranch}`);
+    const branchName = `codra/housekeeping-${Date.now()}`;
+    await github.createBranch(job.owner, job.repo, branchName, defaultRef.object.sha);
+    logger.info(`Created housekeeping branch ${branchName} from ${defaultBranch} (${defaultRef.object.sha.slice(0, 8)})`);
+
+    // Commit each change to the new branch
+    for (const change of changes) {
+      await github.createOrUpdateFileContents(job.owner, job.repo, change.path, {
+        message: change.message,
+        content: change.content,
+        sha: change.existingSha,
+        branch: branchName,
+      });
+      logger.info(`Committed ${change.path} to ${branchName}`);
+    }
+
+    // Open the PR
+    const changedFiles = changes.map(c => `- \`${c.path}\``).join('\n');
+    const housekeepingPR = await github.createPullRequest(job.owner, job.repo, {
+      title: 'chore: codra housekeeping updates',
+      body: `### Codra Housekeeping\n\nAutomated project standardization changes detected during review of PR #${job.prNumber}.\n\n**Changed files:**\n${changedFiles}\n\nThis PR was opened automatically by Codra and will be reviewed independently.`,
+      head: branchName,
+      base: defaultBranch,
+    });
+    logger.info(`Opened housekeeping PR #${housekeepingPR.number} (${housekeepingPR.html_url}) for ${job.owner}/${job.repo}`);
+  } catch (err) {
+    logger.error('Failed to open housekeeping PR', err);
   }
 }

@@ -1,6 +1,7 @@
 import { createApp } from '@server/app';
 import { createMockPRWebhook, createTestEnv } from './helpers';
 import { vi } from 'vitest';
+import { getWorkerApiKey } from '@server/utils/secrets';
 
 // Mock GitHubClient to avoid real JWT signing and network calls
 vi.mock('@server/core/github', async (importOriginal) => {
@@ -10,6 +11,7 @@ vi.mock('@server/core/github', async (importOriginal) => {
     GitHubClient: class {
       getInstallationToken = vi.fn().mockResolvedValue('fake-token');
       getRepoFileOrNull = vi.fn().mockResolvedValue(null);
+      createIssueCommentReaction = vi.fn().mockResolvedValue(undefined);
     }
   };
 });
@@ -58,7 +60,7 @@ describe('Webhook Handling Suite', () => {
 
   it('rejects signed malformed webhook JSON with a 400', async () => {
     const body = '{"not": "valid"';
-    const signature = await signPayload(env.GITHUB_APP_WEBHOOK_SECRET, body);
+    const signature = await signPayload(await getWorkerApiKey(env), body);
 
     const response = await app.request(
       'http://codra.test/webhook',
@@ -87,7 +89,7 @@ describe('Webhook Handling Suite', () => {
     rawPayload.pull_request.head.sha = 'a'.repeat(40);
     rawPayload.pull_request.base.sha = 'b'.repeat(40);
     const body = JSON.stringify(rawPayload);
-    const signature = await signPayload(env.GITHUB_APP_WEBHOOK_SECRET, body);
+    const signature = await signPayload(await getWorkerApiKey(env), body);
 
     const response = await app.request(
       'http://codra.test/webhook',
@@ -128,7 +130,7 @@ describe('Webhook Handling Suite', () => {
     rawPayload.pull_request.head.sha = 'c'.repeat(40);
     rawPayload.pull_request.base.sha = 'd'.repeat(40);
     const body = JSON.stringify(rawPayload);
-    const signature = await signPayload(env.GITHUB_APP_WEBHOOK_SECRET, body);
+    const signature = await signPayload(await getWorkerApiKey(env), body);
 
     const response = await app.request(
       'http://codra.test/',
@@ -157,7 +159,7 @@ describe('Webhook Handling Suite', () => {
       repository: { name: `repo-${Date.now()}-check-suite`, owner: { login: 'test-owner' } },
     });
     const body = JSON.stringify(rawPayload);
-    const signature = await signPayload(env.GITHUB_APP_WEBHOOK_SECRET, body);
+    const signature = await signPayload(await getWorkerApiKey(env), body);
 
     const response = await app.request(
       'http://codra.test/webhook',
@@ -190,7 +192,7 @@ describe('Webhook Handling Suite', () => {
           pull_request: { draft: true, number: 99, head: { sha: 'abc' }, base: { sha: 'def' }, user: { login: 'a' } }
       });
       const body = JSON.stringify(draftPayload);
-      const signature = await signPayload(env.GITHUB_APP_WEBHOOK_SECRET, body);
+      const signature = await signPayload(await getWorkerApiKey(env), body);
 
       const response = await app.request(
         'http://codra.test/webhook',

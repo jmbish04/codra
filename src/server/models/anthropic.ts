@@ -1,13 +1,14 @@
 import { logger } from '@server/core/logger';
 import { withTimeout } from '@server/core/timeout';
 import { ProviderRequestError, providerErrorMessage, type ModelResponse } from './types';
+import { REVIEW_RESPONSE_SCHEMA } from './schemas';
 
 const ANTHROPIC_TIMEOUT_MS = 180_000;
 const ANTHROPIC_MAX_OUTPUT_TOKENS = 4096;
 const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
 
 export interface AnthropicResponse {
-  content?: Array<{ text?: string }>;
+  content?: Array<{ type?: string; text?: string; input?: Record<string, unknown> }>;
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -35,11 +36,18 @@ export async function reviewWithAnthropic(
       },
       body: JSON.stringify({
         model,
-        system: `${input.systemPrompt}\n\nReturn only the JSON object. Do not include chain-of-thought, analysis, markdown, code fences, or explanatory prose.`,
+        system: input.systemPrompt,
         messages: [
-          { role: 'user', content: `${input.userPrompt}\n\nRespond with the required JSON object only.` },
-          { role: 'assistant', content: '{' }
+          { role: 'user', content: `${input.userPrompt}\n\nUse the codra_file_review tool to return your structured review.` },
         ],
+        tools: [
+          {
+            name: 'codra_file_review',
+            description: 'Submit the structured code review result with findings, overall explanation, correctness, and confidence score.',
+            input_schema: REVIEW_RESPONSE_SCHEMA,
+          },
+        ],
+        tool_choice: { type: 'tool', name: 'codra_file_review' },
         max_tokens: ANTHROPIC_MAX_OUTPUT_TOKENS,
         temperature: 0,
       }),
@@ -52,16 +60,23 @@ export async function reviewWithAnthropic(
   }
 
   const data = (await response.json()) as AnthropicResponse;
-  let rawText = Array.isArray(data.content)
-    ? data.content.map((part) => typeof part?.text === 'string' ? part.text : '').join('').trim()
-    : '';
 
-  if (!rawText && (!data.content || data.content.length === 0)) {
-    throw new Error('Anthropic provider returned an empty response.');
+  // Extract the tool_use result — the structured JSON is in the `input` field
+  const toolBlock = data.content?.find((block) => block.type === 'tool_use');
+  let rawText: string;
+
+  if (toolBlock?.input) {
+    rawText = JSON.stringify(toolBlock.input);
+  } else {
+    // Fallback: extract text content if tool_use failed (shouldn't happen with tool_choice)
+    rawText = Array.isArray(data.content)
+      ? data.content.map((part) => typeof part?.text === 'string' ? part.text : '').join('').trim()
+      : '';
   }
 
-  // Prepend the '{' that we pre-filled in the assistant message
-  rawText = '{' + rawText;
+  if (!rawText) {
+    throw new Error('Anthropic provider returned an empty response.');
+  }
 
   return {
     rawText,
@@ -71,3 +86,4 @@ export async function reviewWithAnthropic(
     provider: config.providerName,
   };
 }
+

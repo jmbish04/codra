@@ -186,9 +186,9 @@ export async function getGmailAccessToken(
   }
 
   const [clientEmail, keyPart1, keyPart2] = await Promise.all([
-    env.GOOGLE_CREDS_SA_CLIENT_EMAIL.get().catch(() => null),
-    env.GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1.get().catch(() => null),
-    env.GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2.get().catch(() => null),
+    (env as any).GOOGLE_CREDS_SA_CLIENT_EMAIL.get().catch(() => null),
+    (env as any).GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1.get().catch(() => null),
+    (env as any).GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2.get().catch(() => null),
   ]);
 
   if (!clientEmail) {

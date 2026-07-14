@@ -502,7 +502,6 @@ async function main() {
   const requiredSecrets = [
     "APP_PRIVATE_KEY",
     "GITHUB_APP_ID",
-    "GITHUB_APP_WEBHOOK_SECRET",
     "GITHUB_CLIENT_ID",
     "GITHUB_CLIENT_SECRET",
     "LLM_CONFIG_ENCRYPTION_KEY",

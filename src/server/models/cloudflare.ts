@@ -1,61 +1,15 @@
 import { logger } from '@server/core/logger';
-import type { AppBindings } from '@server/env';
 import { TimeoutError } from '@server/core/timeout';
 import { ProviderRequestError, type ModelResponse } from './types';
+import { REVIEW_RESPONSE_SCHEMA } from './schemas';
 
 /** Max wall-clock time allowed for a single Workers-AI call. */
 const CLOUDFLARE_TIMEOUT_MS = 180_000;
 const CLOUDFLARE_MAX_RETRIES = 0;
 const CLOUDFLARE_MAX_OUTPUT_TOKENS = 8192;
-const REVIEW_RESPONSE_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['findings', 'overall_explanation', 'overall_correctness', 'overall_confidence_score'],
-  properties: {
-    findings: {
-      type: 'array',
-      maxItems: 10,
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['title', 'body', 'priority', 'code_location'],
-        properties: {
-          title: { type: 'string', maxLength: 100 },
-          body: { type: 'string' },
-          confidence_score: { type: 'number', minimum: 0, maximum: 1 },
-          priority: { type: 'integer', minimum: 0, maximum: 3 },
-          code_location: {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              absolute_file_path: { type: 'string' },
-              line: { type: 'integer', minimum: 1 },
-              line_range: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['start', 'end'],
-                properties: {
-                  start: { type: 'integer', minimum: 1 },
-                  end: { type: 'integer', minimum: 1 },
-                },
-              },
-            },
-            anyOf: [
-              { required: ['line'] },
-              { required: ['line_range'] },
-            ],
-          },
-          code_suggestion: { type: 'string' },
-        },
-      },
-    },
-    overall_explanation: { type: 'string' },
-    overall_correctness: { type: 'string', enum: ['patch is correct', 'patch is incorrect'] },
-    overall_confidence_score: { type: 'number', minimum: 0, maximum: 1 },
-  },
-} as const;
 
 type UnknownRecord = Record<string, unknown>;
+
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null;
@@ -156,7 +110,7 @@ function extractCloudflareUsage(result: unknown) {
 }
 
 export async function reviewWithCloudflare(
-  env: Pick<AppBindings, 'AI'>,
+  env: Pick<Env, 'AI'>,
   model: string,
   input: { systemPrompt: string; userPrompt: string },
   tracker?: { incrementSubrequests(count?: number): void },

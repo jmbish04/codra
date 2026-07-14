@@ -1,5 +1,4 @@
-import type { AppBindings } from '@server/env';
-import { queryRows } from './client';
+import { getDb } from './client';
 import {
   KIMI_K2_5_MODEL,
   llmProviderSchema,
@@ -8,29 +7,10 @@ import {
   type LlmProvider,
   type ModelConfig,
 } from '@shared/schema';
+import { llmProviders, modelConfigs } from './schemas';
+import { eq, and, sql, not, like, count, inArray } from 'drizzle-orm';
 
-type ProviderRow = {
-  id: string;
-  name: string;
-  api_format: LlmApiFormat;
-  base_url: string | null;
-  encrypted_api_key: string | null;
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
-type ModelConfigRow = {
-  model_id: string;
-  provider_id: string;
-  provider_name: string;
-  api_format: LlmApiFormat;
-  model_name: string;
-  rpm: number | null;
-  tpm: number | null;
-  rpd: number | null;
-  updated_at: string;
-};
+type ProviderRow = typeof llmProviders.$inferSelect;
 
 export type LlmProviderSecret = LlmProvider & {
   encryptedApiKey: string | null;
@@ -48,7 +28,7 @@ function mapProvider(row: ProviderRow): LlmProvider {
     name: row.name,
     apiFormat: row.api_format,
     baseUrl: row.base_url,
-    enabled: row.enabled,
+    enabled: Boolean(row.enabled),
     hasApiKey: Boolean(row.encrypted_api_key),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -62,7 +42,7 @@ function mapProviderSecret(row: ProviderRow): LlmProviderSecret {
   };
 }
 
-function mapModelConfig(row: ModelConfigRow): ModelConfig {
+function mapModelConfig(row: any): ModelConfig {
   return modelConfigSchema.parse({
     modelId: row.model_id,
     providerId: row.provider_id,
@@ -76,54 +56,26 @@ function mapModelConfig(row: ModelConfigRow): ModelConfig {
   });
 }
 
-const MODEL_SELECT = `
-  SELECT
-    mc.model_id,
-    mc.provider_id,
-    p.name AS provider_name,
-    p.api_format,
-    mc.model_name,
-    mc.rpm,
-    mc.tpm,
-    mc.rpd,
-    mc.updated_at
-  FROM model_configs mc
-  JOIN llm_providers p ON p.id = mc.provider_id
-`;
-
-export async function listLlmProviders(env: Pick<AppBindings, 'HYPERDRIVE'>): Promise<LlmProvider[]> {
-  const rows = await queryRows<ProviderRow>(
-    env,
-    `SELECT id, name, api_format, base_url, encrypted_api_key, enabled, created_at, updated_at
-     FROM llm_providers
-     ORDER BY name ASC`,
-  );
+export async function listLlmProviders(env: Pick<Env, 'DB'>): Promise<LlmProvider[]> {
+  const db = getDb(env);
+  const rows = await db.select().from(llmProviders).orderBy(llmProviders.name).all();
   return rows.map(mapProvider);
 }
 
-export async function listLlmProviderSecrets(env: Pick<AppBindings, 'HYPERDRIVE'>): Promise<LlmProviderSecret[]> {
-  const rows = await queryRows<ProviderRow>(
-    env,
-    `SELECT id, name, api_format, base_url, encrypted_api_key, enabled, created_at, updated_at
-     FROM llm_providers
-     ORDER BY name ASC`,
-  );
+export async function listLlmProviderSecrets(env: Pick<Env, 'DB'>): Promise<LlmProviderSecret[]> {
+  const db = getDb(env);
+  const rows = await db.select().from(llmProviders).orderBy(llmProviders.name).all();
   return rows.map(mapProviderSecret);
 }
 
-export async function getLlmProvider(env: Pick<AppBindings, 'HYPERDRIVE'>, id: string): Promise<LlmProviderSecret | null> {
-  const [row] = await queryRows<ProviderRow>(
-    env,
-    `SELECT id, name, api_format, base_url, encrypted_api_key, enabled, created_at, updated_at
-     FROM llm_providers
-     WHERE id = $1`,
-    [id],
-  );
+export async function getLlmProvider(env: Pick<Env, 'DB'>, id: string): Promise<LlmProviderSecret | null> {
+  const db = getDb(env);
+  const row = await db.select().from(llmProviders).where(eq(llmProviders.id, id)).get();
   return row ? mapProviderSecret(row) : null;
 }
 
 export async function createLlmProvider(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   input: {
     name: string;
     apiFormat: LlmApiFormat;
@@ -132,31 +84,26 @@ export async function createLlmProvider(
     enabled: boolean;
   },
 ) {
-  const [row] = await queryRows<ProviderRow>(
-    env,
-    `
-    INSERT INTO llm_providers (name, api_format, base_url, encrypted_api_key, enabled, updated_at)
-    VALUES ($1, $2, $3, $4, $5, now())
-    RETURNING id, name, api_format, base_url, encrypted_api_key, enabled, created_at, updated_at
-    `,
-    [input.name, input.apiFormat, input.baseUrl, input.encryptedApiKey, input.enabled],
-  );
+  const db = getDb(env);
+  const [row] = await db.insert(llmProviders).values({
+    name: input.name,
+    api_format: input.apiFormat,
+    base_url: input.baseUrl,
+    encrypted_api_key: input.encryptedApiKey,
+    enabled: input.enabled,
+    updated_at: new Date().toISOString(),
+  }).returning();
   return mapProvider(row);
 }
 
-export async function findLlmProviderByName(env: Pick<AppBindings, 'HYPERDRIVE'>, name: string): Promise<LlmProvider | null> {
-  const [row] = await queryRows<ProviderRow>(
-    env,
-    `SELECT id, name, api_format, base_url, encrypted_api_key, enabled, created_at, updated_at
-     FROM llm_providers
-     WHERE lower(name) = lower($1)`,
-    [name],
-  );
+export async function findLlmProviderByName(env: Pick<Env, 'DB'>, name: string): Promise<LlmProvider | null> {
+  const db = getDb(env);
+  const row = await db.select().from(llmProviders).where(sql`lower(${llmProviders.name}) = lower(${name})`).get();
   return row ? mapProvider(row) : null;
 }
 
 export async function updateLlmProvider(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   id: string,
   input: {
     name: string;
@@ -166,150 +113,148 @@ export async function updateLlmProvider(
     enabled: boolean;
   },
 ) {
-  const params: unknown[] = [id, input.name, input.apiFormat, input.baseUrl, input.enabled];
-  let apiKeySql = '';
+  const db = getDb(env);
+  
+  const updates: any = {
+    name: input.name,
+    api_format: input.apiFormat,
+    base_url: input.baseUrl,
+    enabled: input.enabled,
+    updated_at: new Date().toISOString(),
+  };
+  
   if (input.encryptedApiKey !== undefined) {
-    params.push(input.encryptedApiKey);
-    apiKeySql = `, encrypted_api_key = $${params.length}`;
+    updates.encrypted_api_key = input.encryptedApiKey;
   }
 
-  const [row] = await queryRows<ProviderRow>(
-    env,
-    `
-    UPDATE llm_providers
-    SET
-      name = $2,
-      api_format = $3,
-      base_url = $4,
-      enabled = $5,
-      updated_at = now()
-      ${apiKeySql}
-    WHERE id = $1
-    RETURNING id, name, api_format, base_url, encrypted_api_key, enabled, created_at, updated_at
-    `,
-    params,
-  );
+  const [row] = await db.update(llmProviders)
+    .set(updates)
+    .where(eq(llmProviders.id, id))
+    .returning();
+    
   return row ? mapProvider(row) : null;
 }
 
-export async function deleteLlmProvider(env: Pick<AppBindings, 'HYPERDRIVE'>, id: string) {
-  const [{ count }] = await queryRows<{ count: string }>(
-    env,
-    `SELECT COUNT(*)::text AS count FROM model_configs WHERE provider_id = $1`,
-    [id],
-  );
-  if (Number(count) > 0) {
+export async function deleteLlmProvider(env: Pick<Env, 'DB'>, id: string) {
+  const db = getDb(env);
+  const { c } = await db.select({ c: count() }).from(modelConfigs).where(eq(modelConfigs.provider_id, id)).get() || { c: 0 };
+  
+  if (c > 0) {
     return { deleted: false, reason: 'Provider is still used by one or more models.' };
   }
 
-  const rows = await queryRows<{ id: string }>(
-    env,
-    `DELETE FROM llm_providers WHERE id = $1 RETURNING id`,
-    [id],
-  );
-  return { deleted: rows.length > 0, reason: null };
+  const result = await db.delete(llmProviders).where(eq(llmProviders.id, id)).returning({ id: llmProviders.id });
+  return { deleted: result.length > 0, reason: null };
 }
 
-export async function listModelConfigs(env: Pick<AppBindings, 'HYPERDRIVE'>): Promise<ModelConfig[]> {
-  const rows = await queryRows<ModelConfigRow>(
-    env,
-    `${MODEL_SELECT}
-     WHERE mc.model_id <> $1
-     ORDER BY mc.model_id ASC`,
-    [KIMI_K2_5_MODEL],
-  );
+export async function listModelConfigs(env: Pick<Env, 'DB'>): Promise<ModelConfig[]> {
+  const db = getDb(env);
+  const rows = await db.select({
+    model_id: modelConfigs.model_id,
+    provider_id: modelConfigs.provider_id,
+    provider_name: llmProviders.name,
+    api_format: llmProviders.api_format,
+    model_name: modelConfigs.model_name,
+    rpm: modelConfigs.rpm,
+    tpm: modelConfigs.tpm,
+    rpd: modelConfigs.rpd,
+    updated_at: modelConfigs.updated_at,
+  })
+  .from(modelConfigs)
+  .innerJoin(llmProviders, eq(llmProviders.id, modelConfigs.provider_id))
+  .where(not(eq(modelConfigs.model_id, KIMI_K2_5_MODEL)))
+  .orderBy(modelConfigs.model_id)
+  .all();
+  
   return rows.map(mapModelConfig);
 }
 
-export async function getModelConfig(env: Pick<AppBindings, 'HYPERDRIVE'>, modelId: string): Promise<ModelConfig | null> {
-  const [row] = await queryRows<ModelConfigRow>(
-    env,
-    `${MODEL_SELECT}
-     WHERE mc.model_id = $1`,
-    [modelId],
-  );
+export async function getModelConfig(env: Pick<Env, 'DB'>, modelId: string): Promise<ModelConfig | null> {
+  const db = getDb(env);
+  const row = await db.select({
+    model_id: modelConfigs.model_id,
+    provider_id: modelConfigs.provider_id,
+    provider_name: llmProviders.name,
+    api_format: llmProviders.api_format,
+    model_name: modelConfigs.model_name,
+    rpm: modelConfigs.rpm,
+    tpm: modelConfigs.tpm,
+    rpd: modelConfigs.rpd,
+    updated_at: modelConfigs.updated_at,
+  })
+  .from(modelConfigs)
+  .innerJoin(llmProviders, eq(llmProviders.id, modelConfigs.provider_id))
+  .where(eq(modelConfigs.model_id, modelId))
+  .get();
+  
   return row ? mapModelConfig(row) : null;
 }
 
 export async function getResolvedModelConfig(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   modelId: string,
 ): Promise<ResolvedModelConfig | null> {
-  const [row] = await queryRows<ModelConfigRow & {
-    provider_enabled: boolean;
-    base_url: string | null;
-    encrypted_api_key: string | null;
-  }>(
-    env,
-    `
-    SELECT
-      mc.model_id,
-      mc.provider_id,
-      p.name AS provider_name,
-      p.api_format,
-      mc.model_name,
-      mc.rpm,
-      mc.tpm,
-      mc.rpd,
-      mc.updated_at,
-      p.enabled AS provider_enabled,
-      p.base_url,
-      p.encrypted_api_key
-    FROM model_configs mc
-    JOIN llm_providers p ON p.id = mc.provider_id
-    WHERE mc.model_id = $1
-    `,
-    [modelId],
-  );
+  const db = getDb(env);
+  const row = await db.select({
+    model_id: modelConfigs.model_id,
+    provider_id: modelConfigs.provider_id,
+    provider_name: llmProviders.name,
+    api_format: llmProviders.api_format,
+    model_name: modelConfigs.model_name,
+    rpm: modelConfigs.rpm,
+    tpm: modelConfigs.tpm,
+    rpd: modelConfigs.rpd,
+    updated_at: modelConfigs.updated_at,
+    provider_enabled: llmProviders.enabled,
+    base_url: llmProviders.base_url,
+    encrypted_api_key: llmProviders.encrypted_api_key,
+  })
+  .from(modelConfigs)
+  .innerJoin(llmProviders, eq(llmProviders.id, modelConfigs.provider_id))
+  .where(eq(modelConfigs.model_id, modelId))
+  .get();
 
   if (!row) return null;
   return {
     ...mapModelConfig(row),
-    providerEnabled: row.provider_enabled,
+    providerEnabled: Boolean(row.provider_enabled),
     baseUrl: row.base_url,
     encryptedApiKey: row.encrypted_api_key,
   };
 }
 
 export async function updateModelConfig(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   config: Omit<ModelConfig, 'updatedAt' | 'providerName' | 'apiFormat'>,
 ) {
-  const [row] = await queryRows<ModelConfigRow>(
-    env,
-    `
-    WITH upserted AS (
-      INSERT INTO model_configs (model_id, provider_id, model_name, rpm, tpm, rpd, provider, updated_at)
-      SELECT $1, p.id, $3, $4, $5, $6, p.api_format, now()
-      FROM llm_providers p
-      WHERE p.id = $2
-      ON CONFLICT (model_id)
-      DO UPDATE SET
-        provider_id = EXCLUDED.provider_id,
-        model_name = EXCLUDED.model_name,
-        rpm = EXCLUDED.rpm,
-        tpm = EXCLUDED.tpm,
-        rpd = EXCLUDED.rpd,
-        provider = EXCLUDED.provider,
-        updated_at = now()
-      RETURNING model_id, provider_id, model_name, rpm, tpm, rpd, updated_at
-    )
-    SELECT
-      u.model_id,
-      u.provider_id,
-      p.name AS provider_name,
-      p.api_format,
-      u.model_name,
-      u.rpm,
-      u.tpm,
-      u.rpd,
-      u.updated_at
-    FROM upserted u
-    JOIN llm_providers p ON p.id = u.provider_id
-    `,
-    [config.modelId, config.providerId, config.modelName, config.rpm, config.tpm, config.rpd],
-  );
-  return row ? mapModelConfig(row) : null;
+  const db = getDb(env);
+  const providerRow = await db.select({ api_format: llmProviders.api_format }).from(llmProviders).where(eq(llmProviders.id, config.providerId)).get();
+  if (!providerRow) return null;
+  
+  await db.insert(modelConfigs).values({
+    model_id: config.modelId,
+    provider_id: config.providerId,
+    model_name: config.modelName,
+    rpm: config.rpm ?? null,
+    tpm: config.tpm ?? null,
+    rpd: config.rpd ?? null,
+    provider: providerRow.api_format,
+    updated_at: new Date().toISOString(),
+  })
+  .onConflictDoUpdate({
+    target: modelConfigs.model_id,
+    set: {
+      provider_id: config.providerId,
+      model_name: config.modelName,
+      rpm: config.rpm ?? null,
+      tpm: config.tpm ?? null,
+      rpd: config.rpd ?? null,
+      provider: providerRow.api_format,
+      updated_at: new Date().toISOString(),
+    }
+  });
+  
+  return getModelConfig(env, config.modelId);
 }
 
 function slugify(value: string) {
@@ -321,7 +266,7 @@ function slugify(value: string) {
 }
 
 export async function upsertDiscoveredModelConfigs(
-  env: Pick<AppBindings, 'HYPERDRIVE'>,
+  env: Pick<Env, 'DB'>,
   input: {
     providerId: string;
     providerName: string;
@@ -329,34 +274,23 @@ export async function upsertDiscoveredModelConfigs(
     modelNames: string[];
   },
 ) {
+  const db = getDb(env);
   const uniqueModelNames = Array.from(new Set(input.modelNames.map(name => name.trim()).filter(Boolean)));
   if (uniqueModelNames.length === 0) return [];
 
   const providerSlug = slugify(input.providerName);
+  
   const [existingForProvider, existingModelIds] = await Promise.all([
-    queryRows<{ model_id: string; model_name: string }>(
-      env,
-      `SELECT model_id, model_name FROM model_configs WHERE provider_id = $1`,
-      [input.providerId],
-    ),
-    queryRows<{ model_id: string }>(
-      env,
-      `SELECT model_id FROM model_configs WHERE model_id LIKE $1`,
-      [`${providerSlug}:%`],
-    ),
+    db.select({ model_id: modelConfigs.model_id, model_name: modelConfigs.model_name })
+      .from(modelConfigs).where(eq(modelConfigs.provider_id, input.providerId)).all(),
+    db.select({ model_id: modelConfigs.model_id })
+      .from(modelConfigs).where(like(modelConfigs.model_id, `${providerSlug}:%`)).all(),
   ]);
 
   const existingModelNames = new Set(existingForProvider.map(row => row.model_name));
   const usedModelIds = new Set(existingModelIds.map(row => row.model_id));
-  const rowsToInsert: Array<{
-    model_id: string;
-    provider_id: string;
-    model_name: string;
-    rpm: number | null;
-    tpm: number | null;
-    rpd: number | null;
-    provider: LlmApiFormat;
-  }> = [];
+  
+  const rowsToInsert: Array<typeof modelConfigs.$inferInsert> = [];
 
   for (const modelName of uniqueModelNames) {
     if (existingModelNames.has(modelName)) continue;
@@ -370,6 +304,7 @@ export async function upsertDiscoveredModelConfigs(
     }
     usedModelIds.add(candidate);
 
+    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
     rowsToInsert.push({
       model_id: candidate,
       provider_id: input.providerId,
@@ -378,66 +313,39 @@ export async function upsertDiscoveredModelConfigs(
       tpm: null,
       rpd: null,
       provider: input.apiFormat,
+      created_at: nowStr,
+      updated_at: nowStr,
     });
   }
 
   if (rowsToInsert.length === 0) return [];
 
-  const modelIds = rowsToInsert.map(row => row.model_id);
-  const providerIds = rowsToInsert.map(row => row.provider_id);
-  const modelNames = rowsToInsert.map(row => row.model_name);
-  const rpms = rowsToInsert.map(row => row.rpm);
-  const tpms = rowsToInsert.map(row => row.tpm);
-  const rpds = rowsToInsert.map(row => row.rpd);
-  const providers = rowsToInsert.map(row => row.provider);
+  await db.insert(modelConfigs).values(rowsToInsert).onConflictDoNothing();
 
-  const rows = await queryRows<ModelConfigRow>(
-    env,
-    `
-    WITH incoming AS (
-      SELECT *
-      FROM unnest(
-        $1::text[],
-        $2::uuid[],
-        $3::text[],
-        $4::integer[],
-        $5::integer[],
-        $6::integer[],
-        $7::text[]
-      ) AS item(model_id, provider_id, model_name, rpm, tpm, rpd, provider)
-    ),
-    inserted AS (
-      INSERT INTO model_configs (model_id, provider_id, model_name, rpm, tpm, rpd, provider, updated_at)
-      SELECT model_id, provider_id, model_name, rpm, tpm, rpd, provider, now()
-      FROM incoming
-      ON CONFLICT (model_id) DO NOTHING
-      RETURNING model_id, provider_id, model_name, rpm, tpm, rpd, updated_at
-    )
-    SELECT
-      i.model_id,
-      i.provider_id,
-      p.name AS provider_name,
-      p.api_format,
-      i.model_name,
-      i.rpm,
-      i.tpm,
-      i.rpd,
-      i.updated_at
-    FROM inserted i
-    JOIN llm_providers p ON p.id = i.provider_id
-    ORDER BY i.model_id ASC
-    `,
-    [modelIds, providerIds, modelNames, rpms, tpms, rpds, providers],
-  );
+  const insertedIds = rowsToInsert.map(r => r.model_id!);
+  
+  const rows = await db.select({
+    model_id: modelConfigs.model_id,
+    provider_id: modelConfigs.provider_id,
+    provider_name: llmProviders.name,
+    api_format: llmProviders.api_format,
+    model_name: modelConfigs.model_name,
+    rpm: modelConfigs.rpm,
+    tpm: modelConfigs.tpm,
+    rpd: modelConfigs.rpd,
+    updated_at: modelConfigs.updated_at,
+  })
+  .from(modelConfigs)
+  .innerJoin(llmProviders, eq(llmProviders.id, modelConfigs.provider_id))
+  .where(inArray(modelConfigs.model_id, insertedIds))
+  .orderBy(modelConfigs.model_id)
+  .all();
 
   return rows.map(mapModelConfig);
 }
 
-export async function deleteModelConfig(env: Pick<AppBindings, 'HYPERDRIVE'>, modelId: string) {
-  const rows = await queryRows<{ model_id: string }>(
-    env,
-    `DELETE FROM model_configs WHERE model_id = $1 RETURNING model_id`,
-    [modelId],
-  );
+export async function deleteModelConfig(env: Pick<Env, 'DB'>, modelId: string) {
+  const db = getDb(env);
+  const rows = await db.delete(modelConfigs).where(eq(modelConfigs.model_id, modelId)).returning({ model_id: modelConfigs.model_id });
   return rows.length > 0;
 }

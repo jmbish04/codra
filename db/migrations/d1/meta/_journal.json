@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1783543227820,
+      "tag": "0000_broad_meteorite",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1783543255886,
+      "tag": "0001_redundant_the_renegades",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784039273650,
+      "tag": "0002_purple_jetstream",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1784042293610,
+      "tag": "0003_heavy_quicksilver",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1784048780253,
+      "tag": "0004_fast_young_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1784050367914,
+      "tag": "0005_happy_monster_badoon",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1784051431346,
+      "tag": "0006_unusual_lorna_dane",
+      "breakpoints": true
+    }
+  ]
+}

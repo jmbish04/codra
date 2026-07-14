@@ -8,9 +8,11 @@ interface JobHeaderProps {
   job: JobDetail;
   isRetrying: boolean;
   onRetry: () => void;
+  isForceRestarting: boolean;
+  onForceRestart: () => void;
 }
 
-export function JobHeader({ job, isRetrying, onRetry }: JobHeaderProps) {
+export function JobHeader({ job, isRetrying, onRetry, isForceRestarting, onForceRestart }: JobHeaderProps) {
   return (
     <>
       <header className="flex flex-col sm:flex-row items-start justify-between gap-4">
@@ -50,15 +52,27 @@ export function JobHeader({ job, isRetrying, onRetry }: JobHeaderProps) {
             Raw Logs
           </Link>
         </Button>
-        <Button
-          variant={job.status === 'failed' ? 'destructive' : 'default'}
-          disabled={isRetrying || job.status === 'running' || job.status === 'queued'}
-          onClick={onRetry}
-          className="shrink-0 gap-2 w-full sm:w-auto"
-        >
-          <RotateCcw size={14} />
-          {isRetrying ? 'Starting…' : job.status === 'failed' ? 'Retry job' : 'Re-run job'}
-        </Button>
+        {(job.status === 'running' || job.status === 'queued') ? (
+          <Button
+            variant="destructive"
+            disabled={isForceRestarting}
+            onClick={onForceRestart}
+            className={`shrink-0 gap-2 w-full sm:w-auto ${isForceRestarting ? 'animate-pulse' : ''}`}
+          >
+            <RotateCcw size={14} />
+            {isForceRestarting ? 'Restarting…' : 'Force Restart'}
+          </Button>
+        ) : (
+          <Button
+            variant={job.status === 'failed' ? 'destructive' : 'default'}
+            disabled={isRetrying}
+            onClick={onRetry}
+            className="shrink-0 gap-2 w-full sm:w-auto"
+          >
+            <RotateCcw size={14} />
+            {isRetrying ? 'Starting…' : job.status === 'failed' ? 'Retry job' : 'Re-run job'}
+          </Button>
+        )}
       </div>
       </header>
       <UpdatesEmailPrompt />

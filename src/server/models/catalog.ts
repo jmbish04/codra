@@ -4,6 +4,8 @@ import { withTimeout } from '@server/core/timeout';
 const MODEL_LIST_TIMEOUT_MS = 8_000;
 const ERROR_BODY_LIMIT = 500;
 const CLOUDFLARE_TEXT_GENERATION_MODELS = [
+  '@cf/moonshotai/kimi-k2.7-code',
+  '@cf/zai-org/glm-5.2',
   '@cf/moonshotai/kimi-k2.6',
   '@cf/zai-org/glm-4.7-flash',
   '@cf/openai/gpt-oss-120b',

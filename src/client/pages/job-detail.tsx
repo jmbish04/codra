@@ -10,7 +10,7 @@ import { Alert } from '@client/components/ui/alert';
 
 export function JobDetailPage() {
   const { id = '' } = useParams();
-  const { job, error, isRetrying, handleRetry } = useJobDetail(id);
+  const { job, error, isRetrying, isForceRestarting, handleRetry, handleForceRestart } = useJobDetail(id);
 
   if (!job) {
     return <JobDetailSkeleton error={error} />;
@@ -22,6 +22,8 @@ export function JobDetailPage() {
         job={job} 
         isRetrying={isRetrying} 
         onRetry={handleRetry} 
+        isForceRestarting={isForceRestarting}
+        onForceRestart={handleForceRestart}
       />
 
       {error && (

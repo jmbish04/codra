@@ -9,6 +9,58 @@ import { severityConfig } from './constants';
 
 const safeRehypePlugins = [rehypeRaw, rehypeSanitize];
 
+function DiffCodeBlock({ code }: { code: string }) {
+  const lines = code.split('\n');
+
+  return (
+    <pre className="overflow-x-auto text-[13px] font-mono leading-relaxed bg-transparent border-none py-2">
+      <code className="block min-w-full">
+        {lines.map((line, idx) => {
+          let className = "px-3 py-0.5 block";
+          let displayLine = line;
+
+          const isDeletionMarker = line.includes('[!code --]') || line.includes('{/* [!code --] */}');
+          const isAdditionMarker = line.includes('[!code ++]') || line.includes('{/* [!code ++] */}');
+
+          if (line.startsWith('-') && !line.startsWith('---')) {
+            className = "px-3 py-0.5 block bg-rose-950/30 text-rose-300/90 border-l-2 border-rose-500 line-through opacity-70";
+            displayLine = line.slice(1);
+          } else if (line.startsWith('+') && !line.startsWith('+++')) {
+            className = "px-3 py-0.5 block bg-emerald-950/30 text-emerald-300/90 border-l-2 border-emerald-500 font-semibold";
+            displayLine = line.slice(1);
+          } else if (isDeletionMarker) {
+            className = "px-3 py-0.5 block bg-rose-950/30 text-rose-300/90 border-l-2 border-rose-500 line-through opacity-70";
+            displayLine = line
+              .replace('// [!code --]', '')
+              .replace('/* [!code --] */', '')
+              .replace('{/* [!code --] */}', '')
+              .replace('//[!code --]', '')
+              .replace('/*[!code --]*/', '')
+              .replace('{/*[!code --]*/}', '')
+              .trimEnd();
+          } else if (isAdditionMarker) {
+            className = "px-3 py-0.5 block bg-emerald-950/30 text-emerald-300/90 border-l-2 border-emerald-500 font-semibold";
+            displayLine = line
+              .replace('// [!code ++]', '')
+              .replace('/* [!code ++] */', '')
+              .replace('{/* [!code ++] */}', '')
+              .replace('//[!code ++]', '')
+              .replace('/*[!code ++]*/', '')
+              .replace('{/*[!code ++]*/}', '')
+              .trimEnd();
+          }
+
+          return (
+            <span key={idx} className={className}>
+              {displayLine}
+            </span>
+          );
+        })}
+      </code>
+    </pre>
+  );
+}
+
 interface CommentCardProps {
   comment: ParsedReviewComment;
   filePath: string;
@@ -61,12 +113,8 @@ export function CommentCard({ comment, filePath }: CommentCardProps) {
           <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/70 mb-2">
             Suggested Fix
           </p>
-          <div className="rounded-md overflow-hidden border" style={{ background: 'var(--code-bg)', borderColor: 'var(--code-border)', color: 'var(--code-fg)' }}>
-            <div className="p-3 overflow-x-auto text-[13px] font-mono leading-relaxed prose-pre:m-0 prose-pre:bg-transparent prose-pre:border-none prose-pre:p-0">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={safeRehypePlugins}>
-                {`\`\`\`\n${comment.codeSuggestion.replace(/```suggestion\n?|```/g, '').trim()}\n\`\`\``}
-              </ReactMarkdown>
-            </div>
+          <div className="rounded-md overflow-hidden border bg-muted/20 border-border/60">
+            <DiffCodeBlock code={comment.codeSuggestion.replace(/```suggestion\n?|```/g, '').trim()} />
           </div>
         </div>
       )}
