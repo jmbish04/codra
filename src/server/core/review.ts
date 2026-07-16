@@ -1,6 +1,6 @@
 import { logger } from './logger';
 import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHubWebhookPayload, type IssueCommentWebhookPayload, type PullRequestWebhookPayload } from '@shared/github';
-import { changelogModelOutputSchema, defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
+import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview } from '@server/db/file-reviews';
 import { getResolvedModelConfig } from '@server/db/model-configs';
 import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
@@ -30,12 +30,7 @@ const BUSY_RETRY_SECONDS = 60;
 const RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS = [60, 5 * 60, 15 * 60];
 /** Workers AI batches typically land within ~5 minutes; poll on a steady beat. */
 const BATCH_POLL_DELAY_SECONDS = 30;
-/**
- * Step name for an in-flight Workers AI batch. The dashboard keys off this to
- * distinguish "queued on the batch API" (healthy) from "paused after a provider
- * slowdown" (degraded) — both set nextRetryAt, so the step is the only signal.
- */
-const BATCH_STEP_NAME = 'Batch review';
+
 const MAX_RETRYABLE_FILE_REVIEW_FAILURES = 3;
 
 function isRetryableFileReviewErrorMessage(message: string | null | undefined) {

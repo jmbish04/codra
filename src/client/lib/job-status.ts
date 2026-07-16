@@ -1,4 +1,4 @@
-import type { JobSummary } from '@shared/schema';
+import { BATCH_STEP_NAME, type JobSummary } from '@shared/schema';
 
 export interface WaitInfo {
   /** Short banner label. */
@@ -9,8 +9,6 @@ export interface WaitInfo {
 }
 
 const MINUTE = 60_000;
-/** Must match BATCH_STEP_NAME in @server/core/review.ts. */
-const BATCH_STEP_NAME = 'Batch review';
 const STALE_QUEUE_MS = 10 * MINUTE;
 
 function humanizeDuration(ms: number): string {
