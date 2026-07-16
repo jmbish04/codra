@@ -38,7 +38,7 @@ export type BatchPollResult =
  */
 export function batchFitsPayloadLimit(items: BatchReviewItem[]) {
   const bytes = new TextEncoder().encode(
-    JSON.stringify({ requests: items.map(buildCloudflareReviewRequest) }),
+    JSON.stringify({ requests: items.map((item) => buildCloudflareReviewRequest(item)) }),
   ).byteLength;
   return { fits: bytes <= BATCH_PAYLOAD_LIMIT_BYTES, bytes };
 }
@@ -54,7 +54,7 @@ export async function submitCloudflareReviewBatch(
 ): Promise<string> {
   const response = await env.AI.run(
     model as any,
-    { requests: items.map(buildCloudflareReviewRequest) } as any,
+    { requests: items.map((item) => buildCloudflareReviewRequest(item)) } as any,
     { ...cloudflareAiOptions(env), queueRequest: true } as any,
   );
 

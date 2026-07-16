@@ -150,7 +150,7 @@ export const repoConfigSchema = z.object({
 export const reviewJobMessageSchema = z.object({
   jobId: z.string().uuid().optional(),
   deliveryId: z.string().min(1),
-  phase: z.enum(['prepare', 'review', 'finalize']).optional(),
+  phase: z.enum(['prepare', 'review', 'finalize', 'changelog']).optional(),
   eventName: z.string().min(1).optional(),
   payload: z.unknown().optional(),
   installationId: z.string().min(1).optional(),
@@ -376,3 +376,76 @@ export type ModelConfig = z.infer<typeof modelConfigSchema>;
 export type StatsPayload = z.infer<typeof statsSchema>;
 
 export const defaultRepoConfig = repoConfigSchema.parse({});
+
+/* ── Changelog ─────────────────────────────────────────────────────────────
+ * Mirrors CHANGELOG_RESPONSE_SCHEMA in @server/models/schemas.ts. Model output
+ * is validated against this before it is persisted or rendered — the mermaid
+ * and code payloads are model-authored from PR content, so they are untrusted.
+ */
+export const changeKinds = ['added', 'changed', 'removed', 'migration', 'fixed'] as const;
+export const codeLangs = ['ts', 'tsx', 'sql', 'json', 'bash'] as const;
+
+export const changelogChangeSchema = z.object({
+  kind: z.enum(changeKinds),
+  text: z.string(),
+});
+
+export const changelogCodeCardSchema = z.object({
+  title: z.string(),
+  lang: z.enum(codeLangs),
+  code: z.string(),
+});
+
+export const changelogDiagramSchema = z.object({
+  caption: z.string(),
+  /** Mermaid source. Rendered with securityLevel 'strict' — never trusted. */
+  code: z.string(),
+});
+
+export const changelogDetailSchema = z.object({
+  problem: z.string(),
+  approach: z.string(),
+  apiChanges: z.array(z.string()).default([]),
+  filesTouched: z.array(z.string()).default([]),
+  migrations: z.array(z.object({ tag: z.string(), sql: z.string() })).default([]),
+  code: z.array(changelogCodeCardSchema).default([]),
+  diagrams: z.array(changelogDiagramSchema).default([]),
+});
+
+/** Raw model output shape (snake_case, matches the JSON schema sent to the provider). */
+export const changelogModelOutputSchema = z.object({
+  title: z.string().min(1),
+  summary: z.string().min(1),
+  area: z.string().min(1),
+  problem: z.string(),
+  approach: z.string(),
+  changes: z.array(changelogChangeSchema).default([]),
+  api_changes: z.array(z.string()).default([]),
+  migrations: z.array(z.object({ tag: z.string(), sql: z.string() })).default([]),
+  diagrams: z.array(changelogDiagramSchema).default([]),
+  code: z.array(changelogCodeCardSchema).default([]),
+});
+
+export const changelogEntrySchema = z.object({
+  slug: z.string(),
+  jobId: z.string().uuid(),
+  owner: z.string(),
+  repo: z.string(),
+  prNumber: z.number().int(),
+  prUrl: z.string().nullable(),
+  headRef: z.string().nullable(),
+  commitSha: z.string().nullable(),
+  tag: z.string().nullable(),
+  area: z.string(),
+  title: z.string(),
+  summary: z.string(),
+  date: z.string(),
+  changes: z.array(changelogChangeSchema).default([]),
+  detail: changelogDetailSchema.nullable(),
+  createdAt: dateStringSchema,
+});
+
+export type ChangelogChange = z.infer<typeof changelogChangeSchema>;
+export type ChangelogDetail = z.infer<typeof changelogDetailSchema>;
+export type ChangelogModelOutput = z.infer<typeof changelogModelOutputSchema>;
+export type ChangelogEntry = z.infer<typeof changelogEntrySchema>;

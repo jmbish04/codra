@@ -27,6 +27,7 @@ const LoginPage = safeLazy(() => import('./pages/login').then(m => ({ default: m
 const JobsPage = safeLazy(() => import('./pages/jobs').then(m => ({ default: m.JobsPage })));
 const JobDetailPage = safeLazy(() => import('./pages/job-detail').then(m => ({ default: m.JobDetailPage })));
 const JobLogsPage = safeLazy(() => import('./pages/job-logs').then(m => ({ default: m.JobLogsPage })));
+const ChangelogDetailPage = safeLazy(() => import('./pages/changelog-detail').then(m => ({ default: m.ChangelogDetailPage })));
 const ReposPage = safeLazy(() => import('./pages/repos').then(m => ({ default: m.ReposPage })));
 const StatsPage = safeLazy(() => import('./pages/stats').then(m => ({ default: m.StatsPage })));
 const SettingsPage = safeLazy(() => import('./pages/settings').then(m => ({ default: m.SettingsPage })));
@@ -119,6 +120,7 @@ const router = createBrowserRouter([
       { path: 'jobs', element: withSuspense(JobsPage) },
       { path: 'jobs/:id', element: withSuspense(JobDetailPage) },
       { path: 'jobs/:id/logs', element: withSuspense(JobLogsPage) },
+      { path: 'changelog/:slug', element: withSuspense(ChangelogDetailPage) },
       { path: 'repos', element: withSuspense(ReposPage) },
       { path: 'stats', element: withSuspense(StatsPage) },
       { path: 'settings', element: withSuspense(SettingsPage) },

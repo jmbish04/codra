@@ -1,7 +1,7 @@
 import { logger } from '@server/core/logger';
 import { TimeoutError } from '@server/core/timeout';
-import { ProviderRequestError, type ModelResponse } from './types';
-import { REVIEW_RESPONSE_SCHEMA } from './schemas';
+import { ProviderRequestError, type ModelResponse, type StructuredSchema } from './types';
+import { REVIEW_SCHEMA } from './schemas';
 
 /** Max wall-clock time allowed for a single Workers-AI call. */
 const CLOUDFLARE_TIMEOUT_MS = 180_000;
@@ -110,7 +110,10 @@ export function extractCloudflareUsage(result: unknown) {
 }
 
 /** Chat payload for a single file review. Shared by the sync and batch paths. */
-export function buildCloudflareReviewRequest(input: { systemPrompt: string; userPrompt: string }) {
+export function buildCloudflareReviewRequest(
+  input: { systemPrompt: string; userPrompt: string },
+  schema: StructuredSchema = REVIEW_SCHEMA,
+) {
   return {
     messages: [
       {
@@ -123,9 +126,9 @@ export function buildCloudflareReviewRequest(input: { systemPrompt: string; user
     response_format: {
       type: 'json_schema',
       json_schema: {
-        name: 'codra_file_review',
+        name: schema.name,
         strict: true,
-        schema: REVIEW_RESPONSE_SCHEMA,
+        schema: schema.schema,
       },
     },
     temperature: 0,
@@ -147,6 +150,7 @@ export async function reviewWithCloudflare(
   input: { systemPrompt: string; userPrompt: string },
   tracker?: { incrementSubrequests(count?: number): void },
   providerName = 'Cloudflare',
+  schema: StructuredSchema = REVIEW_SCHEMA,
 ): Promise<ModelResponse> {
   const maxRetries = CLOUDFLARE_MAX_RETRIES;
   let lastError: unknown;
@@ -169,7 +173,7 @@ export async function reviewWithCloudflare(
       logger.info(`Calling Cloudflare model: ${model}`);
       const startTime = Date.now();
       const result = await Promise.race([
-        env.AI.run(model as any, buildCloudflareReviewRequest(input), cloudflareAiOptions(env)),
+        env.AI.run(model as any, buildCloudflareReviewRequest(input, schema), cloudflareAiOptions(env)),
         timeoutPromise,
       ]);
       const durationMs = Date.now() - startTime;

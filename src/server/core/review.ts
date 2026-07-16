@@ -1,6 +1,6 @@
 import { logger } from './logger';
 import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHubWebhookPayload, type IssueCommentWebhookPayload, type PullRequestWebhookPayload } from '@shared/github';
-import { defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
+import { changelogModelOutputSchema, defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview } from '@server/db/file-reviews';
 import { getResolvedModelConfig } from '@server/db/model-configs';
 import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
@@ -14,10 +14,14 @@ import { FormatterService } from '../services/formatter';
 import { TokenTracker } from './token-tracker';
 import { loadRepoConfig } from './config';
 import { getWebhookDelivery } from '@server/db/webhook-deliveries';
+import { buildChangelogSlug, upsertChangelogEntry } from '@server/db/changelog';
+import { getOrCreateRepository } from '@server/db/repositories';
+import { buildChangelogPrompt, CHANGELOG_SYSTEM_PROMPT } from '@server/prompts/changelog';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
 
 export type ReviewJobRunResult = { action: 'ack' } | { action: 'retry'; delaySeconds: number };
+export type ReviewPhase = 'prepare' | 'review' | 'finalize' | 'changelog';
 
 const REVIEW_CHUNK_FILE_LIMIT = 3;
 const REVIEW_CHUNK_WALL_CLOCK_MS = 12 * 60 * 1000;
@@ -193,6 +197,14 @@ export async function runReviewJob(env: Env, message: ReviewJobMessage): Promise
     return { action: 'ack' };
   }
 
+  // The changelog runs against an already-completed job, so it deliberately
+  // skips the lease: claimJobLease only admits queued/running jobs and would
+  // reject a 'done' job as terminal. Persistence is an upsert keyed by slug,
+  // so a duplicate delivery is harmless.
+  if (resolved.phase === 'changelog') {
+    return runChangelogJob(env, resolved.job);
+  }
+
   const leaseOwner = crypto.randomUUID();
   const claim = await claimJobLease(env, resolved.job.id, leaseOwner, JOB_LEASE_SECONDS);
   if (claim.status === 'missing') {
@@ -256,7 +268,7 @@ export async function runReviewJob(env: Env, message: ReviewJobMessage): Promise
 async function resolveQueuedJob(
   env: Env,
   message: ReviewJobMessage,
-): Promise<{ job: PersistedReviewJob; phase: 'prepare' | 'review' | 'finalize' } | null> {
+): Promise<{ job: PersistedReviewJob; phase: ReviewPhase } | null> {
   if (message.jobId) {
     const row = await getJobForProcessing(env, message.jobId);
     return row ? { job: mapJob(row), phase: message.phase ?? 'review' } : null;
@@ -1016,6 +1028,10 @@ async function runFinalizePhase(
   });
   logger.info(`Review job completed: ${job.owner}/${job.repo} PR #${job.prNumber}`);
 
+  // Changelog generation runs as its own phase: it must not consume finalize's
+  // wall-clock budget, and a failure there must not fail the shipped review.
+  await enqueueJobPhase(env, job.id, 'changelog');
+
   // Update the status comment with a narrative review summary
   if (job.statusCommentId) {
     try {
@@ -1059,6 +1075,169 @@ async function checkSuperseded(env: Env, jobId: string) {
   }
 }
 
+/**
+ * Runs the changelog phase for a completed job. Never fails the job: the review
+ * has already shipped, so a changelog problem is logged and acked (or retried
+ * once on a transient model failure).
+ */
+async function runChangelogJob(env: Env, job: PersistedReviewJob): Promise<ReviewJobRunResult> {
+  const tracker = new TokenTracker();
+  const github = new GitHubService(env, job.installationId, tracker);
+  const model = new ModelService(env, tracker, { jobId: job.id });
+
+  try {
+    await runChangelogPhase(env, job, github, model);
+    return { action: 'ack' };
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : String(error);
+
+    if (isRetryableModelError(error)) {
+      const delaySeconds = getRetryableModelFailureDelaySeconds(error);
+      logger.warn(`Changelog generation hit a transient failure; retrying in ${delaySeconds}s`, { jobId: job.id });
+      return { action: 'retry', delaySeconds };
+    }
+
+    logger.error(`Changelog generation failed for ${job.owner}/${job.repo} PR #${job.prNumber}`, error);
+    await updateJobStep(env, job.id, 'Changelog', { status: 'failed', error: messageText });
+    return { action: 'ack' };
+  }
+}
+
+/**
+ * Builds the copy-pasteable prompt a coding agent can run to action the review.
+ * Only P0/P1/P2 findings are included — nits are noise in a fix prompt.
+ */
+function buildAgentFixPrompt(job: PersistedReviewJob, findings: ParsedReviewComment[]) {
+  const actionable = findings.filter((f) => ['P0', 'P1', 'P2'].includes(f.severity));
+  if (actionable.length === 0) return null;
+
+  const items = actionable
+    .map((f, i) => `${i + 1}. [${f.severity}] ${f.path}${f.line ? `:${f.line}` : ''} — ${f.title}\n   ${f.body.replace(/\n+/g, ' ').trim()}`)
+    .join('\n');
+
+  return [
+    '```',
+    `Fix the following ${actionable.length} issue${actionable.length === 1 ? '' : 's'} Codra found in PR #${job.prNumber} (${job.owner}/${job.repo}).`,
+    'Address each one at its root cause, keep the diff minimal, and do not refactor beyond what the fix needs.',
+    '',
+    items,
+    '```',
+  ].join('\n');
+}
+
+/**
+ * Generates the changelog entry for a completed review, persists it to D1, and
+ * rewrites the PR status comment with the findings summary, an agent fix
+ * prompt, and a link to the rendered entry.
+ *
+ * Runs as its own phase so the model call sits outside finalize's wall-clock
+ * budget; a failure here never invalidates the review that already shipped.
+ */
+async function runChangelogPhase(
+  env: Env,
+  job: PersistedReviewJob,
+  github: GitHubService,
+  model: ModelService,
+) {
+  const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
+  const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
+  const rawDiff = await github.getPullRequestDiff(job.owner, job.repo, job.prNumber);
+  const files = filterReviewableFiles(parseUnifiedDiff(rawDiff), config.review);
+  const reviews = await getFileReviewsForJobs(env, [job.id]);
+  const findings = reviews.flatMap((review) => review.parsed_comments as ParsedReviewComment[]);
+
+  await updateJobStep(env, job.id, 'Changelog', { status: 'running' });
+
+  const response = await model.generateChangelog({
+    config,
+    systemPrompt: CHANGELOG_SYSTEM_PROMPT,
+    userPrompt: buildChangelogPrompt({
+      prTitle: pr.title ?? null,
+      prBody: pr.body ?? null,
+      headRef: pr.head?.ref ?? null,
+      baseRef: pr.base?.ref ?? null,
+      files: files.map((file) => ({
+        path: file.path,
+        summary: reviews.find((r) => r.file_path === file.path)?.file_summary ?? null,
+        lineCount: file.lineCount,
+      })),
+      diff: rawDiff,
+      findings,
+    }),
+  });
+
+  // Model output is untrusted: validate before it reaches D1 or the renderer.
+  const parsed = changelogModelOutputSchema.parse(JSON.parse(response.rawText));
+
+  const slug = buildChangelogSlug({
+    owner: job.owner,
+    repo: job.repo,
+    prNumber: job.prNumber,
+    commitSha: job.commitSha,
+  });
+
+  const repositoryId = await getOrCreateRepository(env, {
+    installationId: job.installationId,
+    owner: job.owner,
+    repo: job.repo,
+  });
+
+  await upsertChangelogEntry(env, {
+    slug,
+    jobId: job.id,
+    repositoryId,
+    prNumber: job.prNumber,
+    prUrl: `https://github.com/${job.owner}/${job.repo}/pull/${job.prNumber}`,
+    headRef: pr.head?.ref ?? null,
+    commitSha: job.commitSha,
+    tag: null,
+    area: parsed.area,
+    title: parsed.title,
+    summary: parsed.summary,
+    date: new Date().toISOString().slice(0, 10),
+    changes: parsed.changes,
+    detail: {
+      problem: parsed.problem,
+      approach: parsed.approach,
+      apiChanges: parsed.api_changes,
+      filesTouched: files.map((file) => file.path),
+      migrations: parsed.migrations,
+      code: parsed.code,
+      diagrams: parsed.diagrams,
+    },
+  });
+
+  await updateJobStep(env, job.id, 'Changelog', { status: 'done' });
+
+  if (!job.statusCommentId) {
+    logger.warn(`Job ${job.id} has no status comment to update with the changelog link`);
+    return;
+  }
+
+  const changelogUrl = `${env.APP_URL.replace(/\/+$/, '')}/changelog/${slug}`;
+  const bySeverity = ['P0', 'P1', 'P2', 'P3', 'nit']
+    .map((severity) => ({ severity, count: findings.filter((f) => f.severity === severity).length }))
+    .filter((row) => row.count > 0);
+  const findingsLine = bySeverity.length
+    ? bySeverity.map((row) => `**${row.count}** ${row.severity}`).join(' · ')
+    : 'No issues found';
+
+  const fixPrompt = buildAgentFixPrompt(job, findings);
+
+  const body = [
+    '## Code Review complete',
+    '',
+    parsed.summary,
+    '',
+    `**Findings:** ${findingsLine} · **Files:** ${files.length} · **Commit:** \`${job.commitSha.slice(0, 7)}\``,
+    '',
+    `📋 **[View the full changelog for this PR](${changelogUrl})** — schema diagrams, API changes, and the code that moved.`,
+    ...(fixPrompt ? ['', '<details>', '<summary>Prompt for your coding agent to fix these findings</summary>', '', fixPrompt, '</details>'] : []),
+  ].join('\n');
+
+  await github.updateIssueComment(job.owner, job.repo, job.statusCommentId, body);
+}
+
 async function heartbeatAndCheckSuperseded(env: Env, jobId: string, leaseOwner: string) {
   await heartbeatJobLease(env, jobId, leaseOwner, JOB_LEASE_SECONDS);
   await checkSuperseded(env, jobId);
@@ -1067,7 +1246,7 @@ async function heartbeatAndCheckSuperseded(env: Env, jobId: string, leaseOwner: 
 async function enqueueJobPhase(
   env: Env,
   jobId: string,
-  phase: 'prepare' | 'review' | 'finalize',
+  phase: ReviewPhase,
   delaySeconds = 0,
 ) {
   await markJobContinuationQueued(env, jobId, delaySeconds);

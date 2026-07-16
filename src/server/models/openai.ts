@@ -1,7 +1,7 @@
 import { logger } from '@server/core/logger';
 import { withTimeout } from '@server/core/timeout';
-import { ProviderRequestError, providerErrorMessage, type ModelResponse } from './types';
-import { REVIEW_RESPONSE_SCHEMA } from './schemas';
+import { ProviderRequestError, providerErrorMessage, type ModelResponse, type StructuredSchema } from './types';
+import { REVIEW_SCHEMA } from './schemas';
 
 const OPENAI_TIMEOUT_MS = 180_000;
 const OPENAI_MAX_OUTPUT_TOKENS = 4096;
@@ -68,6 +68,7 @@ export async function reviewWithOpenAI(
   model: string,
   input: { systemPrompt: string; userPrompt: string },
   tracker?: { incrementSubrequests(count?: number): void },
+  schema: StructuredSchema = REVIEW_SCHEMA,
 ): Promise<ModelResponse> {
   logger.info(`Calling OpenAI-format model: ${model}`);
   
@@ -100,9 +101,9 @@ export async function reviewWithOpenAI(
         response_format: {
           type: 'json_schema',
           json_schema: {
-            name: 'codra_file_review',
+            name: schema.name,
             strict: true,
-            schema: REVIEW_RESPONSE_SCHEMA,
+            schema: schema.schema,
           },
         },
       }),

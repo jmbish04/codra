@@ -15,7 +15,8 @@ import { parseFileReviewResponse } from '../core/model-output';
 import { truncateFileDiff } from '../core/diff';
 import type { RepoConfig } from '@shared/schema';
 import type { TokenTracker } from '../core/token-tracker';
-import type { ModelResponse } from '../models/types';
+import type { ModelResponse, StructuredSchema } from '../models/types';
+import { CHANGELOG_SCHEMA, REVIEW_SCHEMA } from '../models/schemas';
 import { logger } from '../core/logger';
 import { normalizeModelId } from '@shared/schema';
 import { getResolvedModelConfig, type ResolvedModelConfig } from '@server/db/model-configs';
@@ -207,9 +208,10 @@ export class ModelService {
   private async callResolvedModel(
     config: ResolvedModelConfig,
     input: { systemPrompt: string; userPrompt: string },
+    schema: StructuredSchema = REVIEW_SCHEMA,
   ): Promise<ModelResponse> {
     if (config.apiFormat === 'cloudflare-workers-ai') {
-      return reviewWithCloudflare(this.env, config.modelName, input, this.tracker, config.providerName);
+      return reviewWithCloudflare(this.env, config.modelName, input, this.tracker, config.providerName, schema);
     }
 
     let resolvedBaseUrl = config.baseUrl;
@@ -239,6 +241,7 @@ export class ModelService {
         config.modelName,
         input,
         this.tracker,
+        schema,
       );
     } else if (config.apiFormat === 'openai') {
       result = await reviewWithOpenAI(
@@ -250,6 +253,7 @@ export class ModelService {
         config.modelName,
         input,
         this.tracker,
+        schema,
       );
     } else {
       result = await reviewWithAnthropic(
@@ -257,6 +261,7 @@ export class ModelService {
         config.modelName,
         input,
         this.tracker,
+        schema,
       );
     }
 
@@ -273,8 +278,12 @@ export class ModelService {
     return result;
   }
 
-  async callModel(model: string, input: { systemPrompt: string; userPrompt: string }): Promise<ModelResponse> {
-    return this.callResolvedModel(await this.resolveModel(model), input);
+  async callModel(
+    model: string,
+    input: { systemPrompt: string; userPrompt: string },
+    schema: StructuredSchema = REVIEW_SCHEMA,
+  ): Promise<ModelResponse> {
+    return this.callResolvedModel(await this.resolveModel(model), input, schema);
   }
 
   /**
@@ -480,6 +489,51 @@ Lesson #${idx + 1}:
     }
 
     throw lastError;
+  }
+
+  /**
+   * Generates the structured changelog entry for a PR, walking the same model
+   * chain as the review path. Returns raw JSON text matching
+   * CHANGELOG_RESPONSE_SCHEMA; the caller validates it with Zod.
+   */
+  async generateChangelog(params: {
+    config: RepoConfig;
+    systemPrompt: string;
+    userPrompt: string;
+  }): Promise<ModelResponse> {
+    const { primary, fallbacks } = this.selectModel({ totalLineCount: 0, config: params.config });
+
+    let lastError: unknown;
+    for (const currentModel of [primary, ...fallbacks]) {
+      let resolved: ResolvedModelConfig;
+      try {
+        resolved = await this.resolveModel(currentModel);
+      } catch (error) {
+        lastError = error;
+        continue;
+      }
+
+      if (resolved.apiFormat === 'cloudflare-workers-ai' && (await this.isProviderUnavailable(resolved.providerId))) {
+        continue;
+      }
+
+      try {
+        const response = await this.callResolvedModel(
+          resolved,
+          { systemPrompt: params.systemPrompt, userPrompt: params.userPrompt },
+          CHANGELOG_SCHEMA,
+        );
+        this.tracker?.record(response.modelUsed, response.inputTokens, response.outputTokens);
+        return response;
+      } catch (error) {
+        lastError = error;
+        logger.warn(`Changelog model ${currentModel} failed`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    throw lastError ?? new Error('No model could generate the changelog entry.');
   }
 
   async generateSummary(params: {
