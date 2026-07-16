@@ -1,9 +1,10 @@
 import { logger } from './logger';
 import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHubWebhookPayload, type IssueCommentWebhookPayload, type PullRequestWebhookPayload } from '@shared/github';
-import { defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
+import { changelogModelOutputSchema, defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview } from '@server/db/file-reviews';
 import { getResolvedModelConfig } from '@server/db/model-configs';
-import { claimJobLease, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
+import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
+import { parseFileReviewResponse } from './model-output';
 import { filterReviewableFiles, parseUnifiedDiff } from './diff';
 
 import { GitHubService } from '../services/github';
@@ -13,16 +14,22 @@ import { FormatterService } from '../services/formatter';
 import { TokenTracker } from './token-tracker';
 import { loadRepoConfig } from './config';
 import { getWebhookDelivery } from '@server/db/webhook-deliveries';
+import { buildChangelogSlug, upsertChangelogEntry } from '@server/db/changelog';
+import { getOrCreateRepository } from '@server/db/repositories';
+import { buildChangelogPrompt, CHANGELOG_SYSTEM_PROMPT } from '@server/prompts/changelog';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
 
 export type ReviewJobRunResult = { action: 'ack' } | { action: 'retry'; delaySeconds: number };
+export type ReviewPhase = 'prepare' | 'review' | 'finalize' | 'changelog';
 
 const REVIEW_CHUNK_FILE_LIMIT = 3;
 const REVIEW_CHUNK_WALL_CLOCK_MS = 12 * 60 * 1000;
 const JOB_LEASE_SECONDS = 15 * 60;
 const BUSY_RETRY_SECONDS = 60;
 const RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS = [60, 5 * 60, 15 * 60];
+/** Workers AI batches typically land within ~5 minutes; poll on a steady beat. */
+const BATCH_POLL_DELAY_SECONDS = 30;
 const MAX_RETRYABLE_FILE_REVIEW_FAILURES = 3;
 
 function isRetryableFileReviewErrorMessage(message: string | null | undefined) {
@@ -190,6 +197,14 @@ export async function runReviewJob(env: Env, message: ReviewJobMessage): Promise
     return { action: 'ack' };
   }
 
+  // The changelog runs against an already-completed job, so it deliberately
+  // skips the lease: claimJobLease only admits queued/running jobs and would
+  // reject a 'done' job as terminal. Persistence is an upsert keyed by slug,
+  // so a duplicate delivery is harmless.
+  if (resolved.phase === 'changelog') {
+    return runChangelogJob(env, resolved.job);
+  }
+
   const leaseOwner = crypto.randomUUID();
   const claim = await claimJobLease(env, resolved.job.id, leaseOwner, JOB_LEASE_SECONDS);
   if (claim.status === 'missing') {
@@ -253,7 +268,7 @@ export async function runReviewJob(env: Env, message: ReviewJobMessage): Promise
 async function resolveQueuedJob(
   env: Env,
   message: ReviewJobMessage,
-): Promise<{ job: PersistedReviewJob; phase: 'prepare' | 'review' | 'finalize' } | null> {
+): Promise<{ job: PersistedReviewJob; phase: ReviewPhase } | null> {
   if (message.jobId) {
     const row = await getJobForProcessing(env, message.jobId);
     return row ? { job: mapJob(row), phase: message.phase ?? 'review' } : null;
@@ -388,6 +403,7 @@ async function runPreparePhase(
   leaseOwner: string,
   github: GitHubService,
 ) {
+  await checkSuperseded(env, job.id);
   await updateJobStep(env, job.id, 'Preparation', { status: 'running' });
   const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
   const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
@@ -443,6 +459,8 @@ async function runReviewPhase(
   github: GitHubService,
   model: ModelService,
 ) {
+  await checkSuperseded(env, job.id);
+
   if (!hasCompletedStep(job, 'Preparation')) {
     await runPreparePhase(env, job, leaseOwner, github);
     return;
@@ -476,11 +494,24 @@ async function runReviewPhase(
   const startedAt = Date.now();
   let processedThisChunk = 0;
 
+  // Bail before spending model calls if a newer commit superseded this job
+  // while standardization / diff-fetch was running.
+  await checkSuperseded(env, job.id);
+
   const jobIdsToQuery = [job.id];
   if (job.retryOfJobId) jobIdsToQuery.push(job.retryOfJobId);
   const allExistingReviews = await getFileReviewsForJobs(env, jobIdsToQuery);
   const currentReviews = new Map(allExistingReviews.filter((review) => review.job_id === job.id).map((review) => [review.file_path, review]));
   const parentReviews = new Map(allExistingReviews.filter((review) => review.job_id !== job.id && review.file_status === 'done').map((review) => [review.file_path, review]));
+
+  const pendingFiles = files.filter((file) => {
+    const existingReview = currentReviews.get(file.path);
+    return !(existingReview && countsAsHandledFileReview(existingReview));
+  });
+
+  if (await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount })) {
+    return;
+  }
 
   const reviewTasks: Array<Promise<void>> = [];
 
@@ -561,6 +592,184 @@ async function runReviewPhase(
     });
   }
   await enqueueJobPhase(env, job.id, 'review');
+}
+
+/**
+ * Workers AI async batch path. Queues every outstanding file review in one call
+ * and polls it across later queue invocations, which sidesteps the per-request
+ * capacity errors that drive the synchronous path into multi-minute backoff.
+ *
+ * Returns true when it owns this invocation (submitted or polled), false to let
+ * the caller fall back to synchronous chunked review.
+ */
+async function runBatchReviewPhase(
+  env: Env,
+  job: PersistedReviewJob,
+  leaseOwner: string,
+  github: GitHubService,
+  model: ModelService,
+  ctx: {
+    pr: Awaited<ReturnType<GitHubService['getPullRequest']>>;
+    config: RepoConfig;
+    files: ReturnType<typeof parseUnifiedDiff>;
+    pendingFiles: ReturnType<typeof parseUnifiedDiff>;
+    totalLineCount: number;
+  },
+) {
+  const { pr, config, files, pendingFiles, totalLineCount } = ctx;
+
+  if (job.batchRequestId && job.batchModel) {
+    const result = await model.pollReviewBatch(job.batchModel, job.batchRequestId);
+
+    if (result.status === 'pending') {
+      await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
+      if (job.checkRunId) {
+        await github.updateCheckRun(job.owner, job.repo, job.checkRunId, {
+          title: `Reviewing (batch queued)`,
+          summary: 'Codra queued this review on the Workers AI batch API and is waiting for results.',
+        });
+      }
+      await enqueueJobPhase(env, job.id, 'review', BATCH_POLL_DELAY_SECONDS);
+      return true;
+    }
+
+    await persistBatchResponses(env, job, files, result.responses);
+    await clearJobBatch(env, job.id);
+    // Re-run the review phase so the existing completeness check decides
+    // whether to finalize or retry any files the batch could not review.
+    await enqueueJobPhase(env, job.id, 'review');
+    return true;
+  }
+
+  if (pendingFiles.length === 0) return false;
+
+  const batchModel = await model.resolveBatchModel(config, totalLineCount);
+  if (!batchModel) return false;
+
+  const prompts = await Promise.all(
+    pendingFiles.map((file) =>
+      model.buildReviewPrompt({
+        file,
+        prTitle: pr.title ?? null,
+        prDescription: pr.body ?? null,
+        config,
+        totalLineCount,
+      }),
+    ),
+  );
+
+  const requestId = await model.submitReviewBatch(
+    batchModel,
+    prompts.map((prompt) => ({ systemPrompt: prompt.systemPrompt, userPrompt: prompt.userPrompt })),
+  );
+  if (!requestId) return false;
+
+  await recordJobBatch(env, job.id, {
+    requestId,
+    model: batchModel,
+    filePaths: pendingFiles.map((file) => file.path),
+  });
+  await enqueueJobPhase(env, job.id, 'review', BATCH_POLL_DELAY_SECONDS);
+  return true;
+}
+
+/** Maps batch responses back to files by index and persists each file review. */
+async function persistBatchResponses(
+  env: Env,
+  job: PersistedReviewJob,
+  files: ReturnType<typeof parseUnifiedDiff>,
+  responses: Array<{ index: number; rawText: string | null; error: string | null }>,
+) {
+  const filesByPath = new Map(files.map((file) => [file.path, file]));
+  const batchModel = job.batchModel ?? 'unknown';
+
+  for (const response of responses) {
+    const filePath = job.batchFilePaths[response.index];
+    const file = filePath ? filesByPath.get(filePath) : undefined;
+    if (!file) {
+      logger.warn(`Batch response ${response.index} has no matching file in job ${job.id}; skipping`);
+      continue;
+    }
+
+    const failure = response.error ?? (response.rawText ? null : 'Batch returned no review content');
+    if (failure) {
+      await recordBatchFileFailure(env, job, file, batchModel, failure);
+      continue;
+    }
+
+    try {
+      const parsed = parseFileReviewResponse(response.rawText!, file);
+      await upsertFileReview(env, job.id, {
+        filePath: file.path,
+        fileStatus: 'done',
+        modelUsed: batchModel,
+        modelProvider: 'Cloudflare',
+        diffLineCount: file.lineCount,
+        diffInput: '',
+        rawAiOutput: response.rawText,
+        parsedComments: parsed.comments,
+        inputTokens: null,
+        outputTokens: null,
+        durationMs: null,
+        verdict: parsed.verdict,
+        fileSummary: parsed.fileSummary,
+        overallCorrectness: parsed.overallCorrectness,
+        confidenceScore: parsed.confidenceScore,
+        errorMessage: null,
+      });
+    } catch (error) {
+      await recordBatchFileFailure(env, job, file, batchModel, error instanceof Error ? error.message : String(error));
+    }
+  }
+}
+
+/**
+ * Mirrors the synchronous failure handling so a flaky batch response gets the
+ * same bounded retry budget instead of looping forever.
+ */
+async function recordBatchFileFailure(
+  env: Env,
+  job: PersistedReviewJob,
+  file: ReturnType<typeof parseUnifiedDiff>[number],
+  batchModel: string,
+  errorMessage: string,
+) {
+  const retryable = isRetryableFileReviewErrorMessage(errorMessage);
+
+  if (retryable) {
+    const failureCount = await recordRetryableFileReviewFailure(env, job.id, {
+      filePath: file.path,
+      modelUsed: batchModel,
+      modelProvider: 'Cloudflare',
+      diffLineCount: file.lineCount,
+      diffInput: '',
+      durationMs: null,
+      errorMessage,
+    });
+
+    if (failureCount < MAX_RETRYABLE_FILE_REVIEW_FAILURES) {
+      logger.warn(`Batch review deferred for ${file.path}; will retry`, { attempts: failureCount, error: errorMessage });
+      return;
+    }
+    errorMessage = `Review skipped after ${failureCount} repeated batch failures. Last error: ${errorMessage}`;
+  }
+
+  await upsertFileReview(env, job.id, {
+    filePath: file.path,
+    fileStatus: 'failed',
+    modelUsed: batchModel,
+    modelProvider: 'Cloudflare',
+    diffLineCount: file.lineCount,
+    diffInput: '',
+    rawAiOutput: null,
+    parsedComments: [],
+    inputTokens: null,
+    outputTokens: null,
+    durationMs: null,
+    verdict: null,
+    fileSummary: null,
+    errorMessage,
+  });
 }
 
 async function reviewAndPersistFile(
@@ -709,6 +918,7 @@ async function runFinalizePhase(
   github: GitHubService,
   formatter: FormatterService,
 ) {
+  await checkSuperseded(env, job.id);
   await updateJobStep(env, job.id, 'Generating Summary', { status: 'running' });
 
   const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
@@ -818,6 +1028,10 @@ async function runFinalizePhase(
   });
   logger.info(`Review job completed: ${job.owner}/${job.repo} PR #${job.prNumber}`);
 
+  // Changelog generation runs as its own phase: it must not consume finalize's
+  // wall-clock budget, and a failure there must not fail the shipped review.
+  await enqueueJobPhase(env, job.id, 'changelog');
+
   // Update the status comment with a narrative review summary
   if (job.statusCommentId) {
     try {
@@ -852,18 +1066,187 @@ async function runFinalizePhase(
   }
 }
 
-async function heartbeatAndCheckSuperseded(env: Env, jobId: string, leaseOwner: string) {
-  await heartbeatJobLease(env, jobId, leaseOwner, JOB_LEASE_SECONDS);
+// Throws JOB_SUPERSEDED if a newer commit/job has taken over this PR, so the
+// current invocation stops before spending more model calls on stale code.
+async function checkSuperseded(env: Env, jobId: string) {
   const currentJob = await getJobForProcessing(env, jobId);
   if (currentJob?.status === 'superseded') {
     throw new Error('JOB_SUPERSEDED');
   }
 }
 
+/**
+ * Runs the changelog phase for a completed job. Never fails the job: the review
+ * has already shipped, so a changelog problem is logged and acked (or retried
+ * once on a transient model failure).
+ */
+async function runChangelogJob(env: Env, job: PersistedReviewJob): Promise<ReviewJobRunResult> {
+  const tracker = new TokenTracker();
+  const github = new GitHubService(env, job.installationId, tracker);
+  const model = new ModelService(env, tracker, { jobId: job.id });
+
+  try {
+    await runChangelogPhase(env, job, github, model);
+    return { action: 'ack' };
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : String(error);
+
+    if (isRetryableModelError(error)) {
+      const delaySeconds = getRetryableModelFailureDelaySeconds(error);
+      logger.warn(`Changelog generation hit a transient failure; retrying in ${delaySeconds}s`, { jobId: job.id });
+      return { action: 'retry', delaySeconds };
+    }
+
+    logger.error(`Changelog generation failed for ${job.owner}/${job.repo} PR #${job.prNumber}`, error);
+    await updateJobStep(env, job.id, 'Changelog', { status: 'failed', error: messageText });
+    return { action: 'ack' };
+  }
+}
+
+/**
+ * Builds the copy-pasteable prompt a coding agent can run to action the review.
+ * Only P0/P1/P2 findings are included — nits are noise in a fix prompt.
+ */
+function buildAgentFixPrompt(job: PersistedReviewJob, findings: ParsedReviewComment[]) {
+  const actionable = findings.filter((f) => ['P0', 'P1', 'P2'].includes(f.severity));
+  if (actionable.length === 0) return null;
+
+  const items = actionable
+    .map((f, i) => `${i + 1}. [${f.severity}] ${f.path}${f.line ? `:${f.line}` : ''} — ${f.title}\n   ${f.body.replace(/\n+/g, ' ').trim()}`)
+    .join('\n');
+
+  return [
+    '```',
+    `Fix the following ${actionable.length} issue${actionable.length === 1 ? '' : 's'} Codra found in PR #${job.prNumber} (${job.owner}/${job.repo}).`,
+    'Address each one at its root cause, keep the diff minimal, and do not refactor beyond what the fix needs.',
+    '',
+    items,
+    '```',
+  ].join('\n');
+}
+
+/**
+ * Generates the changelog entry for a completed review, persists it to D1, and
+ * rewrites the PR status comment with the findings summary, an agent fix
+ * prompt, and a link to the rendered entry.
+ *
+ * Runs as its own phase so the model call sits outside finalize's wall-clock
+ * budget; a failure here never invalidates the review that already shipped.
+ */
+async function runChangelogPhase(
+  env: Env,
+  job: PersistedReviewJob,
+  github: GitHubService,
+  model: ModelService,
+) {
+  const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
+  const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
+  const rawDiff = await github.getPullRequestDiff(job.owner, job.repo, job.prNumber);
+  const files = filterReviewableFiles(parseUnifiedDiff(rawDiff), config.review);
+  const reviews = await getFileReviewsForJobs(env, [job.id]);
+  const findings = reviews.flatMap((review) => review.parsed_comments as ParsedReviewComment[]);
+
+  await updateJobStep(env, job.id, 'Changelog', { status: 'running' });
+
+  const response = await model.generateChangelog({
+    config,
+    systemPrompt: CHANGELOG_SYSTEM_PROMPT,
+    userPrompt: buildChangelogPrompt({
+      prTitle: pr.title ?? null,
+      prBody: pr.body ?? null,
+      headRef: pr.head?.ref ?? null,
+      baseRef: pr.base?.ref ?? null,
+      files: files.map((file) => ({
+        path: file.path,
+        summary: reviews.find((r) => r.file_path === file.path)?.file_summary ?? null,
+        lineCount: file.lineCount,
+      })),
+      diff: rawDiff,
+      findings,
+    }),
+  });
+
+  // Model output is untrusted: validate before it reaches D1 or the renderer.
+  const parsed = changelogModelOutputSchema.parse(JSON.parse(response.rawText));
+
+  const slug = buildChangelogSlug({
+    owner: job.owner,
+    repo: job.repo,
+    prNumber: job.prNumber,
+    commitSha: job.commitSha,
+  });
+
+  const repositoryId = await getOrCreateRepository(env, {
+    installationId: job.installationId,
+    owner: job.owner,
+    repo: job.repo,
+  });
+
+  await upsertChangelogEntry(env, {
+    slug,
+    jobId: job.id,
+    repositoryId,
+    prNumber: job.prNumber,
+    prUrl: `https://github.com/${job.owner}/${job.repo}/pull/${job.prNumber}`,
+    headRef: pr.head?.ref ?? null,
+    commitSha: job.commitSha,
+    tag: null,
+    area: parsed.area,
+    title: parsed.title,
+    summary: parsed.summary,
+    date: new Date().toISOString().slice(0, 10),
+    changes: parsed.changes,
+    detail: {
+      problem: parsed.problem,
+      approach: parsed.approach,
+      apiChanges: parsed.api_changes,
+      filesTouched: files.map((file) => file.path),
+      migrations: parsed.migrations,
+      code: parsed.code,
+      diagrams: parsed.diagrams,
+    },
+  });
+
+  await updateJobStep(env, job.id, 'Changelog', { status: 'done' });
+
+  if (!job.statusCommentId) {
+    logger.warn(`Job ${job.id} has no status comment to update with the changelog link`);
+    return;
+  }
+
+  const changelogUrl = `${env.APP_URL.replace(/\/+$/, '')}/changelog/${slug}`;
+  const bySeverity = ['P0', 'P1', 'P2', 'P3', 'nit']
+    .map((severity) => ({ severity, count: findings.filter((f) => f.severity === severity).length }))
+    .filter((row) => row.count > 0);
+  const findingsLine = bySeverity.length
+    ? bySeverity.map((row) => `**${row.count}** ${row.severity}`).join(' · ')
+    : 'No issues found';
+
+  const fixPrompt = buildAgentFixPrompt(job, findings);
+
+  const body = [
+    '## Code Review complete',
+    '',
+    parsed.summary,
+    '',
+    `**Findings:** ${findingsLine} · **Files:** ${files.length} · **Commit:** \`${job.commitSha.slice(0, 7)}\``,
+    '',
+    `📋 **[View the full changelog for this PR](${changelogUrl})** — schema diagrams, API changes, and the code that moved.`,
+    ...(fixPrompt ? ['', '<details>', '<summary>Prompt for your coding agent to fix these findings</summary>', '', fixPrompt, '</details>'] : []),
+  ].join('\n');
+
+  await github.updateIssueComment(job.owner, job.repo, job.statusCommentId, body);
+}
+
+async function heartbeatAndCheckSuperseded(env: Env, jobId: string, leaseOwner: string) {
+  await heartbeatJobLease(env, jobId, leaseOwner, JOB_LEASE_SECONDS);
+  await checkSuperseded(env, jobId);
+}
+
 async function enqueueJobPhase(
   env: Env,
   jobId: string,
-  phase: 'prepare' | 'review' | 'finalize',
+  phase: ReviewPhase,
   delaySeconds = 0,
 ) {
   await markJobContinuationQueued(env, jobId, delaySeconds);

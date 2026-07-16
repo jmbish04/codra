@@ -1,7 +1,7 @@
 import { logger } from '@server/core/logger';
 import { withTimeout } from '@server/core/timeout';
-import { ProviderRequestError, providerErrorMessage, type ModelResponse } from './types';
-import { REVIEW_RESPONSE_SCHEMA } from './schemas';
+import { ProviderRequestError, providerErrorMessage, type ModelResponse, type StructuredSchema } from './types';
+import { REVIEW_SCHEMA } from './schemas';
 
 /** Max wall-clock time allowed for a single Google AI Studio call. */
 const GEMINI_TIMEOUT_MS = 180_000;
@@ -44,6 +44,7 @@ export async function reviewWithGoogle(
   model: string,
   input: { systemPrompt: string; userPrompt: string },
   tracker?: { incrementSubrequests(count?: number): void },
+  schema: StructuredSchema = REVIEW_SCHEMA,
 ): Promise<ModelResponse> {
   logger.info(`Calling Google model: ${model}`);
   
@@ -85,7 +86,7 @@ export async function reviewWithGoogle(
             ],
             generationConfig: {
               responseMimeType: 'application/json',
-              responseSchema: REVIEW_RESPONSE_SCHEMA,
+              responseSchema: schema.schema,
               maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
             },
           }),

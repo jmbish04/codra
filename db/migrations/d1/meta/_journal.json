@@ -50,6 +50,20 @@
       "when": 1784051431346,
       "tag": "0006_unusual_lorna_dane",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1784215159325,
+      "tag": "0007_redundant_butterfly",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1784220090691,
+      "tag": "0008_certain_titania",
+      "breakpoints": true
     }
   ]
 }

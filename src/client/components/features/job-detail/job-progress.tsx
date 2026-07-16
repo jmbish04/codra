@@ -1,6 +1,7 @@
-import { FileCode2, Hourglass } from 'lucide-react';
+import { FileCode2, Hourglass, PauseCircle } from 'lucide-react';
 import type { JobDetail } from '@shared/schema';
 import { Progress } from '@client/components/ui/progress';
+import { describeWait } from '@client/lib/job-status';
 
 interface JobProgressProps {
   job: JobDetail;
@@ -13,6 +14,8 @@ export function JobProgress({ job }: JobProgressProps) {
   const total = job.fileCount || 0;
   const pct = total > 0 ? Math.round((finishedCount / total) * 100) : 0;
   const isQueued = job.status === 'queued';
+  const wait = describeWait(job);
+  const isPaused = Boolean(wait && job.nextRetryAt && new Date(job.nextRetryAt).getTime() > Date.now());
 
   const activeFile = job.files.find(f => f.fileStatus === 'pending');
   const activeFilePath = activeFile?.filePath ?? null;
@@ -46,12 +49,14 @@ export function JobProgress({ job }: JobProgressProps) {
         {/* Top row: label + count */}
         <div className="flex items-baseline justify-between gap-4 mb-4">
           <div className="flex items-center gap-2">
-            {isQueued
+            {isPaused
+              ? <PauseCircle size={13} className="opacity-70 shrink-0" />
+              : isQueued
               ? <Hourglass size={13} className="opacity-70 shrink-0" />
               : <FileCode2 size={13} className="opacity-70 shrink-0" />
             }
             <span className="text-sm font-semibold tracking-tight">
-              {isQueued ? 'Waiting in queue' : 'Reviewing files'}
+              {wait ? wait.label : isQueued ? 'Waiting in queue' : 'Reviewing files'}
             </span>
           </div>
           <span className="font-mono text-xs font-bold opacity-60 tabular-nums shrink-0">
@@ -65,6 +70,13 @@ export function JobProgress({ job }: JobProgressProps) {
           className="h-2.5 bg-primary-foreground/20 border-none"
           indicatorClassName="bg-gradient-to-r from-primary-foreground/80 via-primary-foreground to-primary-foreground/90"
         />
+
+        {/* Why the job is waiting (queue backlog, provider backoff, etc.) */}
+        {wait && (
+          <p className="mt-3 text-[12px] leading-snug opacity-70">
+            {wait.detail}
+          </p>
+        )}
 
         {/* Active file + percent */}
         {!isQueued && (

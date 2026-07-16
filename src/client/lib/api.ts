@@ -11,7 +11,7 @@ import type {
   SyncReposResponse,
   UpdatesEmailResponse,
 } from '@shared/api';
-import type { LlmApiFormat, LlmProvider, ModelConfig, RepoConfig, JobDetail } from '@shared/schema';
+import type { LlmApiFormat, LlmProvider, ModelConfig, RepoConfig, JobDetail, ChangelogEntry } from '@shared/schema';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -161,6 +161,9 @@ export const api = {
     }
     const query = searchParams.toString();
     return request<JobsResponse>(`/api/jobs${query ? `?${query}` : ''}`);
+  },
+  getChangelogEntry(slug: string) {
+    return request<{ entry: ChangelogEntry }>(`/api/changelog/${slug}`);
   },
   getJob(id: string, options: { etag?: string | null } = {}) {
     const headers = new Headers();

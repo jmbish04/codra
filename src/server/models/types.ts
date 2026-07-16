@@ -40,3 +40,14 @@ export function providerErrorMessage(errorText: string) {
 
   return errorText.trim() || 'The provider returned an error.';
 }
+
+/**
+ * A structured-output contract for a model call. Providers default to the file
+ * review schema; other callers (e.g. changelog generation) pass their own.
+ * `name` is used as the OpenAI json_schema name and the Anthropic tool name.
+ */
+export interface StructuredSchema {
+  name: string;
+  description?: string;
+  schema: object;
+}

@@ -7,3 +7,4 @@ export * from './models';
 export * from './best-practices';
 export * from './api-usage';
 export * from './knowledge-base';
+export * from './changelog';

@@ -1,7 +1,7 @@
 import { logger } from '@server/core/logger';
 import { withTimeout } from '@server/core/timeout';
-import { ProviderRequestError, providerErrorMessage, type ModelResponse } from './types';
-import { REVIEW_RESPONSE_SCHEMA } from './schemas';
+import { ProviderRequestError, providerErrorMessage, type ModelResponse, type StructuredSchema } from './types';
+import { REVIEW_SCHEMA } from './schemas';
 
 const ANTHROPIC_TIMEOUT_MS = 180_000;
 const ANTHROPIC_MAX_OUTPUT_TOKENS = 4096;
@@ -20,6 +20,7 @@ export async function reviewWithAnthropic(
   model: string,
   input: { systemPrompt: string; userPrompt: string },
   tracker?: { incrementSubrequests(count?: number): void },
+  schema: StructuredSchema = REVIEW_SCHEMA,
 ): Promise<ModelResponse> {
   logger.info(`Calling Anthropic model: ${model}`);
   const baseUrl = (config.baseUrl || DEFAULT_ANTHROPIC_BASE_URL).replace(/\/+$/, '');
@@ -38,16 +39,16 @@ export async function reviewWithAnthropic(
         model,
         system: input.systemPrompt,
         messages: [
-          { role: 'user', content: `${input.userPrompt}\n\nUse the codra_file_review tool to return your structured review.` },
+          { role: 'user', content: `${input.userPrompt}\n\nUse the ${schema.name} tool to return your structured result.` },
         ],
         tools: [
           {
-            name: 'codra_file_review',
-            description: 'Submit the structured code review result with findings, overall explanation, correctness, and confidence score.',
-            input_schema: REVIEW_RESPONSE_SCHEMA,
+            name: schema.name,
+            description: schema.description ?? 'Submit the structured result.',
+            input_schema: schema.schema,
           },
         ],
-        tool_choice: { type: 'tool', name: 'codra_file_review' },
+        tool_choice: { type: 'tool', name: schema.name },
         max_tokens: ANTHROPIC_MAX_OUTPUT_TOKENS,
         temperature: 0,
       }),
