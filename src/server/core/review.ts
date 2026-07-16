@@ -388,6 +388,7 @@ async function runPreparePhase(
   leaseOwner: string,
   github: GitHubService,
 ) {
+  await checkSuperseded(env, job.id);
   await updateJobStep(env, job.id, 'Preparation', { status: 'running' });
   const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
   const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
@@ -443,6 +444,8 @@ async function runReviewPhase(
   github: GitHubService,
   model: ModelService,
 ) {
+  await checkSuperseded(env, job.id);
+
   if (!hasCompletedStep(job, 'Preparation')) {
     await runPreparePhase(env, job, leaseOwner, github);
     return;
@@ -475,6 +478,10 @@ async function runReviewPhase(
   const totalLineCount = files.reduce((sum, file) => sum + file.lineCount, 0);
   const startedAt = Date.now();
   let processedThisChunk = 0;
+
+  // Bail before spending model calls if a newer commit superseded this job
+  // while standardization / diff-fetch was running.
+  await checkSuperseded(env, job.id);
 
   const jobIdsToQuery = [job.id];
   if (job.retryOfJobId) jobIdsToQuery.push(job.retryOfJobId);
@@ -709,6 +716,7 @@ async function runFinalizePhase(
   github: GitHubService,
   formatter: FormatterService,
 ) {
+  await checkSuperseded(env, job.id);
   await updateJobStep(env, job.id, 'Generating Summary', { status: 'running' });
 
   const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
@@ -852,12 +860,18 @@ async function runFinalizePhase(
   }
 }
 
-async function heartbeatAndCheckSuperseded(env: Env, jobId: string, leaseOwner: string) {
-  await heartbeatJobLease(env, jobId, leaseOwner, JOB_LEASE_SECONDS);
+// Throws JOB_SUPERSEDED if a newer commit/job has taken over this PR, so the
+// current invocation stops before spending more model calls on stale code.
+async function checkSuperseded(env: Env, jobId: string) {
   const currentJob = await getJobForProcessing(env, jobId);
   if (currentJob?.status === 'superseded') {
     throw new Error('JOB_SUPERSEDED');
   }
+}
+
+async function heartbeatAndCheckSuperseded(env: Env, jobId: string, leaseOwner: string) {
+  await heartbeatJobLease(env, jobId, leaseOwner, JOB_LEASE_SECONDS);
+  await checkSuperseded(env, jobId);
 }
 
 async function enqueueJobPhase(

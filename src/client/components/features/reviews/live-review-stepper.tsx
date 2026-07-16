@@ -1,4 +1,5 @@
 import type { JobSummary } from '@shared/schema';
+import { describeWait } from '@client/lib/job-status';
 
 interface LiveReviewStepperProps {
   job: JobSummary;
@@ -7,6 +8,8 @@ interface LiveReviewStepperProps {
 
 export function LiveReviewStepper({ job, compact = true }: LiveReviewStepperProps) {
   const { status, steps = [] } = job;
+  const wait = describeWait(job);
+  const isPaused = Boolean(wait && job.nextRetryAt && new Date(job.nextRetryAt).getTime() > Date.now());
 
   let activeLabel = '';
 
@@ -48,10 +51,17 @@ export function LiveReviewStepper({ job, compact = true }: LiveReviewStepperProp
     superseded: 'bg-secondary text-muted-foreground border-border/40',
   };
 
-  const cls = styles[status] ?? styles.queued;
+  if (isPaused) activeLabel = 'Paused';
+
+  const cls = isPaused
+    ? 'badge-warning'
+    : styles[status] ?? styles.queued;
 
   return (
-    <span className={`inline-flex items-center rounded-md px-2.5 py-1 text-[11px] font-semibold border tracking-wide ${cls}`}>
+    <span
+      className={`inline-flex items-center rounded-md px-2.5 py-1 text-[11px] font-semibold border tracking-wide ${cls}`}
+      title={wait?.detail}
+    >
       {activeLabel}
     </span>
   );
