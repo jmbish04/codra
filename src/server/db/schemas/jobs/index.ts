@@ -39,4 +39,10 @@ export const jobs = sqliteTable('jobs', {
   recovery_count: integer('recovery_count').notNull().default(0),
   last_queue_message_at: text('last_queue_message_at'),
   status_comment_id: integer('status_comment_id', { mode: 'number' }),
+  // In-flight Workers AI async batch: the request id to poll, the model that
+  // owns it, and the ordered file paths whose index maps to each response id.
+  batch_request_id: text('batch_request_id'),
+  batch_model: text('batch_model'),
+  batch_file_paths: text('batch_file_paths', { mode: 'json' }),
+  batch_submitted_at: text('batch_submitted_at'),
 });

@@ -1,5 +1,12 @@
 import { reviewWithGoogle } from '../models/google';
 import { reviewWithCloudflare } from '../models/cloudflare';
+import {
+  batchFitsPayloadLimit,
+  isBatchCapableCloudflareModel,
+  pollCloudflareReviewBatch,
+  submitCloudflareReviewBatch,
+  type BatchReviewItem,
+} from '../models/cloudflare-batch';
 import { reviewWithOpenAI } from '../models/openai';
 import { reviewWithAnthropic } from '../models/anthropic';
 import { buildFileReviewPrompts } from '../prompts/file-review';
@@ -18,6 +25,18 @@ import { getSecretStoreBinding } from '@server/utils/secrets';
 import { logApiUsage } from '@server/db/api-usage';
 
 const PROVIDER_UNAVAILABLE_TTL_SECONDS = 24 * 60 * 60;
+/**
+ * Last-resort Workers AI coding models, appended to every chain so a repo with
+ * no configured `fallbacks` still has somewhere to go when its main model has a
+ * transient failure. Without this, an unconfigured chain is length 1 and any
+ * blip escalates straight to a multi-minute RetryableModelError backoff.
+ * Models absent from the DB resolve-fail and are skipped harmlessly.
+ */
+const DEFAULT_WORKERS_AI_FALLBACKS = [
+  '@cf/moonshotai/kimi-k2.7-code',
+  '@cf/zai-org/glm-5.2',
+  '@cf/qwen/qwen2.5-coder-32b-instruct',
+];
 const COMPACT_REVIEW_PROMPT_LINE_CAP = 400;
 const MODEL_ALIASES: Record<string, string> = {
   'gemma-4-31b': 'gemma-4-31b-it',
@@ -150,10 +169,12 @@ export class ModelService {
       }
     }
 
-    const chain = uniqueModels([...(selectedModel ? [selectedModel] : []), ...fallbackModels]);
-    if (chain.length === 0) {
+    const configured = uniqueModels([...(selectedModel ? [selectedModel] : []), ...fallbackModels]);
+    if (configured.length === 0) {
       throw new Error('No review model strategy is configured. Choose a global model strategy in Settings, or configure this repository.');
     }
+
+    const chain = uniqueModels([...configured, ...DEFAULT_WORKERS_AI_FALLBACKS]);
 
     selectedModel = chain[0];
     fallbackModels = chain.slice(1);
@@ -256,7 +277,66 @@ export class ModelService {
     return this.callResolvedModel(await this.resolveModel(model), input);
   }
 
-  async reviewFile(params: {
+  /**
+   * Resolves the batch-capable Workers AI model for this config, or null when
+   * the chain's primary model cannot be batched (callers then use the
+   * synchronous chunked path).
+   */
+  async resolveBatchModel(config: RepoConfig, totalLineCount: number): Promise<string | null> {
+    const { primary } = this.selectModel({ totalLineCount, config });
+    if (!isBatchCapableCloudflareModel(primary)) return null;
+
+    try {
+      const resolved = await this.resolveModel(primary);
+      if (resolved.apiFormat !== 'cloudflare-workers-ai') return null;
+      if (await this.isProviderUnavailable(resolved.providerId)) return null;
+      return primary;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Queues every file review as one Workers AI batch. Returns null when the
+   * payload exceeds the 10 MB cap so the caller can fall back to sync review.
+   */
+  async submitReviewBatch(model: string, items: BatchReviewItem[]): Promise<string | null> {
+    const { fits, bytes } = batchFitsPayloadLimit(items);
+    if (!fits) {
+      logger.warn(`Batch payload of ${bytes} bytes exceeds the Workers AI limit; falling back to synchronous review`, {
+        model,
+        requests: items.length,
+      });
+      return null;
+    }
+
+    return submitCloudflareReviewBatch(this.env, model, items);
+  }
+
+  async pollReviewBatch(model: string, requestId: string) {
+    const result = await pollCloudflareReviewBatch(this.env, model, requestId);
+
+    if (result.status === 'complete') {
+      this.tracker?.record(model, result.usage.inputTokens, result.usage.outputTokens);
+      await logApiUsage(this.env, {
+        provider: 'Cloudflare',
+        model,
+        promptTokens: result.usage.inputTokens,
+        completionTokens: result.usage.outputTokens,
+        source: 'local',
+        gatewayId: this.env.AI_GATEWAY_ID || '',
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Builds the system/user prompts for one file review. Shared by the
+   * synchronous path and the Workers AI batch path, which needs every prompt up
+   * front without calling a model.
+   */
+  async buildReviewPrompt(params: {
     file: any;
     prTitle: string | null;
     prDescription: string | null;
@@ -301,6 +381,19 @@ Lesson #${idx + 1}:
         custom_rules: customRules,
       },
     });
+
+    return { systemPrompt, userPrompt, reviewFile };
+  }
+
+  async reviewFile(params: {
+    file: any;
+    prTitle: string | null;
+    prDescription: string | null;
+    config: RepoConfig;
+    totalLineCount: number;
+    compactPrompt?: boolean;
+  }) {
+    const { systemPrompt, userPrompt, reviewFile } = await this.buildReviewPrompt(params);
 
     const { primary, fallbacks } = this.selectModel({
       totalLineCount: params.totalLineCount,

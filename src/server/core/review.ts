@@ -3,7 +3,8 @@ import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHub
 import { defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview } from '@server/db/file-reviews';
 import { getResolvedModelConfig } from '@server/db/model-configs';
-import { claimJobLease, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
+import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
+import { parseFileReviewResponse } from './model-output';
 import { filterReviewableFiles, parseUnifiedDiff } from './diff';
 
 import { GitHubService } from '../services/github';
@@ -23,6 +24,8 @@ const REVIEW_CHUNK_WALL_CLOCK_MS = 12 * 60 * 1000;
 const JOB_LEASE_SECONDS = 15 * 60;
 const BUSY_RETRY_SECONDS = 60;
 const RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS = [60, 5 * 60, 15 * 60];
+/** Workers AI batches typically land within ~5 minutes; poll on a steady beat. */
+const BATCH_POLL_DELAY_SECONDS = 30;
 const MAX_RETRYABLE_FILE_REVIEW_FAILURES = 3;
 
 function isRetryableFileReviewErrorMessage(message: string | null | undefined) {
@@ -489,6 +492,15 @@ async function runReviewPhase(
   const currentReviews = new Map(allExistingReviews.filter((review) => review.job_id === job.id).map((review) => [review.file_path, review]));
   const parentReviews = new Map(allExistingReviews.filter((review) => review.job_id !== job.id && review.file_status === 'done').map((review) => [review.file_path, review]));
 
+  const pendingFiles = files.filter((file) => {
+    const existingReview = currentReviews.get(file.path);
+    return !(existingReview && countsAsHandledFileReview(existingReview));
+  });
+
+  if (await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount })) {
+    return;
+  }
+
   const reviewTasks: Array<Promise<void>> = [];
 
   for (const file of files) {
@@ -568,6 +580,184 @@ async function runReviewPhase(
     });
   }
   await enqueueJobPhase(env, job.id, 'review');
+}
+
+/**
+ * Workers AI async batch path. Queues every outstanding file review in one call
+ * and polls it across later queue invocations, which sidesteps the per-request
+ * capacity errors that drive the synchronous path into multi-minute backoff.
+ *
+ * Returns true when it owns this invocation (submitted or polled), false to let
+ * the caller fall back to synchronous chunked review.
+ */
+async function runBatchReviewPhase(
+  env: Env,
+  job: PersistedReviewJob,
+  leaseOwner: string,
+  github: GitHubService,
+  model: ModelService,
+  ctx: {
+    pr: Awaited<ReturnType<GitHubService['getPullRequest']>>;
+    config: RepoConfig;
+    files: ReturnType<typeof parseUnifiedDiff>;
+    pendingFiles: ReturnType<typeof parseUnifiedDiff>;
+    totalLineCount: number;
+  },
+) {
+  const { pr, config, files, pendingFiles, totalLineCount } = ctx;
+
+  if (job.batchRequestId && job.batchModel) {
+    const result = await model.pollReviewBatch(job.batchModel, job.batchRequestId);
+
+    if (result.status === 'pending') {
+      await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
+      if (job.checkRunId) {
+        await github.updateCheckRun(job.owner, job.repo, job.checkRunId, {
+          title: `Reviewing (batch queued)`,
+          summary: 'Codra queued this review on the Workers AI batch API and is waiting for results.',
+        });
+      }
+      await enqueueJobPhase(env, job.id, 'review', BATCH_POLL_DELAY_SECONDS);
+      return true;
+    }
+
+    await persistBatchResponses(env, job, files, result.responses);
+    await clearJobBatch(env, job.id);
+    // Re-run the review phase so the existing completeness check decides
+    // whether to finalize or retry any files the batch could not review.
+    await enqueueJobPhase(env, job.id, 'review');
+    return true;
+  }
+
+  if (pendingFiles.length === 0) return false;
+
+  const batchModel = await model.resolveBatchModel(config, totalLineCount);
+  if (!batchModel) return false;
+
+  const prompts = await Promise.all(
+    pendingFiles.map((file) =>
+      model.buildReviewPrompt({
+        file,
+        prTitle: pr.title ?? null,
+        prDescription: pr.body ?? null,
+        config,
+        totalLineCount,
+      }),
+    ),
+  );
+
+  const requestId = await model.submitReviewBatch(
+    batchModel,
+    prompts.map((prompt) => ({ systemPrompt: prompt.systemPrompt, userPrompt: prompt.userPrompt })),
+  );
+  if (!requestId) return false;
+
+  await recordJobBatch(env, job.id, {
+    requestId,
+    model: batchModel,
+    filePaths: pendingFiles.map((file) => file.path),
+  });
+  await enqueueJobPhase(env, job.id, 'review', BATCH_POLL_DELAY_SECONDS);
+  return true;
+}
+
+/** Maps batch responses back to files by index and persists each file review. */
+async function persistBatchResponses(
+  env: Env,
+  job: PersistedReviewJob,
+  files: ReturnType<typeof parseUnifiedDiff>,
+  responses: Array<{ index: number; rawText: string | null; error: string | null }>,
+) {
+  const filesByPath = new Map(files.map((file) => [file.path, file]));
+  const batchModel = job.batchModel ?? 'unknown';
+
+  for (const response of responses) {
+    const filePath = job.batchFilePaths[response.index];
+    const file = filePath ? filesByPath.get(filePath) : undefined;
+    if (!file) {
+      logger.warn(`Batch response ${response.index} has no matching file in job ${job.id}; skipping`);
+      continue;
+    }
+
+    const failure = response.error ?? (response.rawText ? null : 'Batch returned no review content');
+    if (failure) {
+      await recordBatchFileFailure(env, job, file, batchModel, failure);
+      continue;
+    }
+
+    try {
+      const parsed = parseFileReviewResponse(response.rawText!, file);
+      await upsertFileReview(env, job.id, {
+        filePath: file.path,
+        fileStatus: 'done',
+        modelUsed: batchModel,
+        modelProvider: 'Cloudflare',
+        diffLineCount: file.lineCount,
+        diffInput: '',
+        rawAiOutput: response.rawText,
+        parsedComments: parsed.comments,
+        inputTokens: null,
+        outputTokens: null,
+        durationMs: null,
+        verdict: parsed.verdict,
+        fileSummary: parsed.fileSummary,
+        overallCorrectness: parsed.overallCorrectness,
+        confidenceScore: parsed.confidenceScore,
+        errorMessage: null,
+      });
+    } catch (error) {
+      await recordBatchFileFailure(env, job, file, batchModel, error instanceof Error ? error.message : String(error));
+    }
+  }
+}
+
+/**
+ * Mirrors the synchronous failure handling so a flaky batch response gets the
+ * same bounded retry budget instead of looping forever.
+ */
+async function recordBatchFileFailure(
+  env: Env,
+  job: PersistedReviewJob,
+  file: ReturnType<typeof parseUnifiedDiff>[number],
+  batchModel: string,
+  errorMessage: string,
+) {
+  const retryable = isRetryableFileReviewErrorMessage(errorMessage);
+
+  if (retryable) {
+    const failureCount = await recordRetryableFileReviewFailure(env, job.id, {
+      filePath: file.path,
+      modelUsed: batchModel,
+      modelProvider: 'Cloudflare',
+      diffLineCount: file.lineCount,
+      diffInput: '',
+      durationMs: null,
+      errorMessage,
+    });
+
+    if (failureCount < MAX_RETRYABLE_FILE_REVIEW_FAILURES) {
+      logger.warn(`Batch review deferred for ${file.path}; will retry`, { attempts: failureCount, error: errorMessage });
+      return;
+    }
+    errorMessage = `Review skipped after ${failureCount} repeated batch failures. Last error: ${errorMessage}`;
+  }
+
+  await upsertFileReview(env, job.id, {
+    filePath: file.path,
+    fileStatus: 'failed',
+    modelUsed: batchModel,
+    modelProvider: 'Cloudflare',
+    diffLineCount: file.lineCount,
+    diffInput: '',
+    rawAiOutput: null,
+    parsedComments: [],
+    inputTokens: null,
+    outputTokens: null,
+    durationMs: null,
+    verdict: null,
+    fileSummary: null,
+    errorMessage,
+  });
 }
 
 async function reviewAndPersistFile(

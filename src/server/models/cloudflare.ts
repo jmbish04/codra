@@ -73,7 +73,7 @@ function extractMessageContent(content: unknown): string | null {
   return null;
 }
 
-function extractCloudflareText(result: unknown, model: string): string {
+export function extractCloudflareText(result: unknown, model: string): string {
   if (isText(result)) return result.trim();
   const response = getText(result, 'response');
   if (response) return response;
@@ -101,7 +101,7 @@ function extractCloudflareText(result: unknown, model: string): string {
   return synthesizeInconclusiveReview(model, 'empty response');
 }
 
-function extractCloudflareUsage(result: unknown) {
+export function extractCloudflareUsage(result: unknown) {
   const usage = getRecord(result, 'usage') ?? getRecord(getRecord(result, 'result'), 'usage');
   return {
     inputTokens: getNumber(usage, 'prompt_tokens') ?? 0,
@@ -109,8 +109,40 @@ function extractCloudflareUsage(result: unknown) {
   };
 }
 
+/** Chat payload for a single file review. Shared by the sync and batch paths. */
+export function buildCloudflareReviewRequest(input: { systemPrompt: string; userPrompt: string }) {
+  return {
+    messages: [
+      {
+        role: 'system',
+        content: `${input.systemPrompt}\n\nReturn only the JSON object. Do not include chain-of-thought, analysis, markdown, code fences, or explanatory prose.`,
+      },
+      { role: 'user', content: `${input.userPrompt}\n\nRespond with the required JSON object only.` },
+    ],
+    max_completion_tokens: CLOUDFLARE_MAX_OUTPUT_TOKENS,
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'codra_file_review',
+        strict: true,
+        schema: REVIEW_RESPONSE_SCHEMA,
+      },
+    },
+    temperature: 0,
+    top_p: 0.1,
+  };
+}
+
+/**
+ * Routes Workers AI calls through AI Gateway so usage shows up alongside the
+ * other providers. Without this the AI binding bypasses the gateway entirely.
+ */
+export function cloudflareAiOptions(env: Pick<Env, 'AI_GATEWAY_ID'>) {
+  return env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID } } : {};
+}
+
 export async function reviewWithCloudflare(
-  env: Pick<Env, 'AI'>,
+  env: Pick<Env, 'AI' | 'AI_GATEWAY_ID'>,
   model: string,
   input: { systemPrompt: string; userPrompt: string },
   tracker?: { incrementSubrequests(count?: number): void },
@@ -137,26 +169,7 @@ export async function reviewWithCloudflare(
       logger.info(`Calling Cloudflare model: ${model}`);
       const startTime = Date.now();
       const result = await Promise.race([
-        env.AI.run(model as any, {
-          messages: [
-            {
-              role: 'system',
-              content: `${input.systemPrompt}\n\nReturn only the JSON object. Do not include chain-of-thought, analysis, markdown, code fences, or explanatory prose.`,
-            },
-            { role: 'user', content: `${input.userPrompt}\n\nRespond with the required JSON object only.` },
-          ],
-          max_completion_tokens: CLOUDFLARE_MAX_OUTPUT_TOKENS,
-          response_format: {
-            type: 'json_schema',
-            json_schema: {
-              name: 'codra_file_review',
-              strict: true,
-              schema: REVIEW_RESPONSE_SCHEMA,
-            },
-          },
-          temperature: 0,
-          top_p: 0.1,
-        }),
+        env.AI.run(model as any, buildCloudflareReviewRequest(input), cloudflareAiOptions(env)),
         timeoutPromise,
       ]);
       const durationMs = Date.now() - startTime;
