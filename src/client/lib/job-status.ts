@@ -1,4 +1,4 @@
-import type { JobSummary } from '@shared/schema';
+import { BATCH_STEP_NAME, type JobSummary } from '@shared/schema';
 
 export interface WaitInfo {
   /** Short banner label. */
@@ -36,16 +36,31 @@ function humanizeUntil(ms: number): string {
 export function describeWait(job: JobSummary, now = Date.now()): WaitInfo | null {
   if (job.status !== 'queued' && job.status !== 'running') return null;
 
+  const retryAt = job.nextRetryAt ? new Date(job.nextRetryAt).getTime() : null;
+  const waitingOnRetry = retryAt !== null && Number.isFinite(retryAt) && retryAt > now;
+
+  // A queued Workers AI batch also sets nextRetryAt (it polls on a delay), so
+  // check the step first — otherwise a healthy batch reads as a provider
+  // outage. Batches normally land within ~5 minutes.
+  if (job.steps?.some((step) => step.name === BATCH_STEP_NAME && step.status === 'running')) {
+    return {
+      label: 'Queued on the Workers AI batch API',
+      detail: waitingOnRetry
+        ? `All files were submitted as one batch; Codra is polling for results and will check again in ${humanizeUntil(retryAt - now)}. Batches typically complete within ~5 minutes.`
+        : 'All files were submitted as one batch. Codra is waiting for the results.',
+      tone: 'neutral',
+    };
+  }
+
   // Paused between chunks, waiting on a scheduled retry (model provider outage
   // backoff, up to ~15 min per attempt). Most common reason for long waits.
-  const retryAt = job.nextRetryAt ? new Date(job.nextRetryAt).getTime() : null;
-  if (retryAt && Number.isFinite(retryAt) && retryAt > now) {
+  if (waitingOnRetry) {
     const reason = job.errorMessage?.trim();
     return {
       label: 'Paused — will retry automatically',
       detail: reason
-        ? `Next attempt in ${humanizeUntil(retryAt - now)}. Last issue: ${reason}`
-        : `Next attempt in ${humanizeUntil(retryAt - now)} after a model provider slowdown.`,
+        ? `Next attempt in ${humanizeUntil(retryAt! - now)}. Last issue: ${reason}`
+        : `Next attempt in ${humanizeUntil(retryAt! - now)} after a model provider slowdown.`,
       tone: 'warning',
     };
   }

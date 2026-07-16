@@ -2,6 +2,14 @@ import { z } from 'zod';
 
 export const reviewTriggers = ['auto', 'mention', 'retry'] as const;
 export const jobStatuses = ['queued', 'running', 'done', 'failed', 'superseded'] as const;
+
+/**
+ * Job step recorded while a Workers AI batch is in flight. Shared because the
+ * server writes it and the dashboard reads it to tell a queued batch apart from
+ * a provider-backoff pause — both set nextRetryAt, so this step is the only
+ * distinguishing signal.
+ */
+export const BATCH_STEP_NAME = 'Batch review';
 export const fileStatuses = ['pending', 'done', 'skipped', 'failed'] as const;
 export const reviewVerdicts = ['approve', 'comment'] as const;
 export const reviewSeverities = ['P0', 'P1', 'P2', 'P3', 'nit'] as const;

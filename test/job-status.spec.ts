@@ -59,6 +59,37 @@ describe('describeWait', () => {
     expect(info?.label).toBe('Waiting for a worker');
   });
 
+  it('reads a queued Workers AI batch as healthy, not as a provider outage', () => {
+    // A polling batch also sets nextRetryAt, so without the step check this
+    // would be mislabelled "Paused — provider slowdown".
+    const info = describeWait(
+      job({
+        status: 'running',
+        startedAt: new Date(NOW - 60_000).toISOString(),
+        nextRetryAt: new Date(NOW + 30_000).toISOString(),
+        steps: [{ name: 'Batch review', status: 'running', startedAt: new Date(NOW - 30_000).toISOString(), finishedAt: null }],
+      }),
+      NOW,
+    );
+    expect(info?.label).toMatch(/batch/i);
+    expect(info?.tone).toBe('neutral');
+    expect(info?.detail).not.toMatch(/slowdown/);
+  });
+
+  it('still reports a provider pause once the batch step is finished', () => {
+    const info = describeWait(
+      job({
+        status: 'running',
+        startedAt: new Date(NOW - 60_000).toISOString(),
+        nextRetryAt: new Date(NOW + 5 * 60_000).toISOString(),
+        steps: [{ name: 'Batch review', status: 'done', startedAt: new Date(NOW - 60_000).toISOString(), finishedAt: new Date(NOW - 30_000).toISOString() }],
+      }),
+      NOW,
+    );
+    expect(info?.label).toMatch(/Paused/);
+    expect(info?.tone).toBe('warning');
+  });
+
   it('returns null for a healthy running job', () => {
     expect(describeWait(job({ status: 'running', startedAt: new Date(NOW - 10_000).toISOString() }), NOW)).toBeNull();
   });
