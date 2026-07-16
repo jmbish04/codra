@@ -30,6 +30,12 @@ const BUSY_RETRY_SECONDS = 60;
 const RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS = [60, 5 * 60, 15 * 60];
 /** Workers AI batches typically land within ~5 minutes; poll on a steady beat. */
 const BATCH_POLL_DELAY_SECONDS = 30;
+/**
+ * Step name for an in-flight Workers AI batch. The dashboard keys off this to
+ * distinguish "queued on the batch API" (healthy) from "paused after a provider
+ * slowdown" (degraded) — both set nextRetryAt, so the step is the only signal.
+ */
+const BATCH_STEP_NAME = 'Batch review';
 const MAX_RETRYABLE_FILE_REVIEW_FAILURES = 3;
 
 function isRetryableFileReviewErrorMessage(message: string | null | undefined) {
@@ -619,7 +625,21 @@ async function runBatchReviewPhase(
   const { pr, config, files, pendingFiles, totalLineCount } = ctx;
 
   if (job.batchRequestId && job.batchModel) {
-    const result = await model.pollReviewBatch(job.batchModel, job.batchRequestId);
+    let result: Awaited<ReturnType<ModelService['pollReviewBatch']>>;
+    try {
+      result = await model.pollReviewBatch(job.batchModel, job.batchRequestId);
+    } catch (error) {
+      if (isRetryableModelError(error)) throw error;
+      // An unrecognised batch response must not strand the job: drop the batch
+      // and let the synchronous path review the outstanding files instead.
+      logger.error('Batch poll failed; abandoning the batch and falling back to synchronous review', error);
+      await clearJobBatch(env, job.id);
+      await updateJobStep(env, job.id, BATCH_STEP_NAME, {
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
 
     if (result.status === 'pending') {
       await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
@@ -635,6 +655,7 @@ async function runBatchReviewPhase(
 
     await persistBatchResponses(env, job, files, result.responses);
     await clearJobBatch(env, job.id);
+    await updateJobStep(env, job.id, BATCH_STEP_NAME, { status: 'done' });
     // Re-run the review phase so the existing completeness check decides
     // whether to finalize or retry any files the batch could not review.
     await enqueueJobPhase(env, job.id, 'review');
@@ -658,10 +679,20 @@ async function runBatchReviewPhase(
     ),
   );
 
-  const requestId = await model.submitReviewBatch(
-    batchModel,
-    prompts.map((prompt) => ({ systemPrompt: prompt.systemPrompt, userPrompt: prompt.userPrompt })),
-  );
+  let requestId: string | null;
+  try {
+    requestId = await model.submitReviewBatch(
+      batchModel,
+      prompts.map((prompt) => ({ systemPrompt: prompt.systemPrompt, userPrompt: prompt.userPrompt })),
+    );
+  } catch (error) {
+    if (isRetryableModelError(error)) throw error;
+    // The batch API is an optimisation, not a requirement: if submit behaves
+    // unexpectedly, degrade to the proven synchronous path rather than failing
+    // a review that would otherwise succeed.
+    logger.error('Batch submit failed; falling back to synchronous review', error);
+    return false;
+  }
   if (!requestId) return false;
 
   await recordJobBatch(env, job.id, {
@@ -669,6 +700,7 @@ async function runBatchReviewPhase(
     model: batchModel,
     filePaths: pendingFiles.map((file) => file.path),
   });
+  await updateJobStep(env, job.id, BATCH_STEP_NAME, { status: 'running' });
   await enqueueJobPhase(env, job.id, 'review', BATCH_POLL_DELAY_SECONDS);
   return true;
 }
