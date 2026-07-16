@@ -4,6 +4,7 @@
   "description": "Open-source code review engine",
   "author": "Devarshi Shimpi",
   "license": "AGPL-3.0-only",
+  "packageManager": "pnpm@11.13.1",
   "type": "module",
   "repository": {
     "type": "git",
