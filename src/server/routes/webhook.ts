@@ -8,7 +8,7 @@ import { verifyGitHubWebhookSignature } from '@server/core/verify';
 import { jsonError } from '@server/core/http';
 import { findExistingJobForHead, insertJob, supersedeOlderJobs } from '@server/db/jobs';
 import { recordWebhookDelivery } from '@server/db/webhook-deliveries';
-import { getSecret } from '@server/utils/secrets';
+import { getWorkerApiKey } from '@server/utils/secrets';
 import { GitHubClient } from '@server/core/github';
 import { handleGeminiWebhook } from './gemini-webhook';
 
@@ -22,7 +22,8 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
       return jsonError('Missing GitHub webhook headers.', 400);
     }
 
-    const webhookSecret = getSecret(c.env, 'GITHUB_WEBHOOK_SECRET');
+    // The GitHub App webhook secret is the WORKER_API_KEY secrets-store value.
+    const webhookSecret = await getWorkerApiKey(c.env);
     const verified = await verifyGitHubWebhookSignature(webhookSecret, signature ?? null, rawBody);
     if (!verified) {
       return jsonError('Invalid webhook signature.', 401);
