@@ -144,3 +144,6 @@ vite.config.ts.timestamp-*
 
 .agent
 deploy-secrets.env
+
+# Generated gotcha seed SQL
+scripts/ops/gotchas.sql

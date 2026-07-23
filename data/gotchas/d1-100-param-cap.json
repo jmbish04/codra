@@ -1,0 +1,15 @@
+{
+  "id": "d1-100-param-cap",
+  "title": "D1 caps bound parameters at 100 per query",
+  "infra": ["cloudflare-workers", "d1", "drizzle"],
+  "severity": "P1",
+  "detect": {
+    "content_any": ["db\\.insert\\(", "\\.values\\(\\[", "insert into", "onConflict"],
+    "path_any": ["db/", "schema", "drizzle"],
+    "signal": "bulk insert on D1/Drizzle: a .values([...]) array whose rows x columns can exceed 100 bound parameters"
+  },
+  "directive": "Cloudflare D1 rejects ANY query with more than 100 bound parameters. When bulk-inserting, chunk the rows so (rows x columns) stays <= 100 — e.g. a 9-column row means max ~10 rows per insert. Do NOT spend time debugging errors like 'too many SQL variables' or a giant 'Failed query: insert into ... on conflict do nothing'; the cause is ALWAYS the parameter cap. Apply the chunked-insert fix immediately, and audit sibling batch inserts (they will grow into the same trap).",
+  "fix_example": "const CHUNK = 10;\nfor (let i = 0; i < rows.length; i += CHUNK) {\n  await db.insert(table).values(rows.slice(i, i + CHUNK)).onConflictDoNothing();\n}",
+  "evidence": "2026-07-23: model_configs catalog sync failed for Gemini (~40 models x 9 cols = 360 params > 100). Fixed by chunking in src/server/db/model-configs.ts.",
+  "source": "codra-incident-2026-07-23"
+}

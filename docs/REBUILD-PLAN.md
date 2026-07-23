@@ -225,6 +225,29 @@ deployable for rollback for one to two weeks. Then archive it.
 
 ---
 
+## The Gotchas engine (self-service, decisive)
+
+Today's `best_practices` are **soft** — free text appended to the prompt, matched
+by shallow term search (`matchesCriteria`). The bar you want is higher: codra
+should *recognize a known gotcha and act decisively*, not reinvent the fix.
+
+**Model:** a gotcha = **detection signal + decisive directive + severity**, held
+in a portable catalog (`data/gotchas/*.json`, seeded into the DB via
+`scripts/ops/seed-gotchas.mjs`). See `data/gotchas/README.md`.
+- **P0 gotcha** → hard red-flag that blocks merge (ties into F10 debriefs, e.g.
+  the $700 DO-alarm bug).
+- **P1/P2** → must-address directive injected into the review.
+- **Prevention side:** matching directives are added to the **agent's PR-scope
+  contract at dispatch**, so the agent avoids the trap instead of hitting it.
+  Same catalog, used at both dispatch and audit — no 30-minute rediscovery.
+
+First entry shipped: `d1-100-param-cap` (the D1 >100 bound-param cap that broke
+the model catalog). Adding a gotcha = drop a JSON file + run the seed, or (later)
+the `/best-practices` UI writes to the same catalog.
+
+**Rebuild upgrade:** replace `matchesCriteria`'s term-guessing with the catalog's
+explicit `detect.content_any` / `path_any` regex signals — precise, not fuzzy.
+
 ## Cross-cutting decisions you need to make
 
 1. **New repo vs. in-place `codra-v2` branch?** (Recommend a new repo; clean git,
