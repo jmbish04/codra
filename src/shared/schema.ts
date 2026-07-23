@@ -14,7 +14,7 @@ export const fileStatuses = ['pending', 'done', 'skipped', 'failed'] as const;
 export const reviewVerdicts = ['approve', 'comment'] as const;
 export const reviewSeverities = ['P0', 'P1', 'P2', 'P3', 'nit'] as const;
 export const reviewCategories = ['security', 'bugs', 'performance', 'correctness', 'quality'] as const; // Keeping for DB compatibility but will deprecate usage in prompts
-export const llmApiFormats = ['openai', 'anthropic', 'gemini', 'cloudflare-workers-ai'] as const;
+export const llmApiFormats = ['openai', 'anthropic', 'gemini', 'antigravity', 'cloudflare-workers-ai'] as const;
 
 export const dateStringSchema = z.union([z.string(), z.date()]).transform((d) => (d instanceof Date ? d.toISOString() : d));
 export const coerceNumberSchema = z.coerce.number();

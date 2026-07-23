@@ -1,3 +1,9 @@
+import {
+  clearAntigravityInteractions,
+  listAntigravityInteractions,
+  recordAntigravityInteractions,
+  settleAntigravityInteraction,
+} from '@server/db/gemini-webhooks';
 import { logger } from './logger';
 import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHubWebhookPayload, type IssueCommentWebhookPayload, type PullRequestWebhookPayload } from '@shared/github';
 import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
@@ -30,6 +36,11 @@ const BUSY_RETRY_SECONDS = 60;
 const RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS = [60, 5 * 60, 15 * 60];
 /** Workers AI batches typically land within ~5 minutes; poll on a steady beat. */
 const BATCH_POLL_DELAY_SECONDS = 30;
+/**
+ * How long to wait before reconciling Antigravity interactions directly. Only
+ * fires when the webhook was lost, so it is deliberately slow.
+ */
+const ANTIGRAVITY_SAFETY_NET_SECONDS = 300;
 
 const MAX_RETRYABLE_FILE_REVIEW_FAILURES = 3;
 
@@ -170,7 +181,12 @@ export function extractReviewRequest(input: {
       return null;
     }
 
-    if (!payload.comment?.body?.includes(mentionTrigger)) {
+    // GitHub renders the app mention as its slug (@codra-app-personal), while
+    // people usually type the bot's short name. Accept either.
+    const body = payload.comment?.body ?? '';
+    const aliases = [mentionTrigger, input.botUsername ? `@${input.botUsername}` : null]
+      .filter((alias): alias is string => Boolean(alias));
+    if (!aliases.some((alias) => body.includes(alias))) {
       return null;
     }
 
@@ -510,6 +526,10 @@ async function runReviewPhase(
     return !(existingReview && countsAsHandledFileReview(existingReview));
   });
 
+  if (await runAntigravityWebhookPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount })) {
+    return;
+  }
+
   if (await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount })) {
     return;
   }
@@ -593,6 +613,142 @@ async function runReviewPhase(
     });
   }
   await enqueueJobPhase(env, job.id, 'review');
+}
+
+/**
+ * Antigravity webhook path. Starts one background interaction per outstanding
+ * file and hands the queue message back immediately: Gemini POSTs
+ * /webhook/gemini when each interaction settles, and that handler re-enqueues
+ * the review phase. Nothing blocks the single-concurrency queue consumer while
+ * the agent works.
+ *
+ * The delayed re-enqueue below is a safety net for a dropped webhook, not a
+ * poll loop — it reconciles outstanding interactions with one direct read each.
+ *
+ * Returns true when it owns this invocation, false to fall through to the
+ * batch / synchronous paths.
+ */
+async function runAntigravityWebhookPhase(
+  env: Env,
+  job: PersistedReviewJob,
+  leaseOwner: string,
+  github: GitHubService,
+  model: ModelService,
+  ctx: {
+    pr: Awaited<ReturnType<GitHubService['getPullRequest']>>;
+    config: RepoConfig;
+    files: ReturnType<typeof parseUnifiedDiff>;
+    pendingFiles: ReturnType<typeof parseUnifiedDiff>;
+    totalLineCount: number;
+  },
+) {
+  const { pr, config, files, pendingFiles, totalLineCount } = ctx;
+  const tracked = await listAntigravityInteractions(env, job.id);
+
+  if (tracked.length > 0) {
+    const agentModel = job.batchModel;
+    if (!agentModel) {
+      logger.error(`Job ${job.id} tracks Antigravity interactions without a model; abandoning them`);
+      await clearAntigravityInteractions(env, job.id);
+      await clearJobBatch(env, job.id);
+      return false;
+    }
+
+    // Reconcile anything still open, which covers a webhook that never arrived.
+    for (const row of tracked.filter((row) => !isTerminalInteractionStatus(row.status))) {
+      try {
+        const result = await model.fetchAntigravityResult(agentModel, row.interaction_id);
+        if (isTerminalInteractionStatus(result.status)) {
+          await settleAntigravityInteraction(env, row.interaction_id, result);
+        }
+      } catch (error) {
+        logger.warn(`Failed to reconcile Antigravity interaction ${row.interaction_id}`, error);
+      }
+    }
+
+    const settled = await listAntigravityInteractions(env, job.id);
+    const outstanding = settled.filter((row) => !isTerminalInteractionStatus(row.status));
+
+    if (outstanding.length > 0) {
+      await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
+      if (job.checkRunId) {
+        await github.updateCheckRun(job.owner, job.repo, job.checkRunId, {
+          title: `Reviewing (${settled.length - outstanding.length}/${settled.length})`,
+          summary: 'Codra is waiting on the Antigravity agent. Results arrive by webhook.',
+        });
+      }
+      await enqueueJobPhase(env, job.id, 'review', ANTIGRAVITY_SAFETY_NET_SECONDS);
+      return true;
+    }
+
+    await persistBatchResponses(
+      env,
+      job,
+      files,
+      settled.map((row) => ({
+        index: row.file_index,
+        rawText: row.output_text,
+        error: row.error ?? (row.status === 'failed' ? 'Antigravity interaction failed' : null),
+      })),
+      'Antigravity',
+    );
+    await clearAntigravityInteractions(env, job.id);
+    await clearJobBatch(env, job.id);
+    await updateJobStep(env, job.id, BATCH_STEP_NAME, { status: 'done' });
+    await enqueueJobPhase(env, job.id, 'review');
+    return true;
+  }
+
+  if (pendingFiles.length === 0) return false;
+
+  const agentModel = await model.resolveAntigravityModel(config, totalLineCount);
+  if (!agentModel) return false;
+
+  const prompts = await Promise.all(
+    pendingFiles.map((file) =>
+      model.buildReviewPrompt({
+        file,
+        prTitle: pr.title ?? null,
+        prDescription: pr.body ?? null,
+        config,
+        totalLineCount,
+      }),
+    ),
+  );
+
+  const webhookUri = geminiWebhookUri(env);
+  if (!webhookUri) {
+    logger.warn('APP_URL is not an https URL; Antigravity results will be reconciled on a delay instead of by webhook');
+  }
+
+  let submitted: Array<{ interactionId: string; fileIndex: number }>;
+  try {
+    submitted = await model.submitAntigravityReviews(
+      agentModel,
+      prompts.map((prompt, index) => ({
+        systemPrompt: prompt.systemPrompt,
+        userPrompt: prompt.userPrompt,
+        fileIndex: index,
+      })),
+      { webhookUri, jobId: job.id },
+    );
+  } catch (error) {
+    if (isRetryableModelError(error)) throw error;
+    logger.error('Antigravity submit failed; falling back to synchronous review', error);
+    return false;
+  }
+
+  if (submitted.length === 0) return false;
+
+  await recordJobBatch(env, job.id, {
+    requestId: `antigravity:${job.id}`,
+    model: agentModel,
+    filePaths: pendingFiles.map((file) => file.path),
+  });
+  await recordAntigravityInteractions(env, job.id, submitted);
+  await updateJobStep(env, job.id, BATCH_STEP_NAME, { status: 'running' });
+  await enqueueJobPhase(env, job.id, 'review', ANTIGRAVITY_SAFETY_NET_SECONDS);
+  return true;
 }
 
 /**
@@ -701,11 +857,23 @@ async function runBatchReviewPhase(
 }
 
 /** Maps batch responses back to files by index and persists each file review. */
+export function isTerminalInteractionStatus(status: string) {
+  return status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'expired';
+}
+
+/** The endpoint Gemini pushes interaction results to, or null if unreachable. */
+export function geminiWebhookUri(env: Pick<Env, 'APP_URL'>) {
+  const appUrl = env.APP_URL?.trim();
+  if (!appUrl || !appUrl.startsWith('https://')) return null;
+  return `${appUrl.replace(/\/+$/, '')}/webhook/gemini`;
+}
+
 async function persistBatchResponses(
   env: Env,
   job: PersistedReviewJob,
   files: ReturnType<typeof parseUnifiedDiff>,
   responses: Array<{ index: number; rawText: string | null; error: string | null }>,
+  modelProvider = 'Cloudflare',
 ) {
   const filesByPath = new Map(files.map((file) => [file.path, file]));
   const batchModel = job.batchModel ?? 'unknown';
@@ -730,7 +898,7 @@ async function persistBatchResponses(
         filePath: file.path,
         fileStatus: 'done',
         modelUsed: batchModel,
-        modelProvider: 'Cloudflare',
+        modelProvider,
         diffLineCount: file.lineCount,
         diffInput: '',
         rawAiOutput: response.rawText,

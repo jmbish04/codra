@@ -72,7 +72,7 @@ export async function resolveLlmApiKey(
   const isPlaceholder = decrypted && (decrypted.startsWith('placeholder-') || decrypted.trim() === '');
   if (!decrypted || isPlaceholder) {
     try {
-      if (apiFormat === 'gemini' && env.GEMINI_API_KEY) {
+      if ((apiFormat === 'gemini' || apiFormat === 'antigravity') && env.GEMINI_API_KEY) {
         const key = await getSecretStoreBinding(env as any, 'GEMINI_API_KEY');
         if (key && key.trim().length > 0) return key.trim();
       }

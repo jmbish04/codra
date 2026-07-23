@@ -53,6 +53,9 @@ export default {
 
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     const { runFullSync } = await import('@server/services/sync/github-sync');
+    // The queue consumer only runs maintenance when it has messages, so the
+    // cron is the only thing that re-drives jobs stranded with an empty queue.
+    ctx.waitUntil(runBestEffortJobMaintenance(env));
     ctx.waitUntil(
       runFullSync(env).catch((error) => {
         logger.error('Scheduled full sync failed', error instanceof Error ? error : new Error(String(error)));

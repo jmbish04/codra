@@ -654,7 +654,9 @@ export async function recoverExpiredJobLeases(
   const expiredJobs = await db.select({ id: jobs.id, recovery_count: jobs.recovery_count, steps: jobs.steps })
     .from(jobs)
     .where(and(
-      eq(jobs.status, 'running'),
+      // 'queued' is included so a job whose queue message was never sent (or was
+      // lost) is re-driven instead of sitting in the queued state forever.
+      inArray(jobs.status, ['running', 'queued']),
       or(
         and(isNotNull(jobs.lease_expires_at), lt(jobs.lease_expires_at, sql`CURRENT_TIMESTAMP`)),
         and(isNull(jobs.lease_expires_at), lt(sql`COALESCE(last_queue_message_at, heartbeat_at, started_at, created_at)`, sql`datetime('now', '-' || ${unleasedGraceSeconds} || ' seconds')`))

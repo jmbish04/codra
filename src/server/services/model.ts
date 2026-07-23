@@ -1,4 +1,11 @@
 import { reviewWithGoogle } from '../models/google';
+import {
+  buildAntigravityPrompt,
+  fetchAntigravityInteraction,
+  reviewWithAntigravity,
+  submitAntigravityInteraction,
+  type AntigravityConfig,
+} from '../models/antigravity';
 import { reviewWithCloudflare } from '../models/cloudflare';
 import {
   batchFitsPayloadLimit,
@@ -215,7 +222,8 @@ export class ModelService {
     }
 
     let resolvedBaseUrl = config.baseUrl;
-    if (this.env.AI_GATEWAY_ID) {
+    // AI Gateway has no route for the Antigravity Interactions API, so it stays direct.
+    if (this.env.AI_GATEWAY_ID && config.apiFormat !== 'antigravity') {
       try {
         const accountId = await getSecretStoreBinding(this.env, 'CF_ACCOUNT_ID');
         resolvedBaseUrl = `https://gateway.ai.cloudflare.com/v1/${accountId}/${this.env.AI_GATEWAY_ID}`;
@@ -235,7 +243,15 @@ export class ModelService {
 
     let result: ModelResponse;
 
-    if (config.apiFormat === 'gemini') {
+    if (config.apiFormat === 'antigravity') {
+      result = await reviewWithAntigravity(
+        { apiKey: await this.resolveApiKey(config), baseUrl: config.baseUrl, providerName: config.providerName },
+        config.modelName,
+        input,
+        this.tracker,
+        schema,
+      );
+    } else if (config.apiFormat === 'gemini') {
       result = await reviewWithGoogle(
         { apiKey: await this.resolveApiKey(config), baseUrl: resolvedBaseUrl, providerName: config.providerName },
         config.modelName,
@@ -338,6 +354,102 @@ export class ModelService {
     }
 
     return result;
+  }
+
+  /**
+   * Returns the configured model id when the chain's primary is an Antigravity
+   * managed agent, which is reviewed through background interactions rather
+   * than a blocking request.
+   */
+  async resolveAntigravityModel(config: RepoConfig, totalLineCount: number): Promise<string | null> {
+    const { primary } = this.selectModel({ totalLineCount, config });
+    try {
+      const resolved = await this.resolveModel(primary);
+      if (resolved.apiFormat !== 'antigravity') return null;
+      if (await this.isProviderUnavailable(resolved.providerId)) return null;
+      return primary;
+    } catch {
+      return null;
+    }
+  }
+
+  private async antigravityClient(model: string) {
+    const resolved = await this.resolveModel(model);
+    if (resolved.apiFormat !== 'antigravity') {
+      throw new Error(`Model ${model} is not an Antigravity managed agent.`);
+    }
+    return {
+      agent: resolved.modelName,
+      providerName: resolved.providerName,
+      client: {
+        apiKey: await this.resolveApiKey(resolved),
+        baseUrl: resolved.baseUrl,
+        providerName: resolved.providerName,
+      } satisfies AntigravityConfig,
+    };
+  }
+
+  /**
+   * Starts one background interaction per file. Gemini calls `webhookUri` when
+   * each one finishes, so nothing here waits on the agent.
+   */
+  async submitAntigravityReviews(
+    model: string,
+    items: Array<BatchReviewItem & { fileIndex: number }>,
+    options: { webhookUri: string | null; jobId: string },
+  ): Promise<Array<{ interactionId: string; fileIndex: number }>> {
+    const { agent, client } = await this.antigravityClient(model);
+
+    const submissions = await Promise.allSettled(items.map(async (item) => {
+      const interaction = await submitAntigravityInteraction(
+        client,
+        agent,
+        buildAntigravityPrompt(item),
+        {
+          webhookUri: options.webhookUri,
+          userMetadata: { job_id: options.jobId, file_index: String(item.fileIndex) },
+        },
+        this.tracker,
+      );
+      if (!interaction.id) throw new Error('Antigravity did not return an interaction id.');
+      return { interactionId: interaction.id, fileIndex: item.fileIndex };
+    }));
+
+    const accepted: Array<{ interactionId: string; fileIndex: number }> = [];
+    for (const submission of submissions) {
+      if (submission.status === 'fulfilled') {
+        accepted.push(submission.value);
+      } else {
+        logger.error('Antigravity interaction submit failed', submission.reason);
+      }
+    }
+    return accepted;
+  }
+
+  /** Authoritative read of one interaction, used by the webhook and the safety net. */
+  async fetchAntigravityResult(model: string, interactionId: string) {
+    const { agent, client, providerName } = await this.antigravityClient(model);
+    const interaction = await fetchAntigravityInteraction(client, interactionId, this.tracker);
+
+    const inputTokens = interaction.usage?.input_tokens ?? 0;
+    const outputTokens = interaction.usage?.output_tokens ?? interaction.usage?.total_tokens ?? 0;
+    if (interaction.status === 'completed' && (inputTokens || outputTokens)) {
+      this.tracker?.record(agent, inputTokens, outputTokens);
+      await logApiUsage(this.env, {
+        provider: providerName,
+        model: agent,
+        promptTokens: inputTokens,
+        completionTokens: outputTokens,
+        source: 'local',
+        gatewayId: this.env.AI_GATEWAY_ID || '',
+      });
+    }
+
+    return {
+      status: interaction.status ?? 'in_progress',
+      outputText: interaction.output_text?.trim() || null,
+      error: interaction.error?.message ?? null,
+    };
   }
 
   /**

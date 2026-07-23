@@ -10,6 +10,7 @@ import { findExistingJobForHead, insertJob, supersedeOlderJobs } from '@server/d
 import { recordWebhookDelivery } from '@server/db/webhook-deliveries';
 import { getSecret } from '@server/utils/secrets';
 import { GitHubClient } from '@server/core/github';
+import { handleGeminiWebhook } from './gemini-webhook';
 
 export async function handleGitHubWebhook(c: Context<AppEnv>) {
     const eventName = c.req.header('x-github-event');
@@ -171,19 +172,16 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
         newJobId: job.id,
       });
 
-      const repoAgentId = c.env.RepoAgent.idFromName(`${extracted.owner}/${extracted.repo}`);
-      const repoAgent = c.env.RepoAgent.get(repoAgentId);
-      
-      c.executionCtx.waitUntil(
-        repoAgent.fetch(new Request('https://repoagent/webhook', {
-          method: 'POST',
-          body: JSON.stringify(payload)
-        })).catch((err: unknown) => {
-          console.error('Failed to dispatch webhook to RepoAgent DO:', err);
-        })
-      );
+      // The queue consumer owns every phase of the review. Skipping this send
+      // leaves the job row stuck in 'queued' forever.
+      await c.env.REVIEW_QUEUE.send({
+        jobId: job.id,
+        deliveryId,
+        phase: 'prepare',
+        requestId: c.get('requestId'),
+      });
 
-      return c.json({ ok: true, message: 'delegated_to_repo_agent', job }, 202);
+      return c.json({ ok: true, message: 'queued', job }, 202);
     }
 
     // Events that do not produce a concrete job, such as PR close cleanup or
@@ -201,6 +199,7 @@ export function createWebhookRouter() {
   const app = new Hono<AppEnv>();
 
   app.post('/', handleGitHubWebhook);
+  app.post('/gemini', handleGeminiWebhook);
 
   return app;
 }

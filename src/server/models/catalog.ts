@@ -1,5 +1,6 @@
 import type { LlmApiFormat } from '@shared/schema';
 import { withTimeout } from '@server/core/timeout';
+import { ANTIGRAVITY_MODELS } from './antigravity';
 
 const MODEL_LIST_TIMEOUT_MS = 8_000;
 const ERROR_BODY_LIMIT = 500;
@@ -160,6 +161,10 @@ export async function listProviderModels(input: {
     return extractAnthropicModels(await response.json() as AnthropicModelsResponse);
   }
 
+  if (input.apiFormat === 'antigravity') {
+    return ANTIGRAVITY_MODELS;
+  }
+
   if (input.apiFormat === 'gemini') {
     if (!input.apiKey) throw new Error('Google API key is required to list models.');
     const apiKey = input.apiKey;
@@ -236,7 +241,7 @@ async function limitedErrorBody(response: Response) {
 
 function defaultBaseUrl(apiFormat: LlmApiFormat) {
   if (apiFormat === 'cloudflare-workers-ai') return '';
-  if (apiFormat === 'gemini') return 'https://generativelanguage.googleapis.com/v1beta';
+  if (apiFormat === 'gemini' || apiFormat === 'antigravity') return 'https://generativelanguage.googleapis.com/v1beta';
   if (apiFormat === 'anthropic') return 'https://api.anthropic.com/v1';
   return 'https://api.openai.com/v1';
 }

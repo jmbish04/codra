@@ -22,6 +22,7 @@ import { getSecretStoreBinding } from '@server/utils/secrets';
 import { llmApiFormats } from '@shared/schema';
 import { reviewWithCloudflare } from '@server/models/cloudflare';
 import { reviewWithGoogle } from '@server/models/google';
+import { reviewWithAntigravity } from '@server/models/antigravity';
 import { reviewWithOpenAI } from '@server/models/openai';
 import { reviewWithAnthropic } from '@server/models/anthropic';
 import { listProviderModels } from '@server/models/catalog';
@@ -365,6 +366,9 @@ export function createModelsRouter() {
         const apiKey = await decryptLlmApiKey(c.env, config.encryptedApiKey);
         
         switch (config.apiFormat) {
+          case 'antigravity':
+            response = await reviewWithAntigravity({ apiKey, baseUrl: config.baseUrl, providerName: config.providerName }, config.modelName, input);
+            break;
           case 'gemini':
             response = await reviewWithGoogle({ apiKey, baseUrl: config.baseUrl, providerName: config.providerName }, config.modelName, input);
             break;

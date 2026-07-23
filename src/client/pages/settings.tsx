@@ -46,6 +46,7 @@ const API_FORMAT_OPTIONS: Array<{ value: LlmApiFormat; label: string }> = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'gemini', label: 'Google' },
+  { value: 'antigravity', label: 'Google Antigravity (managed agent)' },
   { value: 'cloudflare-workers-ai', label: 'Cloudflare' },
 ];
 
