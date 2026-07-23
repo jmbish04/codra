@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { isStaleWebhookTimestamp, verifyGeminiWebhookSignature } from '@server/core/gemini-webhook';
 import { geminiWebhookUri, isTerminalInteractionStatus } from '@server/core/review';
+import { createTestEnv } from './helpers';
+
+const APP_URL = createTestEnv().APP_URL;
 
 describe('Gemini webhook plumbing', () => {
   it('only treats settled interaction states as terminal', () => {
@@ -12,7 +15,7 @@ describe('Gemini webhook plumbing', () => {
   });
 
   it('only advertises an https callback url', () => {
-    expect(geminiWebhookUri({ APP_URL: 'https://codra.example.com/' } as any)).toBe('https://codra.example.com/webhook/gemini');
+    expect(geminiWebhookUri({ APP_URL } as any)).toBe(`${APP_URL}/webhook/gemini`);
     expect(geminiWebhookUri({ APP_URL: 'http://localhost:8787' } as any)).toBeNull();
     expect(geminiWebhookUri({ APP_URL: '' } as any)).toBeNull();
   });
