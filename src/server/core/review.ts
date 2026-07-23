@@ -441,7 +441,15 @@ async function runPreparePhase(
   // Post a status comment to the PR so the team knows Codra is active
   if (!job.statusCommentId) {
     try {
-      const statusBody = `## \u{1F50D} Code Review\n\nCodra is reviewing this pull request. A summary will be posted here when the review is complete.`;
+      const formatter = new FormatterService(env.APP_URL);
+      const statusBody = [
+        `## \u{1F50D} Code Review`,
+        ``,
+        `Codra is reviewing this pull request. A summary will be posted here when the review is complete.`,
+        ``,
+        `[Monitor progress directly here](${formatter.jobUrl(job.id)}).`,
+        formatter.commandFooter(env.BOT_USERNAME),
+      ].join('\n');
       const comment = await github.createIssueComment(job.owner, job.repo, job.prNumber, statusBody);
       await updateJobStatusComment(env, job.id, comment.id);
     } catch (err) {
@@ -1252,6 +1260,7 @@ async function runFinalizePhase(
         `${changeSummary}${findingsText}${failureNote}`,
         ``,
         `**Reviewed commit:** \`${pr.head.sha.slice(0, 10)}\` · **Files:** ${files.length} · **Comments:** ${finalComments.length}`,
+        formatter.commandFooter(env.BOT_USERNAME),
       ].join('\n');
 
       await github.updateIssueComment(job.owner, job.repo, job.statusCommentId, narrativeBody);
@@ -1428,6 +1437,7 @@ async function runChangelogPhase(
     '',
     `📋 **[View the full changelog for this PR](${changelogUrl})** — schema diagrams, API changes, and the code that moved.`,
     ...(fixPrompt ? ['', '<details>', '<summary>Prompt for your coding agent to fix these findings</summary>', '', fixPrompt, '</details>'] : []),
+    new FormatterService(env.APP_URL).commandFooter(env.BOT_USERNAME),
   ].join('\n');
 
   await github.updateIssueComment(job.owner, job.repo, job.statusCommentId, body);

@@ -1,7 +1,11 @@
 import type { ParsedReviewComment } from '@shared/schema';
 
 export class FormatterService {
-  constructor(private baseUrl: string) {}
+  private baseUrl: string;
+  constructor(baseUrl: string) {
+    // Normalize once so every `${this.baseUrl}/path` avoids a double slash.
+    this.baseUrl = baseUrl.replace(/\/+$/, '');
+  }
 
   toReviewEvent(verdict: 'approve' | 'comment') {
     return verdict === 'approve' ? 'APPROVE' as const : 'COMMENT' as const;
@@ -64,28 +68,47 @@ export class FormatterService {
 
   formatReviewOverview(commitSha: string, botUsername: string) {
     const shortSha = commitSha.slice(0, 10);
-    
+
     return `### Codra Review
 
 Here are some automated review suggestions for this pull request.
 
 **Reviewed commit:** \`${shortSha}\`
+${this.commandFooter(botUsername)}`;
+  }
 
+  /** Direct link to a review job's live progress in the Codra dashboard. */
+  jobUrl(jobId: string) {
+    return `${this.baseUrl}/jobs/${jobId}`;
+  }
+
+  /**
+   * Standard collapsed footer for main-PR comments (status comment and review
+   * overview). NOT used on inline code comments. Walks through how to invoke
+   * Codra and links to the configuration and help surfaces.
+   */
+  commandFooter(botUsername: string) {
+    const mention = `@${botUsername}`;
+    return `
 <details>
-<summary>ℹ️ About Codra in GitHub</summary>
+<summary><b>Using Codra</b></summary>
+<br>
 
-<br/>
+Codra reviews pull requests automatically and responds when you mention it. Reviews run when you **open** a PR, **mark** a draft ready, or **comment** to trigger one. Below are the supported commands.
 
-[Your team has set up Codra to review pull requests in this repo](${this.baseUrl}/repos). Reviews are triggered when you:
+Feature | Command | Description
+--- | --- | ---
+Code Review | \`${mention} review\` | Reviews the pull request in its current state.
+Follow-up | \`${mention} address that feedback\` | Ask Codra to act on the review feedback or answer a question.
+Mention | ${mention} | Responds when explicitly tagged in a pull request comment.
 
-- **Open** a pull request for review
-- **Mark** a draft as ready
-- **Comment** "@${botUsername} review"
+<b>Configuration</b>
 
-If Codra has suggestions, it will comment; otherwise it will react with 👍.
+Repository maintainers can enable/disable Codra, choose models, and tune review behavior on the [repository settings page](${this.baseUrl}/repos). Global model and provider settings live on the [settings page](${this.baseUrl}/settings).
 
-Codra can also answer questions or update the PR. Try commenting "@${botUsername} address that feedback".
+<b>Help & feedback</b>
 
+See the [full list of commands](${this.baseUrl}/commands), the [dashboard](${this.baseUrl}/dashboard) for every review job and its live progress, or the [setup guide](${this.baseUrl}/setup) to configure a repository. Codra can make mistakes — react with :thumbsup: / :thumbsdown: on its comments to leave feedback.
 </details>`;
   }
 }
