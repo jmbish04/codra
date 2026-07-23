@@ -8,6 +8,7 @@ import type {
   RepoConfigsResponse,
   RetryJobResponse,
   StatsResponse,
+  JobHealthResponse,
   SyncReposResponse,
   UpdatesEmailResponse,
 } from '@shared/api';
@@ -191,6 +192,9 @@ export const api = {
   getStats(days?: number) {
     const query = days ? `?days=${days}` : '';
     return request<StatsResponse>(`/api/stats${query}`);
+  },
+  getHealth() {
+    return request<JobHealthResponse>('/api/health');
   },
   getApiUsage() {
     return request<{

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '@client/lib/api';
 import type { StatsPayload } from '@shared/schema';
 import type { JobSummary } from '@shared/schema';
+import type { JobHealthResponse } from '@shared/api';
 import { ArrowRight } from 'lucide-react';
 import { JobsTable } from '@client/components/shared/jobs-table';
 import { PageHeaderActions } from '@client/components/shared/page-header-actions';
@@ -16,6 +17,7 @@ import { Alert } from '@client/components/ui/alert';
 export function DashboardPage() {
   const [stats, setStats] = useState<StatsPayload | null>(null);
   const [recentJobs, setRecentJobs] = useState<JobSummary[]>([]);
+  const [health, setHealth] = useState<JobHealthResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,12 +27,14 @@ export function DashboardPage() {
   const load = async (manual = false) => {
     if (manual) setRefreshing(true);
     try {
-      const [statsRes, jobsRes] = await Promise.all([
+      const [statsRes, jobsRes, healthRes] = await Promise.all([
         api.getStats(days),
         api.getJobs({ limit: 10 }),
+        api.getHealth().catch(() => null),
       ]);
       setStats(statsRes.stats);
       setRecentJobs(jobsRes.jobs);
+      setHealth(healthRes);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to refresh dashboard.');
@@ -61,6 +65,19 @@ export function DashboardPage() {
       />
 
       {error && <Alert variant="destructive">{error}</Alert>}
+
+      {health && !health.healthy && (
+        <Alert variant="destructive">
+          <span className="font-semibold">Review pipeline unhealthy.</span>{' '}
+          {health.reasons.join('; ')}.{' '}
+          {health.stuck.length > 0 && (
+            <>
+              Oldest stuck {Math.round(Math.max(...health.stuck.map((j) => j.ageSeconds)) / 60)} min.{' '}
+              Open the job and use Force Restart, or check the worker logs.
+            </>
+          )}
+        </Alert>
+      )}
 
       <OverviewStats stats={stats} days={days} />
 

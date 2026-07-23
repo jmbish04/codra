@@ -1,1 +1,0 @@
-CREATE INDEX `antigravity_interactions_job_idx` ON `antigravity_interactions` (`job_id`);

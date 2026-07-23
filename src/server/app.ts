@@ -18,6 +18,7 @@ import { createChangelogRouter } from '@server/routes/api/changelog';
 import { createMcpOAuthRouter } from '@server/routes/api/mcp-oauth';
 import { GitHubLikeMCP } from '@server/agents/orchestrator';
 import { getSecretStoreBinding } from '@server/utils/secrets';
+import { computeJobHealth } from '@server/core/health';
 
 async function serveIndex(c: Context<AppEnv>) {
   return c.env.ASSETS.fetch(new URL('/index.html', c.req.url));
@@ -92,6 +93,22 @@ export function createApp() {
   // Mount OAuth endpoints
   app.route('/oauth', createMcpOAuthRouter());
 
+  // Unauthenticated liveness/health probe for uptime monitors. Returns only
+  // operational status (no job contents) and 503 when the pipeline is stuck so
+  // an external monitor can page on it.
+  app.get('/healthz', async (c) => {
+    const health = await computeJobHealth(c.env);
+    return c.json(
+      {
+        healthy: health.healthy,
+        checkedAt: health.checkedAt,
+        reasons: health.reasons,
+        stuckCount: health.stuck.length,
+      },
+      health.healthy ? 200 : 503,
+    );
+  });
+
   app.use('/api/*', requireSession);
   app.use('/api/*', requireCsrfHeader);
 
@@ -104,6 +121,7 @@ export function createApp() {
   app.route('/api/models', createModelsRouter());
   app.route('/api/prompts', createPromptsRouter());
   app.route('/api/best-practices', createBestPracticesRouter());
+  app.get('/api/health', async (c) => c.json(await computeJobHealth(c.env)));
 
   app.all('/mcp/*', verifyMcpAuth, async (c) => {
     return GitHubLikeMCP.serve('/mcp', { binding: 'GitHubLikeMCP' }).fetch(

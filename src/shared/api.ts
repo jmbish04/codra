@@ -50,6 +50,20 @@ export type StatsResponse = {
   stats: StatsPayload;
 };
 
+export type JobHealthResponse = {
+  healthy: boolean;
+  checkedAt: string;
+  counts: Record<string, number>;
+  stuck: Array<{
+    id: string;
+    status: string;
+    ageSeconds: number;
+    lastProgressAt: string | null;
+    recoveryCount: number;
+  }>;
+  reasons: string[];
+};
+
 export type SyncReposResponse = {
   ok: boolean;
   synced: string[];

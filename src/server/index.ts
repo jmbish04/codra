@@ -4,6 +4,7 @@ import { reviewJobMessageSchema } from '@shared/schema';
 import { logger } from '@server/core/logger';
 
 import { runBestEffortJobMaintenance } from '@server/core/job-recovery';
+import { soundHealthAlarmIfUnhealthy } from '@server/core/health';
 
 const app = createApp();
 
@@ -55,7 +56,14 @@ export default {
     const { runFullSync } = await import('@server/services/sync/github-sync');
     // The queue consumer only runs maintenance when it has messages, so the
     // cron is the only thing that re-drives jobs stranded with an empty queue.
-    ctx.waitUntil(runBestEffortJobMaintenance(env));
+    // Recover first, then sound the alarm on whatever is still stuck afterward.
+    ctx.waitUntil(
+      runBestEffortJobMaintenance(env)
+        .then(() => soundHealthAlarmIfUnhealthy(env))
+        .catch((error) => {
+          logger.error('Scheduled health check failed', error instanceof Error ? error : new Error(String(error)));
+        }),
+    );
     ctx.waitUntil(
       runFullSync(env).catch((error) => {
         logger.error('Scheduled full sync failed', error instanceof Error ? error : new Error(String(error)));

@@ -6,6 +6,7 @@ import { JobMetaCards } from '@client/components/features/job-detail/job-meta-ca
 import { JobReviewOverview } from '@client/components/features/job-detail/job-review-overview';
 import { JobFindingsList } from '@client/components/features/job-detail/job-findings-list';
 import { JobDetailSkeleton } from '@client/components/features/job-detail/job-skeleton';
+import { JobStuckNotice } from '@client/components/features/job-detail/job-stuck-notice';
 import { Alert } from '@client/components/ui/alert';
 
 export function JobDetailPage() {
@@ -29,6 +30,8 @@ export function JobDetailPage() {
       {error && (
         <Alert variant="destructive">{error}</Alert>
       )}
+
+      <JobStuckNotice job={job} />
 
       <JobProgress job={job} />
 

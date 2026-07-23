@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7fbdcffc-6bba-4bfc-abdb-6af1e7daed7f",
-  "prevId": "a3bf3a07-1241-4800-bad9-90e00298360e",
+  "id": "bea019d7-5295-4cef-818f-6633d998bf05",
+  "prevId": "619e74a1-19d7-43b9-a2f2-50b0742e10b3",
   "tables": {
     "repositories": {
       "name": "repositories",
