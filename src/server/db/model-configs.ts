@@ -320,7 +320,14 @@ export async function upsertDiscoveredModelConfigs(
 
   if (rowsToInsert.length === 0) return [];
 
-  await db.insert(modelConfigs).values(rowsToInsert).onConflictDoNothing();
+  // D1 caps bound parameters at 100 per query. Each row binds 9 columns, so a
+  // provider with many models (e.g. Gemini ships ~40) blows past the cap in a
+  // single insert. Chunk to 10 rows (90 params) to stay under it.
+  const INSERT_CHUNK_SIZE = 10;
+  for (let i = 0; i < rowsToInsert.length; i += INSERT_CHUNK_SIZE) {
+    const chunk = rowsToInsert.slice(i, i + INSERT_CHUNK_SIZE);
+    await db.insert(modelConfigs).values(chunk).onConflictDoNothing();
+  }
 
   const insertedIds = rowsToInsert.map(r => r.model_id!);
   
