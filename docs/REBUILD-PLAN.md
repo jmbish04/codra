@@ -11,6 +11,88 @@ This plan is grounded in the actual repos on disk:
 
 ---
 
+## North Star — codra is not a review bot
+
+Codra is the **planning brain and orchestrator** for the whole dev loop. Code
+review is just the *closing gate*, not the product. The product is a closed loop:
+
+```
+   ┌──────────────────────────────────────────────────────────────────┐
+   │                        CODRA (central hub)                          │
+   │                                                                    │
+   │  1. PLAN      specs, tasks, acceptance criteria live here          │
+   │      │        (kanban / sprint / gantt — Phase 1 planning suite)    │
+   │      ▼                                                              │
+   │  2. DISPATCH  assign a task to an agent with a PR-scope contract:   │
+   │      │        "build X, keep the PR to files A/B, submit when       │
+   │      │         tests pass + acceptance criteria met"                │
+   │      ▼                                                              │
+   │  3. AGENTS    claude code · codex · gemini cli · open-code ·        │
+   │      │        antigravity(local) · jules · stitch · claude.ai design │
+   │      ▼        (local fleet + cloud fleet, via a bridge — see below) │
+   │  4. PR        agent opens a PR, linked back to its task             │
+   │      ▼                                                              │
+   │  5. AUDIT     codra reviews the PR against BOTH:                    │
+   │      │          (a) best practices + infra rules (today's codra)    │
+   │      │          (b) the linked spec/task — "was everything          │
+   │      │              expected actually delivered?"                   │
+   │      ▼        merge  ·  or kick back with the gap list              │
+   │  6. LOOP      unmet criteria → new task → back to DISPATCH          │
+   └──────────────────────────────────────────────────────────────────┘
+```
+
+The step that makes codra different from every review bot: **step 5(b),
+spec-conformance audit.** Review is no longer context-free. Codra holds the task
+and its acceptance criteria, so it audits delivered-vs-expected, not just style.
+
+### What this adds on top of the earlier plan
+- **Planning suite (Phase 1) is now the foundation, not decoration.** The
+  kanban/sprint/spec data *is* the review context.
+- **Agent orchestration layer** — a new first-class subsystem (below).
+- **PR-scope contracts** — codra constrains an agent's PR up front.
+- **Spec-aware review** — the review pipeline takes the linked task + acceptance
+  criteria as input.
+
+---
+
+## Orchestration architecture (the new hard part)
+
+Codra is a Cloudflare Worker (cloud). It cannot reach into your Mac directly, so
+commanding **local** agents needs a bridge.
+
+**Recommended: a local Codra Bridge daemon.**
+A small long-running process on your machine that holds a WebSocket / long-poll to
+codra, receives task assignments, and drives the right local CLI agent in the
+right git worktree, then reports status back.
+```
+codra (cloud)  ⇄  Codra Bridge (your Mac)  →  spawns: claude code (headless) |
+                                                        codex exec | gemini cli |
+                                                        open-code | antigravity
+                                              →  reports progress/PR url back
+```
+- **Cloud agents** (jules, stitch, claude.ai design) codra calls directly by API
+  — no bridge needed (`JULES_API_KEY` binding already exists).
+- **The PR-scope contract** is a machine-readable artifact codra writes into the
+  task and injects into the agent (a `TASK.md` / prompt preamble in the worktree):
+  goal, file scope, acceptance criteria, "submit when …". Same contract is what
+  step 5(b) audits against — one source of truth for dispatch *and* review.
+- **Agent abstraction:** one `AgentAdapter` interface (dispatch, poll, cancel,
+  collectResult) with a driver per agent. Local drivers run via the Bridge; cloud
+  drivers hit APIs. Codra stays agent-agnostic.
+
+### New data model (spec-aware loop)
+- `specs` (id, title, body/markdown, repo, status)
+- `tasks` (id, spec_id, title, acceptance_criteria[], file_scope[], assignee_agent,
+  status[todo|dispatched|in_progress|in_review|done], pr_url, worktree)
+- `agent_runs` (id, task_id, agent_kind, status, started_at, pr_url, logs_ref)
+- `pr_task_links` (pr_number, repo, task_id)  ← ties a PR to its spec for the audit
+- `conformance_audits` (pr_number, task_id, criteria_met[], criteria_missing[],
+  verdict) ← the output of step 5(b)
+
+---
+
+---
+
 ## 0 — The stack decision (the reason this is a rebuild, not a refactor)
 
 Current codra is a **Vite single-page-app** served by a Hono worker. The template
@@ -108,11 +190,24 @@ DO experiments behind.
 `PrReviewStream`. If interactive `@codra` chat is wanted, build **one** deliberate
 `AIChatAgent` that reads model config from `ModelService` (no hardcoded kimi).
 
-### 3.3 Build new (from ROADMAP.md, now on the new stack)
-Model routing (F5), Jules queue (F5), CI self-heal (F6), standardization sync
-(F7), rich changelog/preso/diagrams (F8), PR ledger + regression detection (F9),
-debrief red-flags (F10), core-guardian spend + kill-switch (F11). Each ships
-behind a flag with its own D1 table (traceability + revertibility).
+### 3.3 Build new — the closed loop (this is the point of the rebuild)
+In dependency order:
+1. **Spec & task store + planning UI** (Phase 1 suite wired to real D1). The
+   plan lives here.
+2. **PR↔task linking + spec-aware audit** — the review pipeline gains a step:
+   load the linked task's acceptance criteria, audit delivered-vs-expected,
+   emit `conformance_audits`, kick back with the gap list. *This is the
+   highest-leverage new capability — build it before the fancy orchestration.*
+3. **Agent orchestration layer** — `AgentAdapter` interface + drivers. Start with
+   **cloud** drivers (Jules API — reliable, already keyed) and **one local**
+   driver via the Bridge (claude code headless). Expand the fleet after.
+4. **Codra Bridge daemon** — the local process. Ship as a tiny separate package.
+5. Then the convenience/guardrail features: CI self-heal (F6), standardization
+   sync (F7), rich changelog/preso/diagrams (F8), PR ledger + regression (F9),
+   debrief red-flags (F10), core-guardian spend + kill-switch (F11), model
+   routing (F5).
+
+Each ships behind a flag with its own D1 table (traceability + revertibility).
 
 ### 3.4 Data migration
 New D1 schema via Drizzle. Migrate live tables that matter (`jobs`,
@@ -136,10 +231,19 @@ deployable for rollback for one to two weeks. Then archive it.
    old one stays live.)
 2. **Keep old codra serving reviews during the rebuild?** (Recommend yes — it
    works now once deployed; don't go dark.)
-3. **ClickUp as the task backbone, or codra's own D1 tasks?** core-remodel uses
-   ClickUp heavily; decide if codra planning lives in ClickUp or natively.
+3. **Task backbone: ClickUp or codra-native D1?** Big fork. ClickUp = reuse
+   core-remodel's integration + you already live there; but then codra's spec/
+   acceptance-criteria model must sync to ClickUp custom fields. Native D1 = full
+   control of the spec→audit contract, less lock-in, more to build. *The
+   spec-aware audit needs structured acceptance criteria — ClickUp custom fields
+   can hold them, but native D1 is cleaner for the contract.*
 4. **Interactive `@codra` chat agent — in scope?** Decides whether we keep one DO.
 5. **Design profile** — Monolith (core-remodel default) confirmed?
+6. **Agent fleet priority** — which agents first? (Recommend: Jules(cloud) +
+   claude-code(local via Bridge) as the two pilots, expand after the loop works.)
+7. **Bridge trust model** — the local daemon can run agents that write code and
+   open PRs on your machine. It must be least-privilege, per-repo-scoped, and
+   never auto-merge. Confirm the guardrails before it's built.
 
 ## Risks
 - **Scope.** This is a multi-month, multi-repo effort. Phase 1 alone is large.
@@ -150,8 +254,15 @@ deployable for rollback for one to two weeks. Then archive it.
   sharp edges (DO re-export gotcha, hydration directives) — the cloudflare-jedi /
   shadcn skills cover these; lean on them.
 
-## Suggested first concrete step
-Phase 1.2 pilot: port the **ClickUp vertical** (schema → client → route → kanban/
-gantt page) into the template as one deployable slice. It's the biggest single
-gap and proves the port workflow end to end.
+## Suggested first concrete steps
+Two independent tracks can start in parallel:
+- **Track A (foundation):** Phase 1 planning suite in the template — pilot the
+  **ClickUp vertical** (or native task vertical, per decision #3) as one
+  deployable slice. Proves the port workflow.
+- **Track B (the differentiator, prototype-able on TODAY's codra):** the
+  **spec-aware audit**. Add a `pr_task_links` table + a task's acceptance
+  criteria to the existing review pipeline, and have finalize emit a
+  delivered-vs-expected gap list. This is the highest-value idea and doesn't need
+  the full rebuild to prototype — it can prove the concept on the current worker
+  first, then port.
 ```
