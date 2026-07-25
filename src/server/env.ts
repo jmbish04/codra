@@ -1,4 +1,4 @@
-// App-level types (not binding types — those come from wrangler-generated worker-env.d.ts)
+// App-level types (not binding types — those come from wrangler-generated worker-configuration.d.ts)
 
 export interface DashboardSessionUser {
   githubUserId: number;

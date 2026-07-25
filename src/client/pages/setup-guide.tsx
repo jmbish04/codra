@@ -473,7 +473,7 @@ export function SetupGuidePage() {
                   <Settings size={15} /> Type Generation
                 </h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Generate the <code className="font-mono bg-muted/40 p-0.5 px-1 rounded">Env</code> interface from your <code className="font-mono bg-muted/40 p-0.5 px-1 rounded">wrangler.jsonc</code> bindings. This writes to <code className="font-mono bg-muted/40 p-0.5 px-1 rounded">src/server/worker-env.d.ts</code>.
+                  Generate the <code className="font-mono bg-muted/40 p-0.5 px-1 rounded">Env</code> interface from your <code className="font-mono bg-muted/40 p-0.5 px-1 rounded">wrangler.jsonc</code> bindings. This writes to <code className="font-mono bg-muted/40 p-0.5 px-1 rounded">worker-configuration.d.ts</code>.
                 </p>
                 <CodeBlock code="pnpm run types" />
                 <p className="text-[11px] text-muted-foreground">

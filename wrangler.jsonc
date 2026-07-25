@@ -115,6 +115,7 @@
 			"/api/*",
 			"/auth/*",
 			"/webhook*",
+			"/reviews/*",
 			"/settings*",
 			"/best-practices*",
 			"/.well-known/*",
@@ -134,7 +135,7 @@
 	"vars": {
 		"APP_URL": "https://codra.hacolby.workers.dev",
 		"AUTH_CALLBACK_URL": "https://codra.hacolby.workers.dev/auth/github/callback",
-		"BOT_USERNAME": "codra",
+		"BOT_USERNAME": "codra-app",
 		"GITHUB_APP_SLUG": "codra-app-personal",
 		"DASHBOARD_ALLOWED_USERS": "jmbish04",
 		"ENVIRONMENT": "production",
