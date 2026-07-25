@@ -2,7 +2,7 @@ import { getDb, parseJsonColumn } from './client';
 import { defaultRepoConfig, jobDetailSchema, jobSummarySchema, repoConfigSchema, type RepoConfig } from '@shared/schema';
 import { getOrCreateRepository } from './repositories';
 import { jobs, repositories, fileReviews, reviewComments } from './schemas';
-import { eq, and, sql, or, lt, gt, like, desc, asc, inArray, isNull, isNotNull, ne } from 'drizzle-orm';
+import { eq, and, sql, or, lt, gt, like, desc, asc, inArray, notInArray, isNull, isNotNull, ne } from 'drizzle-orm';
 
 export type JobRow = typeof jobs.$inferSelect;
 type JobStep = {
@@ -503,7 +503,8 @@ export async function completeJob(
     overall_confidence_score: input.overallConfidenceScore ?? null,
     error_msg: input.errorMessage ?? null,
     steps,
-  }).where(eq(jobs.id, jobId));
+    // Never clobber a merged/closed PR's status — that state wins.
+  }).where(and(eq(jobs.id, jobId), notInArray(jobs.status, ['merged', 'closed'])));
 }
 
 export async function failJob(env: Pick<Env, 'DB'>, jobId: string, errorMessage: string) {
@@ -528,7 +529,7 @@ export async function failJob(env: Pick<Env, 'DB'>, jobId: string, errorMessage:
     lease_expires_at: null,
     error_msg: errorMessage,
     steps,
-  }).where(eq(jobs.id, jobId));
+  }).where(and(eq(jobs.id, jobId), notInArray(jobs.status, ['merged', 'closed'])));
 }
 
 export async function markJobCheckRunCompleted(env: Pick<Env, 'DB'>, jobId: string) {
@@ -637,6 +638,62 @@ export async function cancelJob(env: Pick<Env, 'DB'>, jobId: string, reason: str
     lease_expires_at: null,
     error_msg: reason,
   }).where(eq(jobs.id, jobId));
+}
+
+/**
+ * Reflect a PR's merged/closed state on EVERY job codra has for it. Active
+ * (queued/running) jobs are cancelled with a reason; already-finished jobs
+ * (done/failed/superseded) just have their status flipped to merged/closed so
+ * the dashboard always shows the PR's final state — the review verdict stays in
+ * the `verdict` column. Returns the ids of jobs that were active (for the
+ * cancellation comment).
+ */
+export async function markPrClosed(
+  env: Pick<Env, 'DB'>,
+  input: { owner: string; repo: string; prNumber: number },
+  state: 'merged' | 'closed',
+  reason: string,
+): Promise<{ cancelledActiveIds: string[] }> {
+  const db = getDb(env);
+  const repoRow = await db.select({ id: repositories.id })
+    .from(repositories)
+    .where(and(eq(repositories.owner, input.owner), eq(repositories.repo, input.repo)))
+    .get();
+  if (!repoRow) return { cancelledActiveIds: [] };
+
+  const active = await db.select({ id: jobs.id })
+    .from(jobs)
+    .where(and(
+      eq(jobs.repository_id, repoRow.id),
+      eq(jobs.pr_number, input.prNumber),
+      inArray(jobs.status, ['queued', 'running']),
+    ))
+    .all();
+
+  // Cancel the active reviews.
+  if (active.length > 0) {
+    await db.update(jobs).set({
+      status: state,
+      finished_at: sql`CURRENT_TIMESTAMP`,
+      lease_owner: null,
+      lease_expires_at: null,
+      error_msg: reason,
+    }).where(and(
+      eq(jobs.repository_id, repoRow.id),
+      eq(jobs.pr_number, input.prNumber),
+      inArray(jobs.status, ['queued', 'running']),
+    ));
+  }
+
+  // Flip every other job for this PR to the PR's final state (keep their
+  // existing verdict / error / finished_at).
+  await db.update(jobs).set({ status: state }).where(and(
+    eq(jobs.repository_id, repoRow.id),
+    eq(jobs.pr_number, input.prNumber),
+    inArray(jobs.status, ['done', 'failed', 'superseded']),
+  ));
+
+  return { cancelledActiveIds: active.map((j) => j.id) };
 }
 
 export async function findExistingJobForHead(

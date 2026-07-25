@@ -45,6 +45,10 @@ function getTone(value: string): BadgeVariant {
     case 'failed':
     case 'request_changes':
       return 'danger';
+    case 'merged':
+      return 'default';
+    case 'closed':
+      return 'danger';
     case 'queued':
     case 'superseded':
       return 'neutral';

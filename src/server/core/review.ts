@@ -3,7 +3,7 @@ import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHub
 import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview } from '@server/db/file-reviews';
 import { getResolvedModelConfig } from '@server/db/model-configs';
-import { cancelJob, claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findActiveJobsForPr, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
+import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
 import { parseFileReviewResponse } from './model-output';
 import { filterReviewableFiles, parseUnifiedDiff } from './diff';
 
@@ -421,8 +421,8 @@ async function runPreparePhase(
   // review a closed PR — cancel and stop.
   if (pr.state && pr.state !== 'open') {
     await cancelReviewsForClosedPr(env, github, { owner: job.owner, repo: job.repo, prNumber: job.prNumber }, pr.merged ? 'merged' : 'closed');
-    // Cancelled → status is 'superseded'; reuse the supersede signal so the
-    // queue consumer acks without retrying.
+    // Job is now 'merged'/'closed'; reuse the supersede signal so the queue
+    // consumer acks without retrying.
     throw new Error('JOB_SUPERSEDED');
   }
 
@@ -1113,11 +1113,12 @@ async function runFinalizePhase(
   }
 }
 
-// Throws JOB_SUPERSEDED if a newer commit/job has taken over this PR, so the
-// current invocation stops before spending more model calls on stale code.
+// Throws JOB_SUPERSEDED if a newer commit/job has taken over this PR, or the PR
+// was merged/closed, so the current invocation stops before spending more model
+// calls on stale code.
 async function checkSuperseded(env: Env, jobId: string) {
   const currentJob = await getJobForProcessing(env, jobId);
-  if (currentJob?.status === 'superseded') {
+  if (currentJob && ['superseded', 'merged', 'closed'].includes(currentJob.status)) {
     throw new Error('JOB_SUPERSEDED');
   }
 }
@@ -1349,30 +1350,34 @@ export async function cancelReviewsForClosedPr(
   input: { owner: string; repo: string; prNumber: number },
   closedState: 'merged' | 'closed',
 ): Promise<number> {
-  const active = await findActiveJobsForPr(env, input);
-  if (active.length === 0) return 0;
+  // Reflect the PR's final state on every job for it (finished reviews too),
+  // and cancel any that were still in flight.
+  const { cancelledActiveIds } = await markPrClosed(
+    env,
+    input,
+    closedState,
+    `Cancelled: PR #${input.prNumber} was ${closedState} before the review finished.`,
+  );
 
-  for (const job of active) {
-    await cancelJob(env, job.id, `Cancelled: PR #${input.prNumber} was ${closedState} before the review finished.`);
+  // Only comment when there was an in-progress review to cancel.
+  if (cancelledActiveIds.length > 0) {
+    try {
+      const jobId = cancelledActiveIds[0];
+      const link = env.APP_URL ? ` <a href="${env.APP_URL}/jobs/${jobId}" target="_blank" rel="noopener noreferrer">View the cancelled job</a>.` : '';
+      await gh.createIssueComment(
+        input.owner,
+        input.repo,
+        input.prNumber,
+        `## 🔍 Code Review\n\nCodra cancelled its in-progress review because this pull request was **${closedState}** before the review completed.${link}`,
+      );
+    } catch (err) {
+      logger.error('Failed to post review-cancellation comment', err);
+    }
   }
 
-  try {
-    const jobId = active[0].id;
-    const link = env.APP_URL ? ` <a href="${env.APP_URL}/jobs/${jobId}" target="_blank" rel="noopener noreferrer">View the cancelled job</a>.` : '';
-    const verb = closedState === 'merged' ? 'merged' : 'closed';
-    await gh.createIssueComment(
-      input.owner,
-      input.repo,
-      input.prNumber,
-      `## 🔍 Code Review\n\nCodra cancelled its in-progress review because this pull request was **${verb}** before the review completed.${link}`,
-    );
-  } catch (err) {
-    logger.error('Failed to post review-cancellation comment', err);
-  }
-
-  await notifyJobsChanged(env, { prNumber: input.prNumber, owner: input.owner, repo: input.repo, status: 'superseded' }).catch(() => {});
-  logger.info(`Cancelled ${active.length} review(s) for ${input.owner}/${input.repo}#${input.prNumber} (${closedState})`);
-  return active.length;
+  await notifyJobsChanged(env, { prNumber: input.prNumber, owner: input.owner, repo: input.repo, status: closedState }).catch(() => {});
+  logger.info(`Marked ${input.owner}/${input.repo}#${input.prNumber} as ${closedState} (${cancelledActiveIds.length} active review(s) cancelled)`);
+  return cancelledActiveIds.length;
 }
 
 type HousekeepingChange = {

@@ -243,6 +243,8 @@ export function JobsPage() {
             { label: 'Running', value: 'running' },
             { label: 'Done', value: 'done' },
             { label: 'Failed', value: 'failed' },
+            { label: 'Merged', value: 'merged' },
+            { label: 'Closed', value: 'closed' },
           ]}
           className="min-w-[140px] flex-1"
         />

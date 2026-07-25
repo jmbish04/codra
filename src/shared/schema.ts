@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const reviewTriggers = ['auto', 'mention', 'retry', 'sync'] as const;
-export const jobStatuses = ['queued', 'running', 'done', 'failed', 'superseded'] as const;
+export const jobStatuses = ['queued', 'running', 'done', 'failed', 'superseded', 'merged', 'closed'] as const;
 
 /**
  * Job step recorded while a Workers AI batch is in flight. Shared because the
