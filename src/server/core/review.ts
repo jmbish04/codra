@@ -37,7 +37,15 @@ const JOB_LEASE_SECONDS = 15 * 60;
 const BUSY_RETRY_SECONDS = 60;
 const RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS = [60, 5 * 60, 15 * 60];
 /** Workers AI batches typically land within ~5 minutes; poll on a steady beat. */
-const BATCH_POLL_DELAY_SECONDS = 30;
+const BATCH_POLL_DELAY_SECONDS = 20;
+
+/**
+ * The async batch API trades minutes of queue latency for throughput and
+ * rate-limit headroom, so it only pays off on large PRs. Smaller reviews finish
+ * faster on the parallel synchronous path. Only submit a NEW batch at/above this
+ * many pending files. ponytail: a flat threshold; make it config if repos vary.
+ */
+const BATCH_MIN_PENDING_FILES = 12;
 
 const MAX_RETRYABLE_FILE_REVIEW_FAILURES = 3;
 
@@ -680,6 +688,10 @@ async function runBatchReviewPhase(
   }
 
   if (pendingFiles.length === 0) return false;
+
+  // Small/medium PRs review faster on the parallel sync path than on the async
+  // batch queue — only batch when there are enough files to make it worthwhile.
+  if (pendingFiles.length < BATCH_MIN_PENDING_FILES) return false;
 
   const batchModel = await model.resolveBatchModel(config, totalLineCount);
   if (!batchModel) return false;
