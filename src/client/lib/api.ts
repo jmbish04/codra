@@ -19,6 +19,7 @@ import type {
   StandardizationRuleResponse,
   StandardizationStrategy,
   AgentActionsResponse,
+  TestConfigResponse,
   AvailableSecretsResponse,
   StandardSecretBindingsResponse,
   StandardSecretBinding,
@@ -196,6 +197,15 @@ export const api = {
   },
   getWebhookRepos() {
     return request<WebhookReposResponse>('/api/webhooks/repos');
+  },
+  getTestConfig(repo: string) {
+    return request<TestConfigResponse>(`/api/test-config?repo=${encodeURIComponent(repo)}`);
+  },
+  setTestConfig(repo: string, patch: { baseUrl?: string | null; apiKey?: string; frontendPassword?: string }) {
+    return request<TestConfigResponse>(`/api/test-config?repo=${encodeURIComponent(repo)}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    });
   },
   getAvailableSecrets(storeId?: string) {
     const q = storeId ? `?store_id=${encodeURIComponent(storeId)}` : '';

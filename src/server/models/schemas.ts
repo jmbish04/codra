@@ -135,6 +135,35 @@ export const REVIEW_SCHEMA = {
   schema: REVIEW_RESPONSE_SCHEMA,
 };
 
+/** Structured-output contract for detecting read-only endpoints/pages to test. */
+export const TEST_TARGETS_SCHEMA = {
+  name: 'codra_test_targets',
+  description: 'List the read-only API endpoints, MCP tools, and frontend pages that this PR changed and that are safe to test.',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      targets: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            kind: { type: 'string', enum: ['api', 'mcp', 'frontend'] },
+            method: { type: 'string', description: 'HTTP method for api targets (GET/HEAD), else empty string.' },
+            target: { type: 'string', description: 'API path (e.g. /api/jobs/:id), MCP tool name, or frontend page path.' },
+            reason: { type: 'string', description: 'One line: what changed and why it is worth testing.' },
+            readOnly: { type: 'boolean', description: 'True only if this is a read/list/get — never create/update/delete.' },
+            params: { type: 'string', description: 'JSON string of example params/args to send, inferred from the code. Empty string if none.' },
+          },
+          required: ['kind', 'method', 'target', 'reason', 'readOnly', 'params'],
+        },
+      },
+    },
+    required: ['targets'],
+  },
+};
+
 /** Structured-output contract for changelog generation. */
 export const CHANGELOG_SCHEMA = {
   name: 'codra_changelog_entry',

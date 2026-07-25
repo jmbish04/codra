@@ -23,6 +23,7 @@ import {
   FileCheck2,
   History,
   KeyRound,
+  FlaskConical,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
 import { useTheme } from '@client/lib/theme';
@@ -46,6 +47,7 @@ const links = [
   { to: '/best-practices', label: 'Best Practices', icon: BookMarked, end: false },
   { to: '/standardization', label: 'Standardization', icon: FileCheck2, end: false },
   { to: '/secrets', label: 'Secret Bindings', icon: KeyRound, end: false },
+  { to: '/testing', label: 'PR Testing', icon: FlaskConical, end: false },
   { to: '/actions', label: 'Codra Actions', icon: History, end: false },
   { to: '/setup', label: 'Setup Guide', icon: BookOpen, end: false },
   { to: '/commands', label: 'Commands', icon: Terminal, end: false },

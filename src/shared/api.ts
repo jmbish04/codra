@@ -180,3 +180,10 @@ export type WebhookOutcomeStat = { outcome: string; count: number };
 export type WebhookStatsResponse = { stats: WebhookOutcomeStat[] };
 export type WebhookRepoRef = { owner: string; repo: string };
 export type WebhookReposResponse = { repos: WebhookRepoRef[] };
+
+export type RepoTestConfig = {
+  baseUrl: string | null;
+  hasApiKey: boolean;
+  hasFrontendPassword: boolean;
+};
+export type TestConfigResponse = { repo: string; config: RepoTestConfig };

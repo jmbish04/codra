@@ -20,6 +20,7 @@ import { createWebhooksRouter } from '@server/routes/api/webhooks';
 import { createStandardizationRouter } from '@server/routes/api/standardization';
 import { createActionsRouter } from '@server/routes/api/actions';
 import { createSecretBindingsRouter } from '@server/routes/api/secret-bindings';
+import { createTestConfigRouter } from '@server/routes/api/test-config';
 import { createMcpOAuthRouter } from '@server/routes/api/mcp-oauth';
 import { GitHubLikeMCP } from '@server/agents/orchestrator';
 import { getSecretStoreBinding } from '@server/utils/secrets';
@@ -115,6 +116,7 @@ export function createApp() {
   app.route('/api/standardization', createStandardizationRouter());
   app.route('/api/actions', createActionsRouter());
   app.route('/api/secret-bindings', createSecretBindingsRouter());
+  app.route('/api/test-config', createTestConfigRouter());
 
   app.all('/mcp/*', verifyMcpAuth, async (c) => {
     return GitHubLikeMCP.serve('/mcp', { binding: 'GitHubLikeMCP' }).fetch(
