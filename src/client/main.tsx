@@ -30,6 +30,7 @@ const StandardizationPage = safeLazy(() => import('./pages/standardization').the
 const ActionsPage = safeLazy(() => import('./pages/actions').then(m => ({ default: m.ActionsPage })));
 const SecretsPage = safeLazy(() => import('./pages/secrets').then(m => ({ default: m.SecretsPage })));
 const TestingPage = safeLazy(() => import('./pages/testing').then(m => ({ default: m.TestingPage })));
+const TestReportPage = safeLazy(() => import('./pages/test-report').then(m => ({ default: m.TestReportPage })));
 const JobDetailPage = safeLazy(() => import('./pages/job-detail').then(m => ({ default: m.JobDetailPage })));
 const JobLogsPage = safeLazy(() => import('./pages/job-logs').then(m => ({ default: m.JobLogsPage })));
 const ChangelogDetailPage = safeLazy(() => import('./pages/changelog-detail').then(m => ({ default: m.ChangelogDetailPage })));
@@ -117,6 +118,11 @@ const router = createBrowserRouter([
   {
     path: '/login',
     element: withSuspense(LoginPage, true),
+  },
+  {
+    // Public test report — reachable via the link codra drops on the PR.
+    path: '/test-report/:jobId',
+    element: withSuspense(TestReportPage, true),
   },
   {
     element: <AppShell />,

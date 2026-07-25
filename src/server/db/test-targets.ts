@@ -52,6 +52,34 @@ export async function listPendingTestTargetsForJob(env: Pick<Env, 'DB'>, jobId: 
   return rows.map((r) => ({ ...r, params: parseJsonColumn(r.params, null) }));
 }
 
+/** Public-safe test report for a job: job info + all targets with results. */
+export async function getTestReport(env: Pick<Env, 'DB'>, jobId: string) {
+  if (!jobId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
+    return null;
+  }
+  const targets = await listTestTargetsForJob(env, jobId);
+  if (targets.length === 0) return null;
+  const first = targets[0];
+  return {
+    jobId,
+    repo: `${first.owner}/${first.repo}`,
+    prNumber: first.pr_number,
+    targetCount: targets.length,
+    targets: targets.map((t) => ({
+      kind: t.kind,
+      method: t.method,
+      target: t.target,
+      reason: t.reason,
+      params: t.params,
+      status: t.status,
+      statusCode: t.status_code,
+      result: t.result,
+      screenshotUrl: t.screenshot_url,
+      error: t.error,
+    })),
+  };
+}
+
 export async function updateTestTargetResult(
   env: Pick<Env, 'DB'>,
   id: string,

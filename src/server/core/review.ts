@@ -23,6 +23,7 @@ import { recordAgentAction } from '@server/db/agent-actions';
 import { listEnabledStandardSecretBindings, recordMissingSecret } from '@server/db/secret-bindings';
 import { notifyJobsChanged } from '@server/core/jobs-feed';
 import { detectTestTargets } from '@server/core/test-detection';
+import { runAndReportPrTests } from '@server/core/test-runner';
 import { listSecretsStoreSecrets, ensureSecretBindings, type SecretBindingSpec } from '@server/core/secrets-store';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
@@ -1031,8 +1032,12 @@ async function runFinalizePhase(
   });
 
   // Build codra's running list of read-only endpoints / MCP tools / frontend
-  // pages this PR touched, to be tested after the review (best-effort).
-  await detectTestTargets(env, github, { id: job.id, owner: job.owner, repo: job.repo, prNumber: job.prNumber }, config);
+  // pages this PR touched, then test the API ones and report back (best-effort).
+  const testJob = { id: job.id, owner: job.owner, repo: job.repo, prNumber: job.prNumber };
+  const detected = await detectTestTargets(env, github, testJob, config);
+  if (detected > 0) {
+    await runAndReportPrTests(env, github, testJob);
+  }
 
   if (config.review.labels !== false) {
     const labels = config.review.labels;
