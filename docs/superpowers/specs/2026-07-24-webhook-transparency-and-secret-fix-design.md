@@ -127,6 +127,12 @@ A duplicate short-circuits to `finish(202, …, 'duplicate')`.
 
 ## Part 3 — Sync open PRs
 
+This does **not** replay past webhook deliveries (GitHub exposes no API to fetch
+missed deliveries; redelivery is manual-only). Instead the worker queries
+GitHub's current open-PR list directly and enqueues jobs for any PR without one.
+One trigger recovers every currently-open PR across enabled repos — no per-PR
+interaction.
+
 ### GitHub client
 
 Add `listOpenPullRequests(owner, repo)` to `GitHubClient` — paginated
