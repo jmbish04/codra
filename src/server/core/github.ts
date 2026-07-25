@@ -81,6 +81,8 @@ type PullRequestRecord = {
   title: string | null;
   body: string | null;
   draft: boolean;
+  state?: 'open' | 'closed';
+  merged?: boolean;
   head: { sha: string; ref: string };
   base: { sha: string; ref: string };
   user: { login: string };

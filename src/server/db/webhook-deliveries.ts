@@ -17,6 +17,7 @@ export type DeliveryOutcome =
   | 'ignored_repo_disabled'      // repo config disabled
   | 'kb_updated'                 // star/watch/fork updated the knowledge base
   | 'job_created'                // a review job was created
+  | 'review_cancelled'           // PR closed/merged → an active review was cancelled
   | 'queued'                     // handed to REVIEW_QUEUE for deferred handling
   | 'no_action'                  // valid + supported but produced no job
   | 'error';                     // exception during processing (500)

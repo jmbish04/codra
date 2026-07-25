@@ -607,6 +607,38 @@ export async function findAnyJobForHead(
   return res ?? null;
 }
 
+/** Active (queued or running) jobs for a PR — the ones a PR close should cancel. */
+export async function findActiveJobsForPr(
+  env: Pick<Env, 'DB'>,
+  input: { owner: string; repo: string; prNumber: number },
+) {
+  const db = getDb(env);
+  const rows = await db.select({ id: jobs.id, status: jobs.status })
+    .from(jobs)
+    .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
+    .where(and(
+      eq(repositories.owner, input.owner),
+      eq(repositories.repo, input.repo),
+      eq(jobs.pr_number, input.prNumber),
+      inArray(jobs.status, ['queued', 'running']),
+    ))
+    .orderBy(desc(jobs.created_at))
+    .all();
+  return rows;
+}
+
+/** Cancel a job (terminal 'superseded' status) with a reason — used when a PR closes. */
+export async function cancelJob(env: Pick<Env, 'DB'>, jobId: string, reason: string) {
+  const db = getDb(env);
+  await db.update(jobs).set({
+    status: 'superseded',
+    finished_at: sql`CURRENT_TIMESTAMP`,
+    lease_owner: null,
+    lease_expires_at: null,
+    error_msg: reason,
+  }).where(eq(jobs.id, jobId));
+}
+
 export async function findExistingJobForHead(
   env: Pick<Env, 'DB'>,
   input: { owner: string; repo: string; prNumber: number; commitSha: string; trigger: 'auto' | 'mention' },

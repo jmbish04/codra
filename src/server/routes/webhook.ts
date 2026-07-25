@@ -3,7 +3,7 @@ import type { Context } from 'hono';
 import { isSupportedGitHubWebhookEvent, type GitHubWebhookPayload } from '@shared/github';
 import type { AppEnv } from '@server/env';
 import { loadRepoConfig } from '@server/core/config';
-import { extractReviewRequest } from '@server/core/review';
+import { extractReviewRequest, cancelReviewsForClosedPr } from '@server/core/review';
 import { verifyGitHubWebhookSignature } from '@server/core/verify';
 import { jsonError } from '@server/core/http';
 import { findExistingJobForHead, insertJob, supersedeOlderJobs } from '@server/db/jobs';
@@ -129,6 +129,29 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
 
       if (!installationId) {
         return finish(202, { ok: true, ignored: true }, 'ignored_no_installation');
+      }
+
+      // A PR that was merged/closed should cancel any review codra still has
+      // queued or running for it, with a comment linking the cancelled job.
+      if (eventName === 'pull_request') {
+        const prPayload = payload as import('@shared/github').PullRequestWebhookPayload;
+        if (prPayload.action === 'closed') {
+          const prNumber = prPayload.pull_request.number;
+          const merged = prPayload.pull_request.merged === true;
+          const gh = new GitHubClient(c.env, installationId);
+          const cancelled = await cancelReviewsForClosedPr(
+            c.env,
+            gh,
+            { owner: payload.repository.owner.login, repo: payload.repository.name, prNumber },
+            merged ? 'merged' : 'closed',
+          ).catch((err) => { console.error('Failed to cancel reviews for closed PR:', err); return 0; });
+          return finish(
+            202,
+            { ok: true, message: 'pr_closed', cancelledReviews: cancelled },
+            cancelled > 0 ? 'review_cancelled' : 'no_action',
+            cancelled > 0 ? { action: 'review_cancelled', prNumber } : { prNumber },
+          );
+        }
       }
 
       const repoConfig = await loadRepoConfig(c.env, {

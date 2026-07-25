@@ -22,6 +22,7 @@ export type PullRequestWebhookPayload = {
     draft: boolean;
     body: string | null;
     created_at?: string;
+    merged?: boolean;
   };
 };
 

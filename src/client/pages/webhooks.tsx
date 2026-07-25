@@ -17,7 +17,7 @@ import type { WebhookDeliverySummary, WebhookOutcomeStat, WebhookRepoRef } from 
 function outcomeVariant(outcome: string): 'success' | 'neutral' | 'danger' | 'secondary' {
   if (['job_created', 'kb_updated', 'queued'].includes(outcome)) return 'success';
   if (['rejected_signature', 'invalid_payload', 'error'].includes(outcome)) return 'danger';
-  if (outcome === 'duplicate') return 'secondary';
+  if (outcome === 'duplicate' || outcome === 'review_cancelled') return 'secondary';
   return 'neutral';
 }
 const outcomeLabel = (o: string) => o.replace(/_/g, ' ');

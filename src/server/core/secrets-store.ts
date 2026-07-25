@@ -27,7 +27,7 @@ export async function listSecretsStoreSecrets(env: Env, storeId: string): Promis
       });
       const data = (await res.json()) as {
         success: boolean;
-        result?: Array<{ name: string; comment?: string | null }>;
+        result?: Array<{ name: string; comment?: string | null; scopes?: string[] }>;
         result_info?: { total_pages?: number };
       };
       if (!res.ok || !data.success) {
@@ -35,6 +35,14 @@ export async function listSecretsStoreSecrets(env: Env, storeId: string): Promis
         return out;
       }
       for (const s of data.result ?? []) {
+        // Worker secrets only — exclude AI Gateway (and other non-worker) scoped
+        // secrets. If a secret carries no scope info, keep it (assume worker).
+        const scopes = s.scopes;
+        if (Array.isArray(scopes) && scopes.length > 0) {
+          const isWorker = scopes.some((sc) => /worker/i.test(sc));
+          const isAiGateway = scopes.some((sc) => /ai.?gateway/i.test(sc));
+          if (!isWorker || isAiGateway) continue;
+        }
         out.push({ name: s.name, comment: s.comment ?? null });
       }
       const totalPages = data.result_info?.total_pages ?? 1;
@@ -50,42 +58,83 @@ export async function listSecretsStoreSecrets(env: Env, storeId: string): Promis
 
 export type SecretBindingSpec = { binding: string; secret_name: string; store_id: string };
 
+/** Find the index just after the `[` of a top-level `"key": [` array, or -1. */
+function findArrayOpen(text: string, key: string): number {
+  const re = new RegExp(`"${key}"\\s*:\\s*\\[`);
+  const m = re.exec(text);
+  return m ? m.index + m[0].length : -1;
+}
+
+/** From an index inside an array (just after `[`), find the matching `]`, ignoring brackets in strings. */
+function findArrayClose(text: string, openIdx: number): number {
+  let depth = 1;
+  let inStr = false;
+  for (let i = openIdx; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (ch === '\\') { i++; continue; }
+      if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === '[') depth++;
+    else if (ch === ']') { depth--; if (depth === 0) return i; }
+  }
+  return -1;
+}
+
 /**
  * Ensure `wrangler.jsonc` declares a secrets_store_secrets binding for each
- * required secret. Returns the updated content (JSON, comments dropped) plus
- * the list of bindings actually added, or null if nothing changed.
- *
- * ponytail: re-serializes as plain JSON, so JSONC comments are lost. Acceptable
- * for an automated PR a human reviews; upgrade to a comment-preserving edit if
- * that becomes a problem.
+ * required secret. Surgically edits the raw text — existing comments and
+ * formatting are preserved. Returns the updated content plus the bindings
+ * actually added, or null if nothing changed.
  */
 export function ensureSecretBindings(
   wranglerContent: string,
   required: SecretBindingSpec[],
 ): { content: string; added: SecretBindingSpec[] } | null {
-  let config: any;
+  // Detect which bindings already exist (parse a comment-stripped copy).
+  let have = new Set<string>();
   try {
     const stripped = wranglerContent
       .replace(/\/\/.*$/gm, '')
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/,(\s*[\]}])/g, '$1');
-    config = JSON.parse(stripped);
+    const cfg = JSON.parse(stripped);
+    if (Array.isArray(cfg.secrets_store_secrets)) {
+      have = new Set(cfg.secrets_store_secrets.map((b: any) => `${b.store_id}:${b.secret_name}`));
+    }
   } catch {
     return null; // don't touch an unparseable config
   }
 
-  const existing: any[] = Array.isArray(config.secrets_store_secrets) ? config.secrets_store_secrets : [];
-  const have = new Set(existing.map((b) => `${b.store_id}:${b.secret_name}`));
+  const added = required.filter((s) => !have.has(`${s.store_id}:${s.secret_name}`));
+  if (added.length === 0) return null;
 
-  const added: SecretBindingSpec[] = [];
-  for (const spec of required) {
-    if (!have.has(`${spec.store_id}:${spec.secret_name}`)) {
-      existing.push({ binding: spec.binding, store_id: spec.store_id, secret_name: spec.secret_name });
-      added.push(spec);
+  const entry = (s: SecretBindingSpec) =>
+    `\t\t{ "binding": "${s.binding}", "store_id": "${s.store_id}", "secret_name": "${s.secret_name}" }`;
+
+  const openIdx = findArrayOpen(wranglerContent, 'secrets_store_secrets');
+
+  if (openIdx !== -1) {
+    const closeIdx = findArrayClose(wranglerContent, openIdx);
+    if (closeIdx === -1) return null;
+    const inner = wranglerContent.slice(openIdx, closeIdx);
+    const entriesText = added.map(entry).join(',\n');
+
+    if (inner.trim().length === 0) {
+      // Empty array — replace its inner whitespace with the new entries.
+      return { content: wranglerContent.slice(0, openIdx) + '\n' + entriesText + '\n\t' + wranglerContent.slice(closeIdx), added };
     }
+    // Non-empty — PREPEND our entries right after `[`, so we never touch the
+    // existing entries' trailing commas or end-of-line comments.
+    return { content: wranglerContent.slice(0, openIdx) + '\n' + entriesText + ',' + wranglerContent.slice(openIdx), added };
   }
 
-  if (added.length === 0) return null;
-  config.secrets_store_secrets = existing;
-  return { content: JSON.stringify(config, null, 2), added };
+  // No array yet — add one right after the top-level opening `{`.
+  const braceIdx = wranglerContent.indexOf('{');
+  if (braceIdx === -1) return null;
+  const block = `\n\t"secrets_store_secrets": [\n${added.map(entry).join(',\n')}\n\t],`;
+  const content = wranglerContent.slice(0, braceIdx + 1) + block + wranglerContent.slice(braceIdx + 1);
+  return { content, added };
 }
