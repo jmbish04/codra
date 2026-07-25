@@ -149,3 +149,29 @@ export type AgentAction = {
 export type AgentActionsResponse = {
   actions: AgentAction[];
 };
+
+export type SecretsStoreSecretInfo = { name: string; comment: string | null };
+export type AvailableSecretsResponse = { store_id: string; secrets: SecretsStoreSecretInfo[] };
+
+export type StandardSecretBinding = {
+  id: string;
+  binding_name: string;
+  secret_name: string;
+  store_id: string;
+  description: string | null;
+  enabled: boolean;
+  updated_at: string;
+};
+export type StandardSecretBindingsResponse = { bindings: StandardSecretBinding[] };
+
+export type MissingSecretReport = {
+  id: string;
+  created_at: string;
+  owner: string;
+  repo: string;
+  secret_name: string;
+  store_id: string;
+  triggering_pr_number: number | null;
+  resolved: boolean;
+};
+export type MissingSecretReportsResponse = { reports: MissingSecretReport[] };

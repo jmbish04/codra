@@ -17,6 +17,10 @@ import type {
   StandardizationRuleResponse,
   StandardizationStrategy,
   AgentActionsResponse,
+  AvailableSecretsResponse,
+  StandardSecretBindingsResponse,
+  StandardSecretBinding,
+  MissingSecretReportsResponse,
 } from '@shared/api';
 import type { LlmApiFormat, LlmProvider, ModelConfig, RepoConfig, JobDetail, ChangelogEntry } from '@shared/schema';
 
@@ -185,6 +189,25 @@ export const api = {
   syncOpenPrs(repo?: string) {
     const query = repo ? `?repo=${encodeURIComponent(repo)}` : '';
     return request<PrSyncResponse>(`/api/webhooks/sync${query}`, { method: 'POST' });
+  },
+  getAvailableSecrets(storeId?: string) {
+    const q = storeId ? `?store_id=${encodeURIComponent(storeId)}` : '';
+    return request<AvailableSecretsResponse>(`/api/secret-bindings/available${q}`);
+  },
+  getStandardSecretBindings() {
+    return request<StandardSecretBindingsResponse>('/api/secret-bindings');
+  },
+  upsertStandardSecretBinding(input: { binding_name: string; secret_name: string; store_id: string; description?: string | null; enabled?: boolean }) {
+    return request<{ binding: StandardSecretBinding }>('/api/secret-bindings', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  deleteStandardSecretBinding(id: string) {
+    return request<{ ok: boolean }>(`/api/secret-bindings/${pathSegment(id)}`, { method: 'DELETE' });
+  },
+  getMissingSecretReports() {
+    return request<MissingSecretReportsResponse>('/api/secret-bindings/missing');
   },
   getAgentActions(params: Record<string, QueryValue> = {}) {
     const searchParams = new URLSearchParams();

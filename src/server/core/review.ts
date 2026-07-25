@@ -20,6 +20,8 @@ import { buildChangelogPrompt, CHANGELOG_SYSTEM_PROMPT } from '@server/prompts/c
 import { listEnabledStandardizationRules, type StandardizationStrategy } from '@server/db/standardization';
 import { applyStrategy, fetchSourceContent } from '@server/core/standardization';
 import { recordAgentAction } from '@server/db/agent-actions';
+import { listEnabledStandardSecretBindings, recordMissingSecret } from '@server/db/secret-bindings';
+import { listSecretsStoreSecrets, ensureSecretBindings, type SecretBindingSpec } from '@server/core/secrets-store';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
 
@@ -1366,6 +1368,45 @@ async function standardizeRepository(
         } catch (err) {
           logger.error(`Standardization rule failed for ${rule.target_path}`, err);
         }
+      }
+
+      // Ensure the standard secret-store bindings exist in wrangler.jsonc.
+      // Verify each secret still exists in its store first; skip + record any
+      // that no longer exist so they can be reviewed in the dashboard.
+      try {
+        const stdBindings = await listEnabledStandardSecretBindings(env);
+        const wranglerJsonc = await github.getRepoFileWithRefOrNull(job.owner, job.repo, 'wrangler.jsonc', defaultBranch);
+        if (stdBindings.length > 0 && wranglerJsonc?.content) {
+          const storeIds = [...new Set(stdBindings.map((b) => b.store_id))];
+          const liveByStore = new Map<string, Set<string>>();
+          for (const storeId of storeIds) {
+            const secrets = await listSecretsStoreSecrets(env, storeId);
+            liveByStore.set(storeId, new Set(secrets.map((s) => s.name)));
+          }
+
+          const present: SecretBindingSpec[] = [];
+          for (const b of stdBindings) {
+            if (liveByStore.get(b.store_id)?.has(b.secret_name)) {
+              present.push({ binding: b.binding_name, secret_name: b.secret_name, store_id: b.store_id });
+            } else {
+              await recordMissingSecret(env, {
+                owner: job.owner, repo: job.repo, secretName: b.secret_name, storeId: b.store_id, triggeringPrNumber: job.prNumber,
+              }).catch((e) => logger.error('Failed to record missing secret', e));
+            }
+          }
+
+          const result = ensureSecretBindings(wranglerJsonc.content, present);
+          if (result) {
+            changes.push({
+              path: 'wrangler.jsonc',
+              content: result.content,
+              message: 'chore: add standard secret store bindings',
+              existingSha: wranglerJsonc.sha,
+            });
+          }
+        }
+      } catch (err) {
+        logger.error('Failed to evaluate secret store bindings', err);
       }
     } else {
       logger.info(`Skipping standardization file rules for ${job.owner}/${job.repo}: not a Cloudflare Worker repo`);
