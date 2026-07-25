@@ -1324,6 +1324,7 @@ async function runChangelogPhase(
     `**Findings:** ${findingsLine} · **Files:** ${files.length} · **Commit:** \`${job.commitSha.slice(0, 7)}\``,
     '',
     `📋 **[View the full changelog for this PR](${changelogUrl})** — schema diagrams, API changes, and the code that moved.`,
+    ...(env.APP_URL ? ['', `🔧 <a href="${env.APP_URL.replace(/\/+$/, '')}/jobs/${job.id}" target="_blank" rel="noopener noreferrer">View the findings on Codra</a> — read them in full and copy a ready-to-paste fix prompt for your coding agent.`] : []),
     ...(fixPrompt ? ['', '<details>', '<summary>Prompt for your coding agent to fix these findings</summary>', '', fixPrompt, '</details>'] : []),
   ].join('\n');
 

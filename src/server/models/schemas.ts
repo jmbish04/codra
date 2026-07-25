@@ -63,7 +63,7 @@ export const CHANGELOG_RESPONSE_SCHEMA = {
   required: ['title', 'summary', 'area', 'problem', 'approach', 'changes', 'api_changes', 'diagrams', 'code'],
   properties: {
     title: { type: 'string', description: 'Short headline for this change, imperative mood.' },
-    summary: { type: 'string', description: 'One or two sentences describing what shipped and why.' },
+    summary: { type: 'string', description: 'A readable GitHub-markdown summary. Open with ONE short sentence of what shipped, then a blank line, then a bulleted list (2-5 items, one per line starting with "- ") of the concrete changes — name the actual routes, tables, columns, or functions. Use real newlines and blank lines; never write one long run-on sentence.' },
     area: { type: 'string', description: 'Subsystem touched, e.g. "API", "Database", "Frontend", "MCP".' },
     problem: { type: 'string', description: 'What was broken or missing before this PR.' },
     approach: { type: 'string', description: 'How the PR solves it.' },
