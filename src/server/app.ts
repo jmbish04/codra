@@ -6,6 +6,7 @@ import { requireCsrfHeader } from '@server/middleware/csrf';
 import { observability } from '@server/middleware/observability';
 import { createAuthRouter } from '@server/routes/auth';
 import { createWebhookRouter } from '@server/routes/webhook';
+import { createReviewsRouter } from '@server/routes/reviews';
 import { createAuthApiRouter } from '@server/routes/api/auth';
 import { createJobsRouter } from '@server/routes/api/jobs';
 import { createReposRouter } from '@server/routes/api/repos';
@@ -66,6 +67,8 @@ export function createApp() {
 
   app.route('/auth', createAuthRouter());
   app.route('/webhook', createWebhookRouter());
+  // Public read-only review-suggestions feed (before the /api/* session guard).
+  app.route('/reviews', createReviewsRouter());
 
   // RFC 9728: Protected Resource Metadata — Claude probes this first
   app.get('/.well-known/oauth-protected-resource', (c) => {

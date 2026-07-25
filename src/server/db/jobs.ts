@@ -220,6 +220,59 @@ export async function getJobForProcessing(env: Pick<Env, 'DB'>, jobId: string) {
   return row ? mergeRow(row) : null;
 }
 
+/**
+ * The review suggestions for a job, as a machine-readable object a review agent
+ * can consume. Returns null for an unknown/invalid job id.
+ */
+export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) {
+  if (!jobId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
+    return null;
+  }
+  const db = getDb(env);
+  const jobRow = await db.select({
+    id: jobs.id,
+    owner: repositories.owner,
+    repo: repositories.repo,
+    prNumber: jobs.pr_number,
+    commitSha: jobs.commit_sha,
+    verdict: jobs.verdict,
+    status: jobs.status,
+    finishedAt: jobs.finished_at,
+  })
+    .from(jobs)
+    .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
+    .where(eq(jobs.id, jobId))
+    .get();
+  if (!jobRow) return null;
+
+  const rows = await db.select({
+    path: reviewComments.path,
+    line: reviewComments.line,
+    severity: reviewComments.severity,
+    category: reviewComments.category,
+    title: reviewComments.title,
+    body: reviewComments.body,
+    codeSuggestion: reviewComments.code_suggestion,
+  })
+    .from(reviewComments)
+    .innerJoin(fileReviews, eq(reviewComments.file_review_id, fileReviews.id))
+    .where(eq(fileReviews.job_id, jobId))
+    .orderBy(asc(reviewComments.id))
+    .all();
+
+  return {
+    jobId: jobRow.id,
+    repo: `${jobRow.owner}/${jobRow.repo}`,
+    prNumber: jobRow.prNumber,
+    commitSha: bytesToHex(jobRow.commitSha),
+    verdict: jobRow.verdict,
+    status: jobRow.status,
+    finishedAt: jobRow.finishedAt,
+    suggestionCount: rows.length,
+    suggestions: rows,
+  };
+}
+
 export async function getJobDetail(env: Pick<Env, 'DB'>, jobId: string) {
   if (!jobId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
     return null;

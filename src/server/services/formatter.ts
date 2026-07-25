@@ -62,14 +62,42 @@ export class FormatterService {
     return { verdict: 'approve' as const, errors: 0, warnings: 0 };
   }
 
-  formatReviewOverview(commitSha: string, botUsername: string) {
-    const shortSha = commitSha.slice(0, 10);
-    
-    return `### Codra Review
+  /** One bullet per suggestion: severity icon, title, and file:line location. */
+  formatSuggestionBullets(comments: ParsedReviewComment[]): string {
+    return comments
+      .map((c) => {
+        const loc = c.line ? ` — \`${c.path}:${c.line}\`` : c.path ? ` — \`${c.path}\`` : '';
+        return `- ${this.severityIcon(c.severity)} **${this.stripLeadingTags(c.title)}**${loc}`;
+      })
+      .join('\n');
+  }
 
-Here are some automated review suggestions for this pull request.
+  formatReviewOverview(
+    commitSha: string,
+    botUsername: string,
+    comments: ParsedReviewComment[],
+    jobId: string,
+  ) {
+    const shortSha = commitSha.slice(0, 10);
+    const jsonUrl = `${this.baseUrl}/reviews/${jobId}.json`;
+
+    const suggestionsBlock = comments.length > 0
+      ? `**Suggestions to improve (${comments.length}):**
+
+${this.formatSuggestionBullets(comments)}
+
+[⬇️ Pull these suggestions as JSON](${jsonUrl}) — machine-readable for a review agent.`
+      : `✅ No blocking issues found — nothing to change.
+
+[⬇️ Review data as JSON](${jsonUrl})`;
+
+    return `### ✅ Codra Review — Completed
+
+Codra finished reviewing this pull request.
 
 **Reviewed commit:** \`${shortSha}\`
+
+${suggestionsBlock}
 
 <details>
 <summary>ℹ️ About Codra in GitHub</summary>
