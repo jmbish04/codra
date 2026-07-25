@@ -394,6 +394,42 @@ export class GitHubClient {
     });
   }
 
+  async listOpenPullRequests(owner: string, repo: string) {
+    return withRetry(`listOpenPullRequests ${owner}/${repo}`, async () => {
+      const out: Array<{
+        number: number;
+        title: string;
+        authorLogin: string | null;
+        headSha: string;
+        headRef: string;
+        baseSha: string;
+        baseRef: string;
+      }> = [];
+      let page = 1;
+      // GitHub caps per_page at 100; paginate until a short page.
+      for (;;) {
+        const response = await this.requestAndCheck(
+          `${repoApiPath(owner, repo)}/pulls?state=open&per_page=100&page=${page}`,
+        );
+        const batch = (await response.json()) as any[];
+        for (const pr of batch) {
+          out.push({
+            number: pr.number,
+            title: pr.title,
+            authorLogin: pr.user?.login ?? null,
+            headSha: pr.head.sha,
+            headRef: pr.head.ref,
+            baseSha: pr.base.sha,
+            baseRef: pr.base.ref,
+          });
+        }
+        if (batch.length < 100) break;
+        page += 1;
+      }
+      return out;
+    });
+  }
+
   async getPullRequestDiff(owner: string, repo: string, pullNumber: number) {
     return withRetry(`getPullRequestDiff ${owner}/${repo}#${pullNumber}`, async () => {
       const response = await this.requestAndCheck(

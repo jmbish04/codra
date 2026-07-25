@@ -121,7 +121,7 @@ export async function insertJob(
     prAuthor: string | null;
     commitSha: string;
     baseSha: string;
-    trigger: 'auto' | 'mention' | 'retry';
+    trigger: 'auto' | 'mention' | 'retry' | 'sync';
     headRef: string | null;
     baseRef: string | null;
     configSnapshot?: RepoConfig | null;
@@ -555,6 +555,31 @@ export async function completePreparationStep(env: Pick<Env, 'DB'>, jobId: strin
     file_count: fileCount,
     steps,
   }).where(eq(jobs.id, jobId));
+}
+
+/**
+ * Trigger-agnostic head check: is there ANY job for this PR at this exact head
+ * commit, regardless of how it was triggered? Used by the open-PR sync so it
+ * does not re-enqueue a PR head that a webhook already produced a job for.
+ */
+export async function findAnyJobForHead(
+  env: Pick<Env, 'DB'>,
+  input: { owner: string; repo: string; prNumber: number; commitSha: string },
+) {
+  const db = getDb(env);
+  const res = await db.select({ id: jobs.id })
+    .from(jobs)
+    .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
+    .where(and(
+      eq(repositories.owner, input.owner),
+      eq(repositories.repo, input.repo),
+      eq(jobs.pr_number, input.prNumber),
+      eq(jobs.commit_sha, Array.from(hexToBytes(input.commitSha))),
+    ))
+    .orderBy(desc(jobs.created_at))
+    .limit(1)
+    .get();
+  return res ?? null;
 }
 
 export async function findExistingJobForHead(

@@ -15,6 +15,7 @@ import { createModelsRouter } from '@server/routes/api/models';
 import { createPromptsRouter } from '@server/routes/api/prompts';
 import { createBestPracticesRouter } from '@server/routes/api/best-practices';
 import { createChangelogRouter } from '@server/routes/api/changelog';
+import { createWebhooksRouter } from '@server/routes/api/webhooks';
 import { createMcpOAuthRouter } from '@server/routes/api/mcp-oauth';
 import { GitHubLikeMCP } from '@server/agents/orchestrator';
 import { getSecretStoreBinding } from '@server/utils/secrets';
@@ -104,6 +105,7 @@ export function createApp() {
   app.route('/api/models', createModelsRouter());
   app.route('/api/prompts', createPromptsRouter());
   app.route('/api/best-practices', createBestPracticesRouter());
+  app.route('/api/webhooks', createWebhooksRouter());
 
   app.all('/mcp/*', verifyMcpAuth, async (c) => {
     return GitHubLikeMCP.serve('/mcp', { binding: 'GitHubLikeMCP' }).fetch(
