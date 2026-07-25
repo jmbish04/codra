@@ -74,3 +74,40 @@ export type ModelConfigsResponse = {
   configs: import('./schema').ModelConfig[];
   syncErrors?: Array<{ providerId: string; providerName: string; error: string }>;
 };
+
+export type WebhookDeliverySummary = {
+  id: string;
+  received_at: string;
+  event_name: string;
+  outcome: string;
+  action: string | null;
+  pr_number: number | null;
+  job_id: string | null;
+  error: string | null;
+  owner: string | null;
+  repo: string | null;
+};
+
+export type WebhookDeliveriesResponse = {
+  items: WebhookDeliverySummary[];
+  total: number;
+};
+
+export type WebhookDeliveryDetailResponse = {
+  delivery: WebhookDeliverySummary & { payload: unknown };
+};
+
+export type PrSyncRepoStat = {
+  owner: string;
+  repo: string;
+  openPrs: number;
+  enqueued: number;
+  skipped: number;
+  errors: number;
+};
+
+export type PrSyncResponse = {
+  ok: boolean;
+  repos: PrSyncRepoStat[];
+  totalEnqueued: number;
+};

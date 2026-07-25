@@ -19,6 +19,7 @@ import {
   BookOpen,
   Terminal,
   BookMarked,
+  Webhook,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
 import { useTheme } from '@client/lib/theme';
@@ -35,6 +36,7 @@ import type { AuthSessionUser } from '@shared/api';
 const links = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/jobs', label: 'Jobs', icon: Activity, end: false },
+  { to: '/webhooks', label: 'Webhooks', icon: Webhook, end: false },
   { to: '/repos', label: 'Repos', icon: GitBranch, end: false },
   { to: '/stats', label: 'Stats', icon: BarChart2, end: false },
   { to: '/prompts', label: 'Prompts', icon: PenTool, end: false },

@@ -10,6 +10,9 @@ import type {
   StatsResponse,
   SyncReposResponse,
   UpdatesEmailResponse,
+  WebhookDeliveriesResponse,
+  WebhookDeliveryDetailResponse,
+  PrSyncResponse,
 } from '@shared/api';
 import type { LlmApiFormat, LlmProvider, ModelConfig, RepoConfig, JobDetail, ChangelogEntry } from '@shared/schema';
 
@@ -161,6 +164,23 @@ export const api = {
     }
     const query = searchParams.toString();
     return request<JobsResponse>(`/api/jobs${query ? `?${query}` : ''}`);
+  },
+  getWebhooks(params: Record<string, QueryValue> = {}) {
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '') {
+        searchParams.set(key, String(value));
+      }
+    }
+    const query = searchParams.toString();
+    return request<WebhookDeliveriesResponse>(`/api/webhooks${query ? `?${query}` : ''}`);
+  },
+  getWebhook(id: string) {
+    return request<WebhookDeliveryDetailResponse>(`/api/webhooks/${pathSegment(id)}`);
+  },
+  syncOpenPrs(repo?: string) {
+    const query = repo ? `?repo=${encodeURIComponent(repo)}` : '';
+    return request<PrSyncResponse>(`/api/webhooks/sync${query}`, { method: 'POST' });
   },
   getChangelogEntry(slug: string) {
     return request<{ entry: ChangelogEntry }>(`/api/changelog/${slug}`);
