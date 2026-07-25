@@ -3,6 +3,70 @@ import type { GitHubService } from '@server/services/github';
 import { listPendingTestTargetsForJob, updateTestTargetResult } from '@server/db/test-targets';
 import { getRepoTestConfig, getRepoTestApiKey } from '@server/core/test-config';
 
+/** The account's workers.dev subdomain, cached for the isolate's lifetime. */
+let cachedSubdomain: string | null = null;
+
+async function getWorkersSubdomain(env: Env, accountId: string, apiToken: string): Promise<string | null> {
+  if (cachedSubdomain) return cachedSubdomain;
+  try {
+    const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`, {
+      headers: { Authorization: `Bearer ${apiToken}` },
+    });
+    const data = (await res.json()) as { success: boolean; result?: { subdomain?: string } };
+    if (res.ok && data.success && data.result?.subdomain) {
+      cachedSubdomain = data.result.subdomain;
+      return cachedSubdomain;
+    }
+  } catch { /* fall through */ }
+  return null;
+}
+
+/**
+ * Resolve the base URL to test a repo against:
+ *   1. the repo's explicitly configured test base URL, if set;
+ *   2. otherwise the deployed Worker's URL — read the Worker name from the
+ *      repo's wrangler.jsonc, confirm the script exists via the Cloudflare API,
+ *      and build https://{name}.{account-subdomain}.workers.dev.
+ * Returns null when neither is available.
+ */
+export async function resolveTestBaseUrl(
+  env: Env,
+  github: GitHubService,
+  job: { owner: string; repo: string },
+): Promise<string | null> {
+  const cfg = await getRepoTestConfig(env, job.owner, job.repo);
+  if (cfg.baseUrl) return cfg.baseUrl;
+
+  try {
+    const defaultBranch = (await github.getRepo(job.owner, job.repo)).default_branch;
+    const wrangler = await github.getRepoFileWithRefOrNull(job.owner, job.repo, 'wrangler.jsonc', defaultBranch)
+      || await github.getRepoFileWithRefOrNull(job.owner, job.repo, 'wrangler.json', defaultBranch);
+    if (!wrangler?.content) return null;
+
+    const stripped = wrangler.content.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/,(\s*[\]}])/g, '$1');
+    const name = (JSON.parse(stripped) as { name?: string }).name;
+    if (!name) return null;
+
+    const [apiToken, accountId] = await Promise.all([env.CF_API_TOKEN.get(), env.CF_ACCOUNT_ID.get()]);
+    if (!apiToken || !accountId) return null;
+
+    // Confirm the Worker is actually deployed.
+    const scriptRes = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${encodeURIComponent(name)}`,
+      { headers: { Authorization: `Bearer ${apiToken}` } },
+    );
+    if (!scriptRes.ok) return null;
+
+    const subdomain = await getWorkersSubdomain(env, accountId, apiToken);
+    if (!subdomain) return null;
+
+    return `https://${name}.${subdomain}.workers.dev`;
+  } catch (err) {
+    logger.error('resolveTestBaseUrl failed', err instanceof Error ? err : new Error(String(err)));
+    return null;
+  }
+}
+
 const TEST_TIMEOUT_MS = 20_000;
 
 /** Fill :param / {param} path placeholders from params; leftover params → query string. */
@@ -60,17 +124,18 @@ export type PrTestSummary = {
  */
 export async function runPrApiTests(
   env: Env,
+  github: GitHubService,
   job: { id: string; owner: string; repo: string; prNumber: number },
 ): Promise<PrTestSummary> {
   const summary: PrTestSummary = { ran: 0, passed: 0, failed: 0, blockedAuth: 0, skipped: 0, baseUrlMissing: false };
   const targets = (await listPendingTestTargetsForJob(env, job.id)).filter((t) => t.kind === 'api');
   if (targets.length === 0) return summary;
 
-  const cfg = await getRepoTestConfig(env, job.owner, job.repo);
-  if (!cfg.baseUrl) {
+  const baseUrl = await resolveTestBaseUrl(env, github, job);
+  if (!baseUrl) {
     summary.baseUrlMissing = true;
     for (const t of targets) {
-      await updateTestTargetResult(env, t.id, { status: 'skipped', error: 'No test base URL configured for this repo.' });
+      await updateTestTargetResult(env, t.id, { status: 'skipped', error: 'No test base URL — set one, or deploy the Worker so codra can find it via the Cloudflare API.' });
       summary.skipped++;
     }
     return summary;
@@ -82,7 +147,7 @@ export async function runPrApiTests(
 
   for (const t of targets) {
     const method = (t.method || 'GET').toUpperCase();
-    const url = buildUrl(cfg.baseUrl, t.target, (t.params as Record<string, unknown> | null) ?? null);
+    const url = buildUrl(baseUrl, t.target, (t.params as Record<string, unknown> | null) ?? null);
     summary.ran++;
     try {
       let last: Awaited<ReturnType<typeof callOnce>> | null = null;
@@ -158,7 +223,7 @@ export async function runAndReportPrTests(
   job: { id: string; owner: string; repo: string; prNumber: number },
 ): Promise<void> {
   try {
-    const summary = await runPrApiTests(env, job);
+    const summary = await runPrApiTests(env, github, job);
     if (summary.ran === 0 && !summary.baseUrlMissing) return; // nothing testable
 
     const { listTestTargetsForJob } = await import('@server/db/test-targets');
