@@ -144,6 +144,9 @@
 		"AI_GATEWAY_ID": "codra",
 	},
 	"secrets_store_secrets": [
+		{ "binding": "CLOUDFLARE_ACCOUNT_ID", "store_id": "8c42fa70938644e0a8a109744467375f", "secret_name": "CLOUDFLARE_ACCOUNT_ID" },
+		{ "binding": "OPENAI_API_KEY", "store_id": "8c42fa70938644e0a8a109744467375f", "secret_name": "OPENAI_API_KEY" },
+		{ "binding": "CLOUDFLARE_AI_GATEWAY_TOKEN", "store_id": "8c42fa70938644e0a8a109744467375f", "secret_name": "CLOUDFLARE_AI_GATEWAY_TOKEN" },
 		{
 			"binding": "CORE_GITHUB_API_GITHUB_APP_PRIVATE_KEY_PT1",
 			"store_id": "8c42fa70938644e0a8a109744467375f",
@@ -226,7 +229,7 @@
 		},
 		{
 			// Gmail comms hub (P3-07): service-account DWD. The private key exceeds
-			// the secrets-store value limit, so it is SPLIT — concatenate PT_1 + PT_2.
+			// the secrets-store value limit, so it is SPLIT â concatenate PT_1 + PT_2.
 			"binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
 			"store_id": "8c42fa70938644e0a8a109744467375f",
 			"secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
