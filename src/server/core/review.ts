@@ -127,6 +127,7 @@ export type ReviewRequest = {
   prNumber: number;
   prTitle: string | null;
   prAuthor: string | null;
+  prCreatedAt: string | null;
   commitSha: string;
   baseSha: string;
   headRef: string | null;
@@ -156,6 +157,7 @@ export function extractReviewRequest(input: {
       prNumber: payload.pull_request.number,
       prTitle: payload.pull_request.title,
       prAuthor: payload.pull_request.user.login,
+      prCreatedAt: payload.pull_request.created_at ?? null,
       commitSha: payload.pull_request.head.sha,
       baseSha: payload.pull_request.base.sha,
       headRef: payload.pull_request.head.ref,
@@ -183,6 +185,7 @@ export function extractReviewRequest(input: {
       prNumber: payload.issue.number,
       prTitle: null,
       prAuthor: null,
+      prCreatedAt: null,
       commitSha: '',
       baseSha: '',
       headRef: null,

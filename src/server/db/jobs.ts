@@ -74,6 +74,7 @@ export function mapJob(row: any) {
       prNumber: row.pr_number,
       prTitle: row.pr_title,
       prAuthor: row.pr_author,
+      prCreatedAt: row.pr_created_at ?? null,
       commitSha: bytesToHex(row.commit_sha),
       trigger: row.trigger,
       status: row.status,
@@ -119,6 +120,7 @@ export async function insertJob(
     prNumber: number;
     prTitle: string | null;
     prAuthor: string | null;
+    prCreatedAt?: string | null;
     commitSha: string;
     baseSha: string;
     trigger: 'auto' | 'mention' | 'retry' | 'sync';
@@ -140,6 +142,7 @@ export async function insertJob(
     pr_number: input.prNumber,
     pr_title: input.prTitle,
     pr_author: input.prAuthor,
+    pr_created_at: input.prCreatedAt ?? null,
     commit_sha: Array.from(hexToBytes(input.commitSha)),
     base_sha: Array.from(hexToBytes(input.baseSha)),
     trigger: input.trigger,
@@ -555,6 +558,28 @@ export async function completePreparationStep(env: Pick<Env, 'DB'>, jobId: strin
     file_count: fileCount,
     steps,
   }).where(eq(jobs.id, jobId));
+}
+
+/**
+ * Highest PR number codra already has a job for in this repo — the sync
+ * watermark. Returns null if codra has never reviewed this repo. Ignores
+ * sync-triggered jobs so a prior sync run can't inflate the watermark.
+ */
+export async function getMaxSeenPrNumber(
+  env: Pick<Env, 'DB'>,
+  input: { owner: string; repo: string },
+): Promise<number | null> {
+  const db = getDb(env);
+  const row = await db.select({ maxPr: sql<number | null>`max(${jobs.pr_number})` })
+    .from(jobs)
+    .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
+    .where(and(
+      eq(repositories.owner, input.owner),
+      eq(repositories.repo, input.repo),
+      ne(jobs.trigger, 'sync'),
+    ))
+    .get();
+  return row?.maxPr ?? null;
 }
 
 /**

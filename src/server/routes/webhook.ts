@@ -187,6 +187,7 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
           prNumber: extracted.prNumber,
           prTitle: extracted.prTitle,
           prAuthor: extracted.prAuthor,
+          prCreatedAt: extracted.prCreatedAt,
           commitSha: extracted.commitSha,
           baseSha: extracted.baseSha,
           trigger: extracted.trigger,

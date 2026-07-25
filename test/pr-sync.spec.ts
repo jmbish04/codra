@@ -11,7 +11,7 @@ describe('open-PR sync', () => {
     await seedEnabledRepo(env, { installationId: 123, owner: 'acme', repo: 'core-remodel' });
 
     vi.spyOn(GitHubClient.prototype, 'listOpenPullRequests').mockResolvedValue([
-      { number: 210, title: 'Feat X', authorLogin: 'alice', headSha: 'aa11', headRef: 'feat-x', baseSha: 'bb22', baseRef: 'main' },
+      { number: 210, title: 'Feat X', authorLogin: 'alice', headSha: 'aa11', headRef: 'feat-x', baseSha: 'bb22', baseRef: 'main', createdAt: '2026-07-24T00:00:00Z' },
     ]);
 
     const first = await syncOpenPullRequests(env);

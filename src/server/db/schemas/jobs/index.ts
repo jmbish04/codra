@@ -24,6 +24,9 @@ export const jobs = sqliteTable('jobs', {
   verdict: text('verdict'),
   pr_title: text('pr_title'),
   pr_author: text('pr_author'),
+  // When the PR was opened on GitHub (ISO 8601). Distinct from created_at,
+  // which is when codra registered the job. Used for display and the sync floor.
+  pr_created_at: text('pr_created_at'),
   head_ref: text('head_ref'),
   base_ref: text('base_ref'),
   summary_model: text('summary_model'),

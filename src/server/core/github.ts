@@ -404,6 +404,7 @@ export class GitHubClient {
         headRef: string;
         baseSha: string;
         baseRef: string;
+        createdAt: string;
       }> = [];
       let page = 1;
       // GitHub caps per_page at 100; paginate until a short page.
@@ -421,6 +422,7 @@ export class GitHubClient {
             headRef: pr.head.ref,
             baseSha: pr.base.sha,
             baseRef: pr.base.ref,
+            createdAt: pr.created_at,
           });
         }
         if (batch.length < 100) break;

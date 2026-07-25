@@ -8,6 +8,7 @@ import {
 import { StatusBadge } from '@client/components/ui/badge';
 import { Skeleton } from '@client/components/shared/skeleton';
 import { cn, fmtNumber } from '@client/lib/utils';
+import { WORKER_TIME_ZONE } from '@client/lib/format';
 
 import type { JobSummary } from '@shared/schema';
 
@@ -74,7 +75,9 @@ const SKELETON_WIDTHS: Record<Column, number | string> = {
 };
 
 function formatDate(value: JobSummary['createdAt']) {
-  return new Date(value).toLocaleString(undefined, {
+  // Worker-local timezone (America/Los_Angeles), short form.
+  return new Date(value).toLocaleString('en-US', {
+    timeZone: WORKER_TIME_ZONE,
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
@@ -189,7 +192,7 @@ function JobMobileCard({ job, columns }: { job: JobSummary; columns: Column[] })
           </div>
         )}
         {show('created') && (
-          <span>{formatRelativeDate(job.createdAt)}</span>
+          <span>{formatRelativeDate(job.prCreatedAt ?? job.createdAt)}</span>
         )}
       </div>
     </Link>
@@ -391,9 +394,9 @@ export function JobsTable({ jobs, loading, columns }: JobsTableProps) {
                         >
                           <div className="flex items-center gap-2 text-sm font-medium text-foreground/80">
                             <div>
-                              <p>{formatDate(job.createdAt)}</p>
+                              <p>{formatDate(job.prCreatedAt ?? job.createdAt)}</p>
                               <p className="text-[11px] font-normal text-muted-foreground">
-                                {formatRelativeDate(job.createdAt)}
+                                {formatRelativeDate(job.prCreatedAt ?? job.createdAt)}
                               </p>
                             </div>
                           </div>
