@@ -90,6 +90,9 @@ function shouldRetryExistingFileReview(review: { file_status: string; error_msg:
 }
 
 function countsAsHandledFileReview(review: { file_status: string; error_msg: string | null }) {
+  // A seeded 'pending' placeholder is NOT a completed review — it still needs to
+  // be reviewed. (Treating it as handled skips the file entirely.)
+  if (review.file_status === 'pending') return false;
   return !shouldRetryExistingFileReview(review);
 }
 

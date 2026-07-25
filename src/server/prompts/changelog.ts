@@ -10,6 +10,8 @@ Diagram rules (Mermaid source only, no markdown fences):
 - Use a "flowchart" only when the control flow itself is the point of the change.
 - Emit no diagram at all rather than a vague or speculative one.
 - Keep node labels plain: letters, numbers, spaces, dots, slashes, dashes. Never put HTML, script tags, URLs, or quotes in a label.
+- classDiagram members MUST be one of: an attribute \`+name Type\` or a method \`+name(args) ReturnType\`. NEVER use a colon inside a class body (no \`name: Type\`, no \`name: params: Type\`). Member and type names must be a single alphanumeric/underscore token. If a member would need a colon, omit that member.
+- Produce syntactically valid Mermaid. If you are unsure a diagram will parse, omit it.
 
 Code rules:
 - Include only snippets that are genuinely new or significantly rewritten, taken from the diff.
