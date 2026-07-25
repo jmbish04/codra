@@ -18,10 +18,6 @@ function parseEnvValue(value) {
   return trimmed.replace(/\\n/g, '\n');
 }
 
-function usableEnvValue(value) {
-  return value && value !== 'undefined' && value !== 'null' ? value : null;
-}
-
 function loadEnvFiles() {
   for (const file of envFiles) {
     try {
@@ -63,15 +59,6 @@ function run(command, args) {
 
 loadEnvFiles();
 
-if (!usableEnvValue(process.env.TEST_DATABASE_URL)) {
-  console.error([
-    'TEST_DATABASE_URL is required to run the full test suite.',
-    'Copy .env.test.example to .env.test and point TEST_DATABASE_URL at a disposable Postgres database.',
-  ].join('\n'));
-  process.exit(1);
-}
-
-process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
-
-run(process.execPath, ['scripts/migrate.mjs']);
+// DB-backed specs use an in-memory node:sqlite D1 (see test/d1-sqlite.ts), so
+// no external Postgres and no migration step is required to run the suite.
 run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run']);

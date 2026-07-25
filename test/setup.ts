@@ -5,14 +5,12 @@ import path from 'node:path';
 const TEST_ENV_FILES = ['.env.test', '.env.local', '.env', '.dev.vars', '.env.test.example'];
 const REQUIRED_TEST_ENV_KEYS = [
   'GITHUB_APP_SLUG',
-  'GITHUB_APP_WEBHOOK_SECRET',
   'GITHUB_CLIENT_ID',
   'GITHUB_CLIENT_SECRET',
   'AUTH_CALLBACK_URL',
   'APP_URL',
   'DASHBOARD_ALLOWED_USERS',
   'BOT_USERNAME',
-  'TEST_DATABASE_URL',
 ];
 
 // Global mocks for Cloudflare environment
@@ -71,14 +69,13 @@ function assertRequiredTestEnv() {
   throw new Error([
     `Missing required test environment variables: ${missing.join(', ')}.`,
     'Set these values in .env.test, .env.local, .env, .dev.vars, .env.test.example, or CI.',
-    'TEST_DATABASE_URL must point to a disposable Postgres database so the full test suite can run.',
   ].join('\n'));
 }
 
 loadTestEnvFromFiles();
 assertRequiredTestEnv();
 
-// Database-backed review flow tests can be slow on local Postgres and CI.
+// Database-backed review flow tests can be slow on CI.
 vi.setConfig({ testTimeout: 300000 });
 
 if (typeof window !== 'undefined' && !window.matchMedia) {
@@ -127,20 +124,6 @@ console.log = (...args: any[]) => {
   if (isJsonLog(args)) return;
   originalConsoleLog(...args);
 };
-// Global cleanup for database tables (Disabled temporarily to debug race conditions)
-/*
-beforeEach(async () => {
-    if (process.env.TEST_DATABASE_URL) {
-        const { getDb } = await import('@server/db/client');
-        const sql = getDb({ DB: { connectionString: process.env.TEST_DATABASE_URL } });
-        try {
-            await sql.query('DELETE FROM webhook_deliveries');
-            await sql.query('DELETE FROM file_reviews');
-            await sql.query('DELETE FROM jobs');
-            await sql.query('DELETE FROM repo_configs');
-        } catch (e) {
-            console.warn('Database cleanup failed, tables might be empty or missing:', e);
-        }
-    }
-});
-*/
+// DB-backed specs use a fresh in-memory node:sqlite D1 per createTestEnv()
+// (see test/d1-sqlite.ts), so there is no shared external database to reset
+// between tests. This app runs entirely on D1 — there is no Postgres.

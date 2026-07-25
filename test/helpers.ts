@@ -1,5 +1,9 @@
-
+import path from 'node:path';
 import { encryptLlmApiKey } from '@server/core/llm-crypto';
+import { createD1 } from './d1-sqlite';
+import { getDb } from '@server/db/client';
+import { repositories, repoConfigs } from '@server/db/schemas';
+import { sql } from 'drizzle-orm';
 
 
 export class MemoryKV {
@@ -60,24 +64,16 @@ function usableEnvValue(value: string | undefined) {
   return value && value !== 'undefined' && value !== 'null' ? value : null;
 }
 
-function requiredEnv(key: keyof NodeJS.ProcessEnv) {
-  const value = usableEnvValue(process.env[key]);
-  if (!value) {
-    throw new Error(`Missing required test environment variable: ${key}`);
-  }
-  return value;
-}
-
 function unusedEnv(key: string): string {
   throw new Error(`${key} is not required by the current test suite. Add it to the test env only when a test exercises that path.`);
 }
 
-export function getTestDatabaseUrl() {
-  return requiredEnv('TEST_DATABASE_URL');
-}
 
 export function hasConfiguredTestDatabaseUrl() {
-  return Boolean(usableEnvValue(process.env.TEST_DATABASE_URL));
+  // DB is an in-memory node:sqlite D1 provisioned per createTestEnv (Codra is
+  // D1-only — no Postgres), so a database is always available. Kept as a gate
+  // so the DB-backed specs read clearly.
+  return true;
 }
 
 export function createTestEnv(overrides: Partial<Record<keyof Env, unknown>> = {}): Env {
@@ -91,7 +87,7 @@ export function createTestEnv(overrides: Partial<Record<keyof Env, unknown>> = {
     PROMPTS_KV: new MemoryKV() as unknown as KVNamespace,
     REVIEW_QUEUE: new MockQueue() as any,
     ASSETS: new MockAssets() as any,
-    DB: {} as any,
+    DB: createD1(path.resolve(process.cwd(), 'db/migrations/d1')) as any,
     APP_PRIVATE_KEY: 'test-private-key',
     GITHUB_APP_ID: 'test-app-id',
     GITHUB_APP_SLUG: 'codra-app-personal',
@@ -119,8 +115,8 @@ export function createTestEnv(overrides: Partial<Record<keyof Env, unknown>> = {
 
 export async function saveTestProviderApiKey(env: Env, providerName = 'Google', apiKey = 'test-key') {
   const encrypted = await encryptLlmApiKey(env, apiKey);
-  const db = require('@server/db/client').getDb(env);
-  await db.run(require('drizzle-orm').sql`
+  const db = getDb(env);
+  await db.run(sql`
     UPDATE llm_providers
     SET encrypted_api_key = ${encrypted}, enabled = 1, updated_at = CURRENT_TIMESTAMP
     WHERE name = ${providerName}
@@ -147,6 +143,24 @@ ${lines.map((l) => `+${l}`).join('\n')}`;
 /**
  * Creates a mock GitHub Webhook payload for a PR opened event.
  */
+/**
+ * Seed an enabled repo (repositories + repo_configs rows) so services that
+ * enumerate enabled repos (e.g. the open-PR sync) can find it.
+ */
+export async function seedEnabledRepo(
+  env: Env,
+  input: { installationId: number; owner: string; repo: string; enabled?: boolean },
+) {
+  const db = getDb(env);
+  const [repoRow] = await db.insert(repositories)
+    .values({ installation_id: input.installationId, owner: input.owner, repo: input.repo })
+    .returning({ id: repositories.id });
+  await db.insert(repoConfigs)
+    .values({ repository_id: repoRow.id, enabled: input.enabled ?? true })
+    .returning({ id: repoConfigs.id });
+  return repoRow.id as number;
+}
+
 export function createMockPRWebhook(overrides: any = {}) {
   return {
     action: 'opened',

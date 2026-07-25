@@ -141,97 +141,6 @@ async function handleKVNamespace(baseBinding, isPreview) {
   }
 }
 
-async function handleHyperdrive(dbUrl) {
-  let currentBinding = 'codra-db';
-  
-  while (true) {
-    const spinner = ora(`Creating Hyperdrive (${currentBinding})...`).start();
-    try {
-      const { stdout } = await spawnAsync('npx', ['wrangler', 'hyperdrive', 'create', currentBinding, `--connection-string=${dbUrl}`]);
-      spinner.succeed();
-      return extractId(stdout);
-    } catch (error) {
-      const errorMsg = error.stderr || error.message;
-      if (errorMsg.includes('already exists') || errorMsg.includes('code: 2017')) {
-        spinner.warn(`Hyperdrive config "${currentBinding}" already exists.`);
-        
-        const { action } = await prompts({
-          type: 'select',
-          name: 'action',
-          message: `How would you like to handle this existing Hyperdrive?`,
-          choices: [
-            { title: 'Auto-fetch existing ID', value: 'fetch' },
-            { title: 'Manually enter ID', value: 'manual' },
-            { title: 'Create new with different name', value: 'new' },
-            { title: 'Skip', value: 'skip' }
-          ]
-        }, { onCancel: () => process.exit(1) });
-
-        if (action === 'fetch') {
-           const fetchSpinner = ora('Fetching existing Hyperdrive configs...').start();
-           try {
-             const { stdout: listOut } = await execAsync('npx wrangler hyperdrive list');
-             fetchSpinner.succeed();
-             
-             let parsed = null;
-             try {
-               const jsonStr = listOut.substring(listOut.indexOf('['), listOut.lastIndexOf(']') + 1);
-               parsed = JSON.parse(jsonStr);
-             } catch(e) {}
-
-             if (parsed && Array.isArray(parsed)) {
-                const found = parsed.find(hd => hd.name === currentBinding);
-                if (found) {
-                  console.log(chalk.green(`  ✅ Found existing ID: ${found.id}`));
-                  return found.id;
-                }
-             } else {
-                const lines = listOut.split('\n');
-                for (const line of lines) {
-                  if (line.includes(currentBinding)) {
-                    const match = line.match(/[a-f0-9]{32}/);
-                    if (match) {
-                      console.log(chalk.green(`  ✅ Found existing ID: ${match[0]}`));
-                      return match[0];
-                    }
-                  }
-                }
-             }
-             
-             console.log(chalk.yellow(`  ⚠️ Could not automatically find an ID matching ${currentBinding}.`));
-             const { manualId } = await prompts({ type: 'text', name: 'manualId', message: 'Enter the Hyperdrive ID manually:'}, { onCancel: () => process.exit(1) });
-             if (manualId) return manualId;
-             return null;
-           } catch(e) {
-             fetchSpinner.fail('Failed to fetch Hyperdrive configs.');
-             const { manualId } = await prompts({ type: 'text', name: 'manualId', message: 'Enter the Hyperdrive ID manually:'}, { onCancel: () => process.exit(1) });
-             if (manualId) return manualId;
-             return null;
-           }
-        } else if (action === 'manual') {
-          const { manualId } = await prompts({ type: 'text', name: 'manualId', message: 'Enter the Hyperdrive ID:'}, { onCancel: () => process.exit(1) });
-          if (manualId) return manualId;
-          return null;
-        } else if (action === 'new') {
-          const { newName } = await prompts({ type: 'text', name: 'newName', message: 'Enter a new Hyperdrive name (e.g. codra-db-2):', initial: `${currentBinding}-2`}, { onCancel: () => process.exit(1) });
-          if (newName) {
-            currentBinding = newName;
-            continue;
-          }
-          return null;
-        } else {
-          return null;
-        }
-      } else {
-        spinner.fail();
-        console.error(chalk.red(`\n❌ Error executing Hyperdrive creation.`));
-        console.error(chalk.red(errorMsg));
-        process.exit(1);
-      }
-    }
-  }
-}
-
 function getEnvVars() {
   const env = {};
   if (fs.existsSync(DEV_VARS_PATH)) {
@@ -348,29 +257,6 @@ async function main() {
   }
   console.log('');
 
-  // 4. Hyperdrive
-  console.log(chalk.cyan.bold('🗄️  Hyperdrive'));
-  console.log(chalk.gray(`  (Using default from .dev.vars if available)`));
-  const { dbUrl } = await prompts({
-    type: 'text',
-    name: 'dbUrl',
-    message: 'Enter your Database Connection String for Hyperdrive:',
-    initial: env.DATABASE_URL || 'postgres://user:password@hostname:5432/codra'
-  }, {
-    onCancel: () => {
-      console.log(chalk.red('\n🛑 Setup aborted.'));
-      process.exit(1);
-    }
-  });
-
-  if (!dbUrl) {
-    console.log(chalk.red('❌ Database URL is required for Hyperdrive. Exiting.'));
-    process.exit(1);
-  }
-
-  const hyperdriveId = await handleHyperdrive(dbUrl);
-  console.log('');
-
   // 5. Domain Configuration
   console.log(chalk.cyan.bold('🌐 Domain Configuration'));
   const { domainChoice } = await prompts({
@@ -473,13 +359,6 @@ async function main() {
     configChanged = true;
   }
 
-  if (hyperdriveId) {
-    wranglerConfig = wranglerConfig.replace(
-      /"binding":\s*"HYPERDRIVE",\s*"id":\s*"[^"]+"/,
-      `"binding": "HYPERDRIVE",${os.EOL}      "id": "${hyperdriveId}"`
-    );
-    configChanged = true;
-  }
 
   if (dlqQueueId) {
     wranglerConfig = wranglerConfig.replace(
