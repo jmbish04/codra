@@ -4,6 +4,7 @@ import { reviewJobMessageSchema } from '@shared/schema';
 import { logger } from '@server/core/logger';
 
 import { runBestEffortJobMaintenance } from '@server/core/job-recovery';
+import { notifyJobsChanged } from '@server/core/jobs-feed';
 
 const app = createApp();
 
@@ -33,6 +34,8 @@ export default {
 
         try {
           const result = await runReviewJob(env, parseResult.data);
+          // Notify the realtime jobs dashboard that this job may have changed.
+          _ctx.waitUntil(notifyJobsChanged(env, { jobId: (parseResult.data as any).jobId }));
           if (result.action === 'retry') {
             message.retry({ delaySeconds: result.delaySeconds });
           } else {
@@ -65,3 +68,4 @@ export { RepoAgent } from './agents/repo';
 export { ReviewAgent } from './agents/review';
 export { Chat, GitHubLikeMCP } from './agents/orchestrator';
 export { PrReviewStream } from './agents/pr-stream';
+export { JobsFeed } from './agents/jobs-feed';

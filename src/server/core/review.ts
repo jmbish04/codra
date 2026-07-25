@@ -3,7 +3,7 @@ import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHub
 import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview } from '@server/db/file-reviews';
 import { getResolvedModelConfig } from '@server/db/model-configs';
-import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
+import { cancelJob, claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findActiveJobsForPr, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
 import { parseFileReviewResponse } from './model-output';
 import { filterReviewableFiles, parseUnifiedDiff } from './diff';
 
@@ -17,6 +17,12 @@ import { getWebhookDelivery } from '@server/db/webhook-deliveries';
 import { buildChangelogSlug, upsertChangelogEntry } from '@server/db/changelog';
 import { getOrCreateRepository } from '@server/db/repositories';
 import { buildChangelogPrompt, CHANGELOG_SYSTEM_PROMPT } from '@server/prompts/changelog';
+import { listEnabledStandardizationRules, type StandardizationStrategy } from '@server/db/standardization';
+import { applyStrategy, fetchSourceContent } from '@server/core/standardization';
+import { recordAgentAction } from '@server/db/agent-actions';
+import { listEnabledStandardSecretBindings, recordMissingSecret } from '@server/db/secret-bindings';
+import { notifyJobsChanged } from '@server/core/jobs-feed';
+import { listSecretsStoreSecrets, ensureSecretBindings, type SecretBindingSpec } from '@server/core/secrets-store';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
 
@@ -125,6 +131,7 @@ export type ReviewRequest = {
   prNumber: number;
   prTitle: string | null;
   prAuthor: string | null;
+  prCreatedAt: string | null;
   commitSha: string;
   baseSha: string;
   headRef: string | null;
@@ -154,6 +161,7 @@ export function extractReviewRequest(input: {
       prNumber: payload.pull_request.number,
       prTitle: payload.pull_request.title,
       prAuthor: payload.pull_request.user.login,
+      prCreatedAt: payload.pull_request.created_at ?? null,
       commitSha: payload.pull_request.head.sha,
       baseSha: payload.pull_request.base.sha,
       headRef: payload.pull_request.head.ref,
@@ -181,6 +189,7 @@ export function extractReviewRequest(input: {
       prNumber: payload.issue.number,
       prTitle: null,
       prAuthor: null,
+      prCreatedAt: null,
       commitSha: '',
       baseSha: '',
       headRef: null,
@@ -407,6 +416,16 @@ async function runPreparePhase(
   await checkSuperseded(env, job.id);
   await updateJobStep(env, job.id, 'Preparation', { status: 'running' });
   const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
+
+  // The PR may have been merged/closed while this job sat in the queue. Don't
+  // review a closed PR — cancel and stop.
+  if (pr.state && pr.state !== 'open') {
+    await cancelReviewsForClosedPr(env, github, { owner: job.owner, repo: job.repo, prNumber: job.prNumber }, pr.merged ? 'merged' : 'closed');
+    // Cancelled → status is 'superseded'; reuse the supersede signal so the
+    // queue consumer acks without retrying.
+    throw new Error('JOB_SUPERSEDED');
+  }
+
   const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
 
   let checkRunId = job.checkRunId;
@@ -425,7 +444,8 @@ async function runPreparePhase(
   // Post a status comment to the PR so the team knows Codra is active
   if (!job.statusCommentId) {
     try {
-      const statusBody = `## \u{1F50D} Code Review\n\nCodra is reviewing this pull request. A summary will be posted here when the review is complete.`;
+      const monitorLink = env.APP_URL ? `\n\n<a href="${env.APP_URL}/jobs/${job.id}" target="_blank" rel="noopener noreferrer">👉 Click here to monitor progress</a>` : '';
+      const statusBody = `## \u{1F50D} Code Review\n\nCodra is reviewing this pull request. A summary will be posted here when the review is complete.${monitorLink}`;
       const comment = await github.createIssueComment(job.owner, job.repo, job.prNumber, statusBody);
       await updateJobStatusComment(env, job.id, comment.id);
     } catch (err) {
@@ -1315,56 +1335,44 @@ async function failJobAndCheckRun(
   }
 }
 
-async function fetchReferenceSettings(env: Env): Promise<string> {
-  const repo = (env as any).STANDARDIZATION_REPO || 'jmbish04/core-github-standardization';
-  const url = `https://raw.githubusercontent.com/${repo}/main/.vscode/settings.json`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch reference VS Code settings from ${url}: ${res.statusText}`);
+/** Minimal commenting surface shared by GitHubService and GitHubClient. */
+type IssueCommenter = { createIssueComment(owner: string, repo: string, issueNumber: number, body: string): Promise<unknown> };
+
+/**
+ * Cancel any active (queued/running) codra review for a PR that is no longer
+ * open, and leave a comment on the PR explaining it, with a link to the job.
+ * Returns the number of reviews cancelled.
+ */
+export async function cancelReviewsForClosedPr(
+  env: Env,
+  gh: IssueCommenter,
+  input: { owner: string; repo: string; prNumber: number },
+  closedState: 'merged' | 'closed',
+): Promise<number> {
+  const active = await findActiveJobsForPr(env, input);
+  if (active.length === 0) return 0;
+
+  for (const job of active) {
+    await cancelJob(env, job.id, `Cancelled: PR #${input.prNumber} was ${closedState} before the review finished.`);
   }
-  return res.text();
-}
 
-function cleanJsonc(content: string): string {
-  return content
-    // Remove single line comments
-    .replace(/\/\/.*$/gm, '')
-    // Remove multi-line comments
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    // Remove trailing commas
-    .replace(/,(\s*[\]}])/g, '$1')
-    .trim();
-}
-
-function mergeSettings(existingStr: string, referenceStr: string): { mergedContent: string; changed: boolean } {
   try {
-    const existingClean = cleanJsonc(existingStr);
-    const referenceClean = cleanJsonc(referenceStr);
-    
-    const existing = JSON.parse(existingClean);
-    const reference = JSON.parse(referenceClean);
-    
-    let changed = false;
-    const merged = { ...existing };
-    
-    for (const [key, value] of Object.entries(reference)) {
-      if (JSON.stringify(existing[key]) !== JSON.stringify(value)) {
-        merged[key] = value;
-        changed = true;
-      }
-    }
-    
-    return {
-      mergedContent: JSON.stringify(merged, null, 2),
-      changed,
-    };
-  } catch {
-    // If parsing fails (e.g. invalid existing JSON), we overwrite with reference settings
-    return {
-      mergedContent: referenceStr,
-      changed: true,
-    };
+    const jobId = active[0].id;
+    const link = env.APP_URL ? ` <a href="${env.APP_URL}/jobs/${jobId}" target="_blank" rel="noopener noreferrer">View the cancelled job</a>.` : '';
+    const verb = closedState === 'merged' ? 'merged' : 'closed';
+    await gh.createIssueComment(
+      input.owner,
+      input.repo,
+      input.prNumber,
+      `## 🔍 Code Review\n\nCodra cancelled its in-progress review because this pull request was **${verb}** before the review completed.${link}`,
+    );
+  } catch (err) {
+    logger.error('Failed to post review-cancellation comment', err);
   }
+
+  await notifyJobsChanged(env, { prNumber: input.prNumber, owner: input.owner, repo: input.repo, status: 'superseded' }).catch(() => {});
+  logger.info(`Cancelled ${active.length} review(s) for ${input.owner}/${input.repo}#${input.prNumber} (${closedState})`);
+  return active.length;
 }
 
 type HousekeepingChange = {
@@ -1386,35 +1394,76 @@ async function standardizeRepository(
   const defaultBranch = (await github.getRepo(job.owner, job.repo)).default_branch;
   const changes: HousekeepingChange[] = [];
 
-  // 1. VS Code settings check (against default branch, not the PR branch)
+  // 1. Config-driven standardization file rules — Cloudflare Worker repos only.
+  // Each rule points at a reference file (GitHub URL) and a merge strategy; any
+  // missing/drifted files become changes in the separate follow-up PR below.
   try {
-    const referenceSettingsText = await fetchReferenceSettings(env);
-    const existingFile = (await github.getRepoFileWithRefOrNull(job.owner, job.repo, '.vscode/settings.jsonc', defaultBranch))
-      || (await github.getRepoFileWithRefOrNull(job.owner, job.repo, '.vscode/settings.json', defaultBranch));
+    const wranglerFile =
+      (await github.getRepoFileWithRefOrNull(job.owner, job.repo, 'wrangler.jsonc', defaultBranch)) ||
+      (await github.getRepoFileWithRefOrNull(job.owner, job.repo, 'wrangler.toml', defaultBranch)) ||
+      (await github.getRepoFileWithRefOrNull(job.owner, job.repo, 'wrangler.json', defaultBranch));
 
-    if (!existingFile) {
-      changes.push({
-        path: '.vscode/settings.jsonc',
-        content: referenceSettingsText,
-        message: 'chore: add standardized VS Code settings',
-      });
-    } else {
-      const { mergedContent, changed } = mergeSettings(existingFile.content || '', referenceSettingsText);
-      if (changed) {
-        const fileToUpdate = (await github.getRepoFileWithRefOrNull(job.owner, job.repo, '.vscode/settings.jsonc', defaultBranch))
-          ? '.vscode/settings.jsonc'
-          : '.vscode/settings.json';
-        const fileInfo = await github.getRepoFileWithRefOrNull(job.owner, job.repo, fileToUpdate, defaultBranch);
-        changes.push({
-          path: fileToUpdate,
-          content: mergedContent,
-          message: 'chore: update VS Code settings with standardized keys',
-          existingSha: fileInfo?.sha,
-        });
+    if (wranglerFile) {
+      const rules = await listEnabledStandardizationRules(env);
+      for (const rule of rules) {
+        try {
+          const source = await fetchSourceContent(rule.source_url);
+          const existing = await github.getRepoFileWithRefOrNull(job.owner, job.repo, rule.target_path, defaultBranch);
+          const change = applyStrategy(
+            rule.strategy as StandardizationStrategy,
+            rule.target_path,
+            existing ? { content: existing.content || '', sha: existing.sha } : null,
+            source,
+          );
+          if (change) changes.push(change);
+        } catch (err) {
+          logger.error(`Standardization rule failed for ${rule.target_path}`, err);
+        }
       }
+
+      // Ensure the standard secret-store bindings exist in wrangler.jsonc.
+      // Verify each secret still exists in its store first; skip + record any
+      // that no longer exist so they can be reviewed in the dashboard.
+      try {
+        const stdBindings = await listEnabledStandardSecretBindings(env);
+        const wranglerJsonc = await github.getRepoFileWithRefOrNull(job.owner, job.repo, 'wrangler.jsonc', defaultBranch);
+        if (stdBindings.length > 0 && wranglerJsonc?.content) {
+          const storeIds = [...new Set(stdBindings.map((b) => b.store_id))];
+          const liveByStore = new Map<string, Set<string>>();
+          for (const storeId of storeIds) {
+            const secrets = await listSecretsStoreSecrets(env, storeId);
+            liveByStore.set(storeId, new Set(secrets.map((s) => s.name)));
+          }
+
+          const present: SecretBindingSpec[] = [];
+          for (const b of stdBindings) {
+            if (liveByStore.get(b.store_id)?.has(b.secret_name)) {
+              present.push({ binding: b.binding_name, secret_name: b.secret_name, store_id: b.store_id });
+            } else {
+              await recordMissingSecret(env, {
+                owner: job.owner, repo: job.repo, secretName: b.secret_name, storeId: b.store_id, triggeringPrNumber: job.prNumber,
+              }).catch((e) => logger.error('Failed to record missing secret', e));
+            }
+          }
+
+          const result = ensureSecretBindings(wranglerJsonc.content, present);
+          if (result) {
+            changes.push({
+              path: 'wrangler.jsonc',
+              content: result.content,
+              message: 'chore: add standard secret store bindings',
+              existingSha: wranglerJsonc.sha,
+            });
+          }
+        }
+      } catch (err) {
+        logger.error('Failed to evaluate secret store bindings', err);
+      }
+    } else {
+      logger.info(`Skipping standardization file rules for ${job.owner}/${job.repo}: not a Cloudflare Worker repo`);
     }
   } catch (err) {
-    logger.error('Failed to evaluate VS Code settings', err);
+    logger.error('Failed to evaluate standardization rules', err);
   }
 
   // 2. AGENTS.md check (against default branch)
@@ -1553,6 +1602,23 @@ Maintain the existing structure but improve details. DO NOT write any conversati
       base: defaultBranch,
     });
     logger.info(`Opened housekeeping PR #${housekeepingPR.number} (${housekeepingPR.html_url}) for ${job.owner}/${job.repo}`);
+
+    // Record the action + reasoning so it is auditable in the dashboard.
+    try {
+      await recordAgentAction(env, {
+        owner: job.owner,
+        repo: job.repo,
+        actionType: 'standardization',
+        summary: `Opened a standardization PR while reviewing PR #${job.prNumber}. Missing or drifted files detected on the default branch:\n${changedFiles}`,
+        files: changes.map((c) => c.path),
+        prNumber: housekeepingPR.number,
+        prUrl: housekeepingPR.html_url,
+        triggeringPrNumber: job.prNumber,
+        triggeringJobId: job.id,
+      });
+    } catch (err) {
+      logger.error('Failed to record standardization action', err);
+    }
   } catch (err) {
     logger.error('Failed to open housekeeping PR', err);
   }

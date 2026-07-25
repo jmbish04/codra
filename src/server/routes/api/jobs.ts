@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { defaultRepoConfig, jobsQuerySchema } from '@shared/schema';
+import { notifyJobsChanged } from '@server/core/jobs-feed';
 import type { AppEnv } from '@server/env';
 import { bytesToHex, getJobDetail, getJobForProcessing, insertJob, listJobs, mapJob, supersedeOlderJobs, forceRestartJob } from '@server/db/jobs';
 import { jsonError } from '@server/core/http';
@@ -21,6 +22,18 @@ function getExecutionContext(c: Context<AppEnv>) {
 
 export function createJobsRouter() {
   const app = new Hono<AppEnv>();
+
+  // Real-time jobs feed. Clients open a WebSocket here; the JobsFeed Durable
+  // Object broadcasts a message whenever any job is created or changes status.
+  app.get('/stream', async (c) => {
+    if (c.req.header('upgrade') !== 'websocket') {
+      return jsonError('Expected a WebSocket upgrade.', 426);
+    }
+    const stub = c.env.JobsFeed.get(c.env.JobsFeed.idFromName('global'));
+    // Forward the original request (with its WebSocket handshake headers) to the
+    // DO's /ws path so the upgrade completes end to end.
+    return stub.fetch(new Request('http://jobs-feed/ws', c.req.raw));
+  });
 
   app.get('/', async (c) => {
     scheduleBestEffortJobMaintenance(c.env, getExecutionContext(c));
@@ -110,6 +123,7 @@ export function createJobsRouter() {
       requestId: c.get('requestId'),
     });
 
+    c.executionCtx.waitUntil(notifyJobsChanged(c.env, { jobId: job.id, status: 'queued' }));
     return c.json({ job }, 202);
   });
 
@@ -128,6 +142,7 @@ export function createJobsRouter() {
       requestId: c.get('requestId'),
     });
 
+    c.executionCtx.waitUntil(notifyJobsChanged(c.env, { jobId, status: 'queued' }));
     const job = await getJobDetail(c.env, jobId);
     return c.json({ job }, 200);
   });

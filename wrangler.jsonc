@@ -51,6 +51,10 @@
 				"name": "PrReviewStream",
 				"class_name": "PrReviewStream"
 			},
+			{
+				"name": "JobsFeed",
+				"class_name": "JobsFeed"
+			},
 		],
 	},
 	"migrations": [
@@ -67,6 +71,12 @@
 			"tag": "v2",
 			"new_sqlite_classes": [
 				"PrReviewStream"
+			],
+		},
+		{
+			"tag": "v3",
+			"new_sqlite_classes": [
+				"JobsFeed"
 			],
 		},
 	],
@@ -118,8 +128,7 @@
 			"LLM_CONFIG_ENCRYPTION_KEY",
 			"GITHUB_CLIENT_ID",
 			"GITHUB_CLIENT_SECRET",
-			"GITHUB_APP_ID",
-			"GITHUB_WEBHOOK_SECRET"
+			"GITHUB_APP_ID"
 		],
 	},
 	"vars": {

@@ -74,6 +74,7 @@ export function mapJob(row: any) {
       prNumber: row.pr_number,
       prTitle: row.pr_title,
       prAuthor: row.pr_author,
+      prCreatedAt: row.pr_created_at ?? null,
       commitSha: bytesToHex(row.commit_sha),
       trigger: row.trigger,
       status: row.status,
@@ -119,9 +120,10 @@ export async function insertJob(
     prNumber: number;
     prTitle: string | null;
     prAuthor: string | null;
+    prCreatedAt?: string | null;
     commitSha: string;
     baseSha: string;
-    trigger: 'auto' | 'mention' | 'retry';
+    trigger: 'auto' | 'mention' | 'retry' | 'sync';
     headRef: string | null;
     baseRef: string | null;
     configSnapshot?: RepoConfig | null;
@@ -140,6 +142,7 @@ export async function insertJob(
     pr_number: input.prNumber,
     pr_title: input.prTitle,
     pr_author: input.prAuthor,
+    pr_created_at: input.prCreatedAt ?? null,
     commit_sha: Array.from(hexToBytes(input.commitSha)),
     base_sha: Array.from(hexToBytes(input.baseSha)),
     trigger: input.trigger,
@@ -554,6 +557,85 @@ export async function completePreparationStep(env: Pick<Env, 'DB'>, jobId: strin
   await db.update(jobs).set({
     file_count: fileCount,
     steps,
+  }).where(eq(jobs.id, jobId));
+}
+
+/**
+ * Highest PR number codra already has a job for in this repo — the sync
+ * watermark. Returns null if codra has never reviewed this repo. Ignores
+ * sync-triggered jobs so a prior sync run can't inflate the watermark.
+ */
+export async function getMaxSeenPrNumber(
+  env: Pick<Env, 'DB'>,
+  input: { owner: string; repo: string },
+): Promise<number | null> {
+  const db = getDb(env);
+  const row = await db.select({ maxPr: sql<number | null>`max(${jobs.pr_number})` })
+    .from(jobs)
+    .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
+    .where(and(
+      eq(repositories.owner, input.owner),
+      eq(repositories.repo, input.repo),
+      ne(jobs.trigger, 'sync'),
+    ))
+    .get();
+  return row?.maxPr ?? null;
+}
+
+/**
+ * Trigger-agnostic head check: is there ANY job for this PR at this exact head
+ * commit, regardless of how it was triggered? Used by the open-PR sync so it
+ * does not re-enqueue a PR head that a webhook already produced a job for.
+ */
+export async function findAnyJobForHead(
+  env: Pick<Env, 'DB'>,
+  input: { owner: string; repo: string; prNumber: number; commitSha: string },
+) {
+  const db = getDb(env);
+  const res = await db.select({ id: jobs.id })
+    .from(jobs)
+    .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
+    .where(and(
+      eq(repositories.owner, input.owner),
+      eq(repositories.repo, input.repo),
+      eq(jobs.pr_number, input.prNumber),
+      eq(jobs.commit_sha, Array.from(hexToBytes(input.commitSha))),
+    ))
+    .orderBy(desc(jobs.created_at))
+    .limit(1)
+    .get();
+  return res ?? null;
+}
+
+/** Active (queued or running) jobs for a PR — the ones a PR close should cancel. */
+export async function findActiveJobsForPr(
+  env: Pick<Env, 'DB'>,
+  input: { owner: string; repo: string; prNumber: number },
+) {
+  const db = getDb(env);
+  const rows = await db.select({ id: jobs.id, status: jobs.status })
+    .from(jobs)
+    .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
+    .where(and(
+      eq(repositories.owner, input.owner),
+      eq(repositories.repo, input.repo),
+      eq(jobs.pr_number, input.prNumber),
+      inArray(jobs.status, ['queued', 'running']),
+    ))
+    .orderBy(desc(jobs.created_at))
+    .all();
+  return rows;
+}
+
+/** Cancel a job (terminal 'superseded' status) with a reason — used when a PR closes. */
+export async function cancelJob(env: Pick<Env, 'DB'>, jobId: string, reason: string) {
+  const db = getDb(env);
+  await db.update(jobs).set({
+    status: 'superseded',
+    finished_at: sql`CURRENT_TIMESTAMP`,
+    lease_owner: null,
+    lease_expires_at: null,
+    error_msg: reason,
   }).where(eq(jobs.id, jobId));
 }
 

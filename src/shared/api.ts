@@ -74,3 +74,109 @@ export type ModelConfigsResponse = {
   configs: import('./schema').ModelConfig[];
   syncErrors?: Array<{ providerId: string; providerName: string; error: string }>;
 };
+
+export type WebhookDeliverySummary = {
+  id: string;
+  received_at: string;
+  event_name: string;
+  outcome: string;
+  action: string | null;
+  pr_number: number | null;
+  job_id: string | null;
+  error: string | null;
+  owner: string | null;
+  repo: string | null;
+};
+
+export type WebhookDeliveriesResponse = {
+  items: WebhookDeliverySummary[];
+  total: number;
+};
+
+export type WebhookDeliveryDetailResponse = {
+  delivery: WebhookDeliverySummary & { payload: unknown };
+};
+
+export type PrSyncRepoStat = {
+  owner: string;
+  repo: string;
+  openPrs: number;
+  enqueued: number;
+  skipped: number;
+  errors: number;
+};
+
+export type PrSyncResponse = {
+  ok: boolean;
+  repos: PrSyncRepoStat[];
+  totalEnqueued: number;
+};
+
+export type StandardizationStrategy = 'create_if_missing' | 'merge_json' | 'merge_mcp_servers' | 'overwrite';
+
+export type StandardizationRule = {
+  id: string;
+  target_path: string;
+  source_url: string;
+  strategy: StandardizationStrategy;
+  enabled: boolean;
+  sort_order: number;
+  updated_at: string;
+};
+
+export type StandardizationRulesResponse = {
+  rules: StandardizationRule[];
+};
+
+export type StandardizationRuleResponse = {
+  rule: StandardizationRule;
+};
+
+export type AgentAction = {
+  id: string;
+  created_at: string;
+  owner: string;
+  repo: string;
+  action_type: string;
+  summary: string;
+  files: string[];
+  pr_number: number | null;
+  pr_url: string | null;
+  triggering_pr_number: number | null;
+  triggering_job_id: string | null;
+};
+
+export type AgentActionsResponse = {
+  actions: AgentAction[];
+};
+
+export type SecretsStoreSecretInfo = { name: string; comment: string | null };
+export type AvailableSecretsResponse = { store_id: string; secrets: SecretsStoreSecretInfo[] };
+
+export type StandardSecretBinding = {
+  id: string;
+  binding_name: string;
+  secret_name: string;
+  store_id: string;
+  description: string | null;
+  enabled: boolean;
+  updated_at: string;
+};
+export type StandardSecretBindingsResponse = { bindings: StandardSecretBinding[] };
+
+export type MissingSecretReport = {
+  id: string;
+  created_at: string;
+  owner: string;
+  repo: string;
+  secret_name: string;
+  store_id: string;
+  triggering_pr_number: number | null;
+  resolved: boolean;
+};
+export type MissingSecretReportsResponse = { reports: MissingSecretReport[] };
+
+export type WebhookOutcomeStat = { outcome: string; count: number };
+export type WebhookStatsResponse = { stats: WebhookOutcomeStat[] };
+export type WebhookRepoRef = { owner: string; repo: string };
+export type WebhookReposResponse = { repos: WebhookRepoRef[] };

@@ -48,7 +48,7 @@ Codra listens to GitHub pull request events, runs AI-powered review jobs, posts 
 - Queue-backed processing through Cloudflare Queues
 - Dead letter queue inspection, replay, and purge workflows
 - GitHub OAuth dashboard authentication
-- External PostgreSQL storage through Cloudflare Hyperdrive
+- Durable storage on Cloudflare D1 (SQLite)
 - Dashboard-managed LLM providers for OpenAI, OpenRouter, Anthropic, Google, and Cloudflare models
 - Repository settings for labels, skipped globs, custom rules, and model routing
 
@@ -56,7 +56,7 @@ Codra listens to GitHub pull request events, runs AI-powered review jobs, posts 
 
 1. GitHub sends Codra a pull request webhook.
 2. Codra verifies the signature and loads repository review settings.
-3. A review job is stored in PostgreSQL and queued on Cloudflare Queues.
+3. A review job is stored in Cloudflare D1 and queued on Cloudflare Queues.
 4. The Worker consumes the job, fetches the PR diff, runs model review passes, and formats findings.
 5. Codra posts inline comments and a summary review back to GitHub.
 6. The dashboard keeps the job history, findings, logs, stats, and replay tools available for operators.
@@ -65,7 +65,7 @@ Codra listens to GitHub pull request events, runs AI-powered review jobs, posts 
 
 - **Worker**: Cloudflare Workers, Hono, Wrangler
 - **Dashboard**: React, Vite, Tailwind CSS, Radix UI, Recharts
-- **Data**: PostgreSQL, Cloudflare Hyperdrive, Cloudflare KV
+- **Data**: Cloudflare D1 (SQLite), Cloudflare KV
 - **Queues**: Cloudflare Queues with DLQ workflows
 - **Models**: OpenAI, OpenRouter, Anthropic, Google, and Cloudflare providers
 - **GitHub**: GitHub App webhooks, checks, reviews, and OAuth

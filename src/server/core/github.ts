@@ -81,6 +81,8 @@ type PullRequestRecord = {
   title: string | null;
   body: string | null;
   draft: boolean;
+  state?: 'open' | 'closed';
+  merged?: boolean;
   head: { sha: string; ref: string };
   base: { sha: string; ref: string };
   user: { login: string };
@@ -391,6 +393,44 @@ export class GitHubClient {
     return withRetry(`getPullRequest ${owner}/${repo}#${pullNumber}`, async () => {
       const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/pulls/${pullNumber}`);
       return (await response.json()) as PullRequestRecord;
+    });
+  }
+
+  async listOpenPullRequests(owner: string, repo: string) {
+    return withRetry(`listOpenPullRequests ${owner}/${repo}`, async () => {
+      const out: Array<{
+        number: number;
+        title: string;
+        authorLogin: string | null;
+        headSha: string;
+        headRef: string;
+        baseSha: string;
+        baseRef: string;
+        createdAt: string;
+      }> = [];
+      let page = 1;
+      // GitHub caps per_page at 100; paginate until a short page.
+      for (;;) {
+        const response = await this.requestAndCheck(
+          `${repoApiPath(owner, repo)}/pulls?state=open&per_page=100&page=${page}`,
+        );
+        const batch = (await response.json()) as any[];
+        for (const pr of batch) {
+          out.push({
+            number: pr.number,
+            title: pr.title,
+            authorLogin: pr.user?.login ?? null,
+            headSha: pr.head.sha,
+            headRef: pr.head.ref,
+            baseSha: pr.base.sha,
+            baseRef: pr.base.ref,
+            createdAt: pr.created_at,
+          });
+        }
+        if (batch.length < 100) break;
+        page += 1;
+      }
+      return out;
     });
   }
 

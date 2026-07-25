@@ -2,9 +2,6 @@
 # Copy this file to .dev.vars for local development.
 # Keep real secrets only in .dev.vars or your deployment secret store.
 
-# --- Integration tests ---
-TEST_DATABASE_URL="postgresql://user:password@localhost:5432/codra"
-
 # --- LLM provider config encryption ---
 LLM_CONFIG_ENCRYPTION_KEY="REPLACE_WITH_A_LONG_RANDOM_ENCRYPTION_KEY"
 
@@ -26,6 +23,7 @@ APP_URL="http://localhost:8787"
 AUTH_CALLBACK_URL="http://localhost:8787/auth/github/callback"
 ENVIRONMENT="development"
 
-# --- Database connections ---
-DATABASE_URL="postgresql://user:password@localhost:5432/codra_dev"
-CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="postgresql://user:password@localhost:5432/codra_dev"
+# --- Database ---
+# Codra stores all data in Cloudflare D1 (the `DB` binding in wrangler.jsonc).
+# There is no Postgres/Hyperdrive connection string to configure. Apply
+# migrations with `npm run migrate:local` / `npm run migrate:remote`.

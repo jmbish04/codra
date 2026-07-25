@@ -8,6 +8,7 @@ import { Select } from '@client/components/ui/select';
 import { Alert } from '@client/components/ui/alert';
 import { PageHeader } from '@client/components/layout/page-header';
 import { usePolling } from '@client/hooks/use-polling';
+import { useJobsFeed } from '@client/hooks/use-jobs-feed';
 import { Inbox, ChevronLeft, ChevronRight, RefreshCw, AlertTriangle, RotateCcw, Trash2, Info } from 'lucide-react';
 import type { JobSummary } from '@shared/schema';
 import type { DlqMessage } from '@shared/api';
@@ -82,7 +83,9 @@ export function JobsPage() {
     }
   };
 
-  usePolling(load, 15_000, [filters]);
+  // Slow poll as a safety net; the WebSocket feed drives real-time refreshes.
+  usePolling(load, 60_000, [filters]);
+  const live = useJobsFeed(() => load());
 
   const totalPages = Math.ceil(total / limit);
 
@@ -95,7 +98,14 @@ export function JobsPage() {
         title="Review history"
         description={!loading && `${total.toLocaleString()} ${total === 1 ? 'review job' : 'review jobs'}`}
         actions={
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider border ${live ? 'bg-success/15 text-success border-success/20' : 'bg-secondary text-muted-foreground border-border'}`}
+              title={live ? 'Live updates connected' : 'Reconnecting…'}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${live ? 'bg-success animate-pulse' : 'bg-muted-foreground'}`} />
+              {live ? 'Live' : 'Offline'}
+            </span>
             {dlqMessages.length > 0 && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-warning/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-warning border border-warning/20">
                 <AlertTriangle size={10} />

@@ -73,7 +73,11 @@ function extractMessageContent(content: unknown): string | null {
   return null;
 }
 
-export function extractCloudflareText(result: unknown, model: string): string {
+export function extractCloudflareText(
+  result: unknown,
+  model: string,
+  opts: { throwOnNoContent?: boolean } = {},
+): string {
   if (isText(result)) return result.trim();
   const response = getText(result, 'response');
   if (response) return response;
@@ -90,15 +94,21 @@ export function extractCloudflareText(result: unknown, model: string): string {
 
   const finishReason = isRecord(choice) ? choice.finish_reason ?? choice.stop_reason : null;
   const reasoning = isText(message?.reasoning) ? message.reasoning : isText(message?.reasoning_content) ? message.reasoning_content : null;
-  if (reasoning) {
-    return synthesizeInconclusiveReview(model, `reasoning-only response${finishReason ? `, finish_reason=${String(finishReason)}` : ''}`);
+  const reason = reasoning
+    ? `reasoning-only response${finishReason ? `, finish_reason=${String(finishReason)}` : ''}`
+    : finishReason
+      ? `finish_reason=${String(finishReason)}`
+      : 'empty response';
+
+  // On the sync review path we'd rather fall back to another provider (e.g.
+  // Gemini) than accept an inconclusive review. Throw a retryable error so the
+  // model service moves to the next model in the chain. The batch path keeps
+  // synthesizing (it can't fall back per-file mid-batch).
+  if (opts.throwOnNoContent) {
+    throw new ProviderRequestError(model, 502, `returned no parseable review content (${reason})`, true);
   }
 
-  if (finishReason) {
-    return synthesizeInconclusiveReview(model, `finish_reason=${String(finishReason)}`);
-  }
-
-  return synthesizeInconclusiveReview(model, 'empty response');
+  return synthesizeInconclusiveReview(model, reason);
 }
 
 export function extractCloudflareUsage(result: unknown) {
@@ -179,7 +189,9 @@ export async function reviewWithCloudflare(
       const durationMs = Date.now() - startTime;
       logger.info(`AI model ${model} responded in ${durationMs}ms`);
 
-      const rawText = extractCloudflareText(result, model);
+      // Throw (→ fall back to the next model, e.g. Gemini) rather than accept a
+      // reasoning-only / empty Cloudflare response as an inconclusive review.
+      const rawText = extractCloudflareText(result, model, { throwOnNoContent: true });
       const usage = extractCloudflareUsage(result);
 
       return {

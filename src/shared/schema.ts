@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const reviewTriggers = ['auto', 'mention', 'retry'] as const;
+export const reviewTriggers = ['auto', 'mention', 'retry', 'sync'] as const;
 export const jobStatuses = ['queued', 'running', 'done', 'failed', 'superseded'] as const;
 
 /**
@@ -188,6 +188,7 @@ export const jobSummarySchema = z.object({
   prNumber: z.number().int(),
   prTitle: z.string().nullable(),
   prAuthor: z.string().nullable(),
+  prCreatedAt: z.string().nullable().default(null),
   commitSha: z.string(),
   trigger: z.enum(reviewTriggers),
   status: z.enum(jobStatuses),

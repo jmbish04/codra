@@ -8,3 +8,6 @@ export * from './best-practices';
 export * from './api-usage';
 export * from './knowledge-base';
 export * from './changelog';
+export * from './standardization';
+export * from './agent-actions';
+export * from './secret-bindings';

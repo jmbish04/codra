@@ -21,6 +21,8 @@ export type PullRequestWebhookPayload = {
     base: { sha: string; ref: string };
     draft: boolean;
     body: string | null;
+    created_at?: string;
+    merged?: boolean;
   };
 };
 

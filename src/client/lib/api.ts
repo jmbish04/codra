@@ -10,6 +10,19 @@ import type {
   StatsResponse,
   SyncReposResponse,
   UpdatesEmailResponse,
+  WebhookDeliveriesResponse,
+  WebhookDeliveryDetailResponse,
+  PrSyncResponse,
+  WebhookStatsResponse,
+  WebhookReposResponse,
+  StandardizationRulesResponse,
+  StandardizationRuleResponse,
+  StandardizationStrategy,
+  AgentActionsResponse,
+  AvailableSecretsResponse,
+  StandardSecretBindingsResponse,
+  StandardSecretBinding,
+  MissingSecretReportsResponse,
 } from '@shared/api';
 import type { LlmApiFormat, LlmProvider, ModelConfig, RepoConfig, JobDetail, ChangelogEntry } from '@shared/schema';
 
@@ -161,6 +174,87 @@ export const api = {
     }
     const query = searchParams.toString();
     return request<JobsResponse>(`/api/jobs${query ? `?${query}` : ''}`);
+  },
+  getWebhooks(params: Record<string, QueryValue> = {}) {
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '') {
+        searchParams.set(key, String(value));
+      }
+    }
+    const query = searchParams.toString();
+    return request<WebhookDeliveriesResponse>(`/api/webhooks${query ? `?${query}` : ''}`);
+  },
+  getWebhook(id: string) {
+    return request<WebhookDeliveryDetailResponse>(`/api/webhooks/${pathSegment(id)}`);
+  },
+  getWebhookStats(params: Record<string, QueryValue> = {}) {
+    const sp = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') sp.set(k, String(v));
+    const q = sp.toString();
+    return request<WebhookStatsResponse>(`/api/webhooks/stats${q ? `?${q}` : ''}`);
+  },
+  getWebhookRepos() {
+    return request<WebhookReposResponse>('/api/webhooks/repos');
+  },
+  getAvailableSecrets(storeId?: string) {
+    const q = storeId ? `?store_id=${encodeURIComponent(storeId)}` : '';
+    return request<AvailableSecretsResponse>(`/api/secret-bindings/available${q}`);
+  },
+  getStandardSecretBindings() {
+    return request<StandardSecretBindingsResponse>('/api/secret-bindings');
+  },
+  upsertStandardSecretBinding(input: { binding_name: string; secret_name: string; store_id: string; description?: string | null; enabled?: boolean }) {
+    return request<{ binding: StandardSecretBinding }>('/api/secret-bindings', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  deleteStandardSecretBinding(id: string) {
+    return request<{ ok: boolean }>(`/api/secret-bindings/${pathSegment(id)}`, { method: 'DELETE' });
+  },
+  getMissingSecretReports() {
+    return request<MissingSecretReportsResponse>('/api/secret-bindings/missing');
+  },
+  getAgentActions(params: Record<string, QueryValue> = {}) {
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '') {
+        searchParams.set(key, String(value));
+      }
+    }
+    const query = searchParams.toString();
+    return request<AgentActionsResponse>(`/api/actions${query ? `?${query}` : ''}`);
+  },
+  getStandardizationRules() {
+    return request<StandardizationRulesResponse>('/api/standardization');
+  },
+  createStandardizationRule(input: {
+    target_path: string;
+    source_url: string;
+    strategy: StandardizationStrategy;
+    enabled?: boolean;
+    sort_order?: number;
+  }) {
+    return request<StandardizationRuleResponse>('/api/standardization', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  updateStandardizationRule(id: string, input: Partial<{
+    target_path: string;
+    source_url: string;
+    strategy: StandardizationStrategy;
+    enabled: boolean;
+    sort_order: number;
+  }>) {
+    return request<StandardizationRuleResponse>(`/api/standardization/${pathSegment(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  },
+  deleteStandardizationRule(id: string) {
+    return request<{ ok: boolean }>(`/api/standardization/${pathSegment(id)}`, { method: 'DELETE' });
   },
   getChangelogEntry(slug: string) {
     return request<{ entry: ChangelogEntry }>(`/api/changelog/${slug}`);
