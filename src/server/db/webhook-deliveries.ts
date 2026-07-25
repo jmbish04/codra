@@ -1,6 +1,6 @@
 import { getDb, parseJsonColumn } from './client';
 import { repositories, webhookDeliveries } from './schemas';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, gte, inArray } from 'drizzle-orm';
 
 /**
  * Every terminal state a webhook delivery can reach. Finalized once per
@@ -76,6 +76,40 @@ export async function getWebhookDelivery(
   return row ? { ...row, payload: parseJsonColumn(row.payload, null) } : null;
 }
 
+/** Delivery counts grouped by outcome (for the dashboard chart), within an optional window/repo. */
+export async function webhookOutcomeStats(
+  env: Pick<Env, 'DB'>,
+  q?: { since?: string; repos?: string[] },
+) {
+  const db = getDb(env);
+  const conds = [];
+  if (q?.since) conds.push(gte(webhookDeliveries.received_at, q.since));
+  if (q?.repos && q.repos.length) conds.push(inArray(repositories.repo, q.repos));
+  const where = conds.length ? and(...conds) : undefined;
+
+  const rows = await db.select({
+    outcome: webhookDeliveries.outcome,
+    count: sql<number>`count(*)`,
+  })
+    .from(webhookDeliveries)
+    .leftJoin(repositories, eq(webhookDeliveries.repository_id, repositories.id))
+    .where(where)
+    .groupBy(webhookDeliveries.outcome)
+    .all();
+
+  return rows.map((r) => ({ outcome: r.outcome, count: Number(r.count) }));
+}
+
+/** Distinct repos that have webhook deliveries, for the repo filter. */
+export async function webhookDeliveryRepos(env: Pick<Env, 'DB'>) {
+  const db = getDb(env);
+  const rows = await db.selectDistinct({ owner: repositories.owner, repo: repositories.repo })
+    .from(webhookDeliveries)
+    .innerJoin(repositories, eq(webhookDeliveries.repository_id, repositories.id))
+    .all();
+  return rows.filter((r) => r.owner && r.repo);
+}
+
 /**
  * Set the final outcome (and any linked action/PR/job/error) on a delivery.
  * Best-effort: callers wrap this so a recording failure never blocks webhook
@@ -133,7 +167,7 @@ export async function getWebhookDeliveryRow(env: Pick<Env, 'DB'>, deliveryId: st
 /** Filterable, paginated list of deliveries for the dashboard. */
 export async function listWebhookDeliveries(
   env: Pick<Env, 'DB'>,
-  q: { outcome?: string; event?: string; owner?: string; repo?: string; limit: number; offset: number },
+  q: { outcome?: string; event?: string; owner?: string; repo?: string; repos?: string[]; since?: string; limit: number; offset: number },
 ) {
   const db = getDb(env);
   const conds = [];
@@ -141,6 +175,8 @@ export async function listWebhookDeliveries(
   if (q.event) conds.push(eq(webhookDeliveries.event_name, q.event));
   if (q.owner) conds.push(eq(repositories.owner, q.owner));
   if (q.repo) conds.push(eq(repositories.repo, q.repo));
+  if (q.repos && q.repos.length) conds.push(inArray(repositories.repo, q.repos));
+  if (q.since) conds.push(gte(webhookDeliveries.received_at, q.since));
   const where = conds.length ? and(...conds) : undefined;
 
   const items = await db.select({

@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom';
 import {
   ArrowUpRight,
   FileText,
-  GitPullRequestArrow,
   Zap,
 } from 'lucide-react';
 import { StatusBadge } from '@client/components/ui/badge';
@@ -31,7 +30,6 @@ interface JobsTableProps {
 
 const DEFAULT_COLUMNS: Column[] = [
   'repo',
-  'pr',
   'status',
   'verdict',
   'created',
@@ -42,7 +40,7 @@ const thCls =
   'px-4 py-3 text-left text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground select-none';
 
 const COLUMN_CLASSES: Record<Column, string> = {
-  repo: 'w-[190px] max-w-[190px]',
+  repo: 'min-w-[260px] max-w-[440px]',
   pr: 'max-w-[480px]',
   status: 'w-[150px]',
   verdict: 'w-[120px]',
@@ -53,7 +51,7 @@ const COLUMN_CLASSES: Record<Column, string> = {
 };
 
 const COLUMN_HEADERS: Record<Column, string> = {
-  repo: 'Repository',
+  repo: 'Repository / PR',
   pr: 'Pull request',
   status: 'Status',
   verdict: 'Verdict',
@@ -149,7 +147,7 @@ function JobMobileCard({ job, columns }: { job: JobSummary; columns: Column[] })
               {job.owner}/{job.repo}
             </p>
           )}
-          {show('pr') && (
+          {show('repo') && (
             <div className="mt-1 flex min-w-0 items-start gap-2">
               <span className="mt-0.5 shrink-0 rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] font-semibold text-muted-foreground">
                 #{job.prNumber}
@@ -276,54 +274,27 @@ export function JobsTable({ jobs, loading, columns }: JobsTableProps) {
                             COLUMN_CLASSES.repo,
                           )}
                         >
-                          <div className="flex min-w-0 items-center gap-2.5">
-                            <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-xs font-bold text-primary shadow-sm", itemBgClass)}>
+                          <div className="flex min-w-0 items-start gap-2.5">
+                            <span className={cn("mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-xs font-bold text-primary shadow-sm", itemBgClass)}>
                               {job.repo.slice(0, 2).toUpperCase()}
                             </span>
                             <div className="min-w-0">
-                              <Link
-                                to={`/jobs/${job.id}`}
-                                className="block truncate text-sm font-semibold text-foreground underline-offset-2 hover:text-primary hover:underline"
-                              >
-                                {job.repo}
-                              </Link>
-                              <p className="truncate text-[11px] font-medium text-muted-foreground">
-                                {job.owner}
+                              {/* repository */}
+                              <p className="truncate text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                {job.owner}/{job.repo}
                               </p>
-                            </div>
-                          </div>
-                        </td>
-                      )}
-
-                      {cols.includes('pr') && (
-                        <td
-                          className={cn(
-                            'border-t border-border/50 px-4 py-4 align-middle overflow-hidden',
-                            COLUMN_CLASSES.pr,
-                          )}
-                        >
-                          <div className="flex min-w-0 items-start gap-2">
-                            <GitPullRequestArrow
-                              size={15}
-                              className="mt-0.5 shrink-0 text-muted-foreground/70"
-                            />
-                            <div className="min-w-0 overflow-hidden">
-                              <div className="flex min-w-0 items-baseline gap-1.5">
+                              {/* pull request */}
+                              <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5">
                                 <span className="shrink-0 font-mono text-[11px] font-semibold text-muted-foreground">
                                   #{job.prNumber}
                                 </span>
                                 <Link
                                   to={`/jobs/${job.id}`}
-                                  className="truncate block text-sm font-medium text-foreground underline-offset-2 group-hover:text-primary group-hover:underline"
+                                  className="block truncate text-sm font-medium text-foreground underline-offset-2 group-hover:text-primary group-hover:underline"
                                 >
                                   {job.prTitle ?? 'Untitled PR'}
                                 </Link>
                               </div>
-                              {job.prAuthor && (
-                                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                                  opened by {job.prAuthor}
-                                </p>
-                              )}
                             </div>
                           </div>
                         </td>

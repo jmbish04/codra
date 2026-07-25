@@ -35,11 +35,17 @@ export type PrSyncSummary = {
  * yet. Idempotent: a head that already has a job (from a webhook or a prior
  * sync) is skipped, so re-running is safe.
  */
+export type PrSyncProgress =
+  | { type: 'start'; repoCount: number; message: string }
+  | { type: 'repo'; owner: string; repo: string; index: number; repoCount: number; openPrs: number; enqueued: number; skipped: number; message: string }
+  | { type: 'done'; totalEnqueued: number; repoCount: number; message: string };
+
 export async function syncOpenPullRequests(
   env: Env,
-  opts?: { repoFilter?: { owner: string; repo: string } },
+  opts?: { repoFilter?: { owner: string; repo: string }; onProgress?: (e: PrSyncProgress) => void | Promise<void> },
 ): Promise<PrSyncSummary> {
   const db = getDb(env);
+  const emit = async (e: PrSyncProgress) => { try { await opts?.onProgress?.(e); } catch { /* progress is best-effort */ } };
 
   const rows = await db.select({
     installation_id: repositories.installation_id,
@@ -60,8 +66,11 @@ export async function syncOpenPullRequests(
     .all();
 
   const summary: PrSyncSummary = { repos: [], totalEnqueued: 0 };
+  await emit({ type: 'start', repoCount: rows.length, message: `Scanning ${rows.length} enabled repo(s) for open pull requests…` });
 
+  let index = 0;
   for (const row of rows) {
+    index += 1;
     const installationId = String(row.installation_id);
     const client = new GitHubClient(env, installationId);
     const stat: RepoSyncStat = { owner: row.owner, repo: row.repo, openPrs: 0, enqueued: 0, skipped: 0, errors: 0 };
@@ -154,7 +163,19 @@ export async function syncOpenPullRequests(
     }
 
     summary.repos.push(stat);
+    await emit({
+      type: 'repo',
+      owner: row.owner,
+      repo: row.repo,
+      index,
+      repoCount: rows.length,
+      openPrs: stat.openPrs,
+      enqueued: stat.enqueued,
+      skipped: stat.skipped,
+      message: `${row.owner}/${row.repo}: ${stat.openPrs} open PR(s), ${stat.enqueued} queued${stat.skipped ? `, ${stat.skipped} skipped` : ''}`,
+    });
   }
 
+  await emit({ type: 'done', totalEnqueued: summary.totalEnqueued, repoCount: rows.length, message: `Done — queued ${summary.totalEnqueued} review(s) across ${rows.length} repo(s).` });
   return summary;
 }

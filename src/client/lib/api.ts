@@ -13,6 +13,8 @@ import type {
   WebhookDeliveriesResponse,
   WebhookDeliveryDetailResponse,
   PrSyncResponse,
+  WebhookStatsResponse,
+  WebhookReposResponse,
   StandardizationRulesResponse,
   StandardizationRuleResponse,
   StandardizationStrategy,
@@ -186,9 +188,14 @@ export const api = {
   getWebhook(id: string) {
     return request<WebhookDeliveryDetailResponse>(`/api/webhooks/${pathSegment(id)}`);
   },
-  syncOpenPrs(repo?: string) {
-    const query = repo ? `?repo=${encodeURIComponent(repo)}` : '';
-    return request<PrSyncResponse>(`/api/webhooks/sync${query}`, { method: 'POST' });
+  getWebhookStats(params: Record<string, QueryValue> = {}) {
+    const sp = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') sp.set(k, String(v));
+    const q = sp.toString();
+    return request<WebhookStatsResponse>(`/api/webhooks/stats${q ? `?${q}` : ''}`);
+  },
+  getWebhookRepos() {
+    return request<WebhookReposResponse>('/api/webhooks/repos');
   },
   getAvailableSecrets(storeId?: string) {
     const q = storeId ? `?store_id=${encodeURIComponent(storeId)}` : '';

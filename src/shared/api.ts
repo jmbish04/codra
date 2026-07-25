@@ -175,3 +175,8 @@ export type MissingSecretReport = {
   resolved: boolean;
 };
 export type MissingSecretReportsResponse = { reports: MissingSecretReport[] };
+
+export type WebhookOutcomeStat = { outcome: string; count: number };
+export type WebhookStatsResponse = { stats: WebhookOutcomeStat[] };
+export type WebhookRepoRef = { owner: string; repo: string };
+export type WebhookReposResponse = { repos: WebhookRepoRef[] };
