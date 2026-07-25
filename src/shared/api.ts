@@ -111,3 +111,23 @@ export type PrSyncResponse = {
   repos: PrSyncRepoStat[];
   totalEnqueued: number;
 };
+
+export type StandardizationStrategy = 'create_if_missing' | 'merge_json' | 'merge_mcp_servers' | 'overwrite';
+
+export type StandardizationRule = {
+  id: string;
+  target_path: string;
+  source_url: string;
+  strategy: StandardizationStrategy;
+  enabled: boolean;
+  sort_order: number;
+  updated_at: string;
+};
+
+export type StandardizationRulesResponse = {
+  rules: StandardizationRule[];
+};
+
+export type StandardizationRuleResponse = {
+  rule: StandardizationRule;
+};

@@ -17,6 +17,8 @@ import { getWebhookDelivery } from '@server/db/webhook-deliveries';
 import { buildChangelogSlug, upsertChangelogEntry } from '@server/db/changelog';
 import { getOrCreateRepository } from '@server/db/repositories';
 import { buildChangelogPrompt, CHANGELOG_SYSTEM_PROMPT } from '@server/prompts/changelog';
+import { listEnabledStandardizationRules, type StandardizationStrategy } from '@server/db/standardization';
+import { applyStrategy, fetchSourceContent } from '@server/core/standardization';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
 
@@ -1315,58 +1317,6 @@ async function failJobAndCheckRun(
   }
 }
 
-async function fetchReferenceSettings(env: Env): Promise<string> {
-  const repo = (env as any).STANDARDIZATION_REPO || 'jmbish04/core-github-standardization';
-  const url = `https://raw.githubusercontent.com/${repo}/main/.vscode/settings.json`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch reference VS Code settings from ${url}: ${res.statusText}`);
-  }
-  return res.text();
-}
-
-function cleanJsonc(content: string): string {
-  return content
-    // Remove single line comments
-    .replace(/\/\/.*$/gm, '')
-    // Remove multi-line comments
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    // Remove trailing commas
-    .replace(/,(\s*[\]}])/g, '$1')
-    .trim();
-}
-
-function mergeSettings(existingStr: string, referenceStr: string): { mergedContent: string; changed: boolean } {
-  try {
-    const existingClean = cleanJsonc(existingStr);
-    const referenceClean = cleanJsonc(referenceStr);
-    
-    const existing = JSON.parse(existingClean);
-    const reference = JSON.parse(referenceClean);
-    
-    let changed = false;
-    const merged = { ...existing };
-    
-    for (const [key, value] of Object.entries(reference)) {
-      if (JSON.stringify(existing[key]) !== JSON.stringify(value)) {
-        merged[key] = value;
-        changed = true;
-      }
-    }
-    
-    return {
-      mergedContent: JSON.stringify(merged, null, 2),
-      changed,
-    };
-  } catch {
-    // If parsing fails (e.g. invalid existing JSON), we overwrite with reference settings
-    return {
-      mergedContent: referenceStr,
-      changed: true,
-    };
-  }
-}
-
 type HousekeepingChange = {
   path: string;
   content: string;
@@ -1386,35 +1336,37 @@ async function standardizeRepository(
   const defaultBranch = (await github.getRepo(job.owner, job.repo)).default_branch;
   const changes: HousekeepingChange[] = [];
 
-  // 1. VS Code settings check (against default branch, not the PR branch)
+  // 1. Config-driven standardization file rules — Cloudflare Worker repos only.
+  // Each rule points at a reference file (GitHub URL) and a merge strategy; any
+  // missing/drifted files become changes in the separate follow-up PR below.
   try {
-    const referenceSettingsText = await fetchReferenceSettings(env);
-    const existingFile = (await github.getRepoFileWithRefOrNull(job.owner, job.repo, '.vscode/settings.jsonc', defaultBranch))
-      || (await github.getRepoFileWithRefOrNull(job.owner, job.repo, '.vscode/settings.json', defaultBranch));
+    const wranglerFile =
+      (await github.getRepoFileWithRefOrNull(job.owner, job.repo, 'wrangler.jsonc', defaultBranch)) ||
+      (await github.getRepoFileWithRefOrNull(job.owner, job.repo, 'wrangler.toml', defaultBranch)) ||
+      (await github.getRepoFileWithRefOrNull(job.owner, job.repo, 'wrangler.json', defaultBranch));
 
-    if (!existingFile) {
-      changes.push({
-        path: '.vscode/settings.jsonc',
-        content: referenceSettingsText,
-        message: 'chore: add standardized VS Code settings',
-      });
-    } else {
-      const { mergedContent, changed } = mergeSettings(existingFile.content || '', referenceSettingsText);
-      if (changed) {
-        const fileToUpdate = (await github.getRepoFileWithRefOrNull(job.owner, job.repo, '.vscode/settings.jsonc', defaultBranch))
-          ? '.vscode/settings.jsonc'
-          : '.vscode/settings.json';
-        const fileInfo = await github.getRepoFileWithRefOrNull(job.owner, job.repo, fileToUpdate, defaultBranch);
-        changes.push({
-          path: fileToUpdate,
-          content: mergedContent,
-          message: 'chore: update VS Code settings with standardized keys',
-          existingSha: fileInfo?.sha,
-        });
+    if (wranglerFile) {
+      const rules = await listEnabledStandardizationRules(env);
+      for (const rule of rules) {
+        try {
+          const source = await fetchSourceContent(rule.source_url);
+          const existing = await github.getRepoFileWithRefOrNull(job.owner, job.repo, rule.target_path, defaultBranch);
+          const change = applyStrategy(
+            rule.strategy as StandardizationStrategy,
+            rule.target_path,
+            existing ? { content: existing.content || '', sha: existing.sha } : null,
+            source,
+          );
+          if (change) changes.push(change);
+        } catch (err) {
+          logger.error(`Standardization rule failed for ${rule.target_path}`, err);
+        }
       }
+    } else {
+      logger.info(`Skipping standardization file rules for ${job.owner}/${job.repo}: not a Cloudflare Worker repo`);
     }
   } catch (err) {
-    logger.error('Failed to evaluate VS Code settings', err);
+    logger.error('Failed to evaluate standardization rules', err);
   }
 
   // 2. AGENTS.md check (against default branch)

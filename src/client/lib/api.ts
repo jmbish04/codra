@@ -13,6 +13,9 @@ import type {
   WebhookDeliveriesResponse,
   WebhookDeliveryDetailResponse,
   PrSyncResponse,
+  StandardizationRulesResponse,
+  StandardizationRuleResponse,
+  StandardizationStrategy,
 } from '@shared/api';
 import type { LlmApiFormat, LlmProvider, ModelConfig, RepoConfig, JobDetail, ChangelogEntry } from '@shared/schema';
 
@@ -181,6 +184,36 @@ export const api = {
   syncOpenPrs(repo?: string) {
     const query = repo ? `?repo=${encodeURIComponent(repo)}` : '';
     return request<PrSyncResponse>(`/api/webhooks/sync${query}`, { method: 'POST' });
+  },
+  getStandardizationRules() {
+    return request<StandardizationRulesResponse>('/api/standardization');
+  },
+  createStandardizationRule(input: {
+    target_path: string;
+    source_url: string;
+    strategy: StandardizationStrategy;
+    enabled?: boolean;
+    sort_order?: number;
+  }) {
+    return request<StandardizationRuleResponse>('/api/standardization', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  updateStandardizationRule(id: string, input: Partial<{
+    target_path: string;
+    source_url: string;
+    strategy: StandardizationStrategy;
+    enabled: boolean;
+    sort_order: number;
+  }>) {
+    return request<StandardizationRuleResponse>(`/api/standardization/${pathSegment(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  },
+  deleteStandardizationRule(id: string) {
+    return request<{ ok: boolean }>(`/api/standardization/${pathSegment(id)}`, { method: 'DELETE' });
   },
   getChangelogEntry(slug: string) {
     return request<{ entry: ChangelogEntry }>(`/api/changelog/${slug}`);
