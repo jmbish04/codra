@@ -20,6 +20,7 @@ import { buildChangelogPrompt, CHANGELOG_SYSTEM_PROMPT } from '@server/prompts/c
 import { listEnabledStandardizationRules, type StandardizationStrategy } from '@server/db/standardization';
 import { applyStrategy, fetchSourceContent } from '@server/core/standardization';
 import { recordAgentAction } from '@server/db/agent-actions';
+import { getDismissedStandards } from '@server/db/dismissed-standards';
 import { listEnabledStandardSecretBindings, recordMissingSecret } from '@server/db/secret-bindings';
 import { notifyJobsChanged } from '@server/core/jobs-feed';
 import { detectTestTargets } from '@server/core/test-detection';
@@ -1442,7 +1443,7 @@ async function standardizeRepository(
 ) {
   const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
   const defaultBranch = (await github.getRepo(job.owner, job.repo)).default_branch;
-  const changes: HousekeepingChange[] = [];
+  let changes: HousekeepingChange[] = [];
 
   // 1. Config-driven standardization file rules — Cloudflare Worker repos only.
   // Each rule points at a reference file (GitHub URL) and a merge strategy; any
@@ -1606,6 +1607,17 @@ Maintain the existing structure but improve details. DO NOT write any conversati
     }
   } catch (err) {
     logger.error('Failed to evaluate AGENTS.md', err);
+  }
+
+  // Drop any files whose standard the maintainers already rejected by closing a
+  // previous housekeeping PR — never propose those again.
+  const dismissed = await getDismissedStandards(env, job.owner, job.repo).catch(() => new Set<string>());
+  if (dismissed.size > 0) {
+    const before = changes.length;
+    changes = changes.filter((c) => !dismissed.has(c.path));
+    if (changes.length !== before) {
+      logger.info(`Skipped ${before - changes.length} previously-rejected standard file(s) for ${job.owner}/${job.repo}`);
+    }
   }
 
   // 3. If there are changes, open a separate housekeeping PR
