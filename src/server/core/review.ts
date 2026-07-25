@@ -21,6 +21,7 @@ import { listEnabledStandardizationRules, type StandardizationStrategy } from '@
 import { applyStrategy, fetchSourceContent } from '@server/core/standardization';
 import { recordAgentAction } from '@server/db/agent-actions';
 import { listEnabledStandardSecretBindings, recordMissingSecret } from '@server/db/secret-bindings';
+import { notifyJobsChanged } from '@server/core/jobs-feed';
 import { listSecretsStoreSecrets, ensureSecretBindings, type SecretBindingSpec } from '@server/core/secrets-store';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
@@ -443,7 +444,7 @@ async function runPreparePhase(
   // Post a status comment to the PR so the team knows Codra is active
   if (!job.statusCommentId) {
     try {
-      const monitorLink = env.APP_URL ? `\n\n[👉 Click here to monitor progress](${env.APP_URL}/jobs/${job.id})` : '';
+      const monitorLink = env.APP_URL ? `\n\n<a href="${env.APP_URL}/jobs/${job.id}" target="_blank" rel="noopener noreferrer">👉 Click here to monitor progress</a>` : '';
       const statusBody = `## \u{1F50D} Code Review\n\nCodra is reviewing this pull request. A summary will be posted here when the review is complete.${monitorLink}`;
       const comment = await github.createIssueComment(job.owner, job.repo, job.prNumber, statusBody);
       await updateJobStatusComment(env, job.id, comment.id);
@@ -1357,7 +1358,7 @@ export async function cancelReviewsForClosedPr(
 
   try {
     const jobId = active[0].id;
-    const link = env.APP_URL ? ` [View the cancelled job](${env.APP_URL}/jobs/${jobId}).` : '';
+    const link = env.APP_URL ? ` <a href="${env.APP_URL}/jobs/${jobId}" target="_blank" rel="noopener noreferrer">View the cancelled job</a>.` : '';
     const verb = closedState === 'merged' ? 'merged' : 'closed';
     await gh.createIssueComment(
       input.owner,
@@ -1369,6 +1370,7 @@ export async function cancelReviewsForClosedPr(
     logger.error('Failed to post review-cancellation comment', err);
   }
 
+  await notifyJobsChanged(env, { prNumber: input.prNumber, owner: input.owner, repo: input.repo, status: 'superseded' }).catch(() => {});
   logger.info(`Cancelled ${active.length} review(s) for ${input.owner}/${input.repo}#${input.prNumber} (${closedState})`);
   return active.length;
 }

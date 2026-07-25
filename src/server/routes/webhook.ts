@@ -9,6 +9,7 @@ import { jsonError } from '@server/core/http';
 import { findExistingJobForHead, insertJob, supersedeOlderJobs } from '@server/db/jobs';
 import { recordWebhookDelivery, finalizeWebhookDelivery, type DeliveryOutcome } from '@server/db/webhook-deliveries';
 import { getWorkerApiKey } from '@server/utils/secrets';
+import { notifyJobsChanged } from '@server/core/jobs-feed';
 import { GitHubClient } from '@server/core/github';
 
 export async function handleGitHubWebhook(c: Context<AppEnv>) {
@@ -238,6 +239,7 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
             console.error('Failed to dispatch webhook to RepoAgent DO:', err);
           })
         );
+        c.executionCtx.waitUntil(notifyJobsChanged(c.env, { jobId: job.id, status: 'queued' }));
 
         return finish(202, { ok: true, message: 'delegated_to_repo_agent', job }, 'job_created', {
           action: 'review',

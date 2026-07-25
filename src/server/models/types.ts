@@ -11,6 +11,8 @@ export class ProviderRequestError extends Error {
     public readonly provider: string,
     public readonly status: number,
     message: string,
+    /** When true, the model service treats this as transient and falls back to the next model. */
+    public readonly retryable: boolean = false,
   ) {
     super(`${provider} request failed with ${status}: ${message}`);
     this.name = 'ProviderRequestError';
