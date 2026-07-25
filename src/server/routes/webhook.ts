@@ -7,7 +7,7 @@ import { extractReviewRequest } from '@server/core/review';
 import { verifyGitHubWebhookSignature } from '@server/core/verify';
 import { jsonError } from '@server/core/http';
 import { findExistingJobForHead, insertJob, supersedeOlderJobs } from '@server/db/jobs';
-import { recordWebhookDelivery } from '@server/db/webhook-deliveries';
+import { recordWebhookDelivery, finalizeWebhookDelivery, type DeliveryOutcome } from '@server/db/webhook-deliveries';
 import { getWorkerApiKey } from '@server/utils/secrets';
 import { GitHubClient } from '@server/core/github';
 
@@ -18,183 +18,224 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
     const rawBody = await c.req.text();
 
     if (!eventName || !deliveryId) {
+      // No delivery id means nothing to record or de-duplicate against.
       return jsonError('Missing GitHub webhook headers.', 400);
     }
+
+    // Record the delivery BEFORE verifying, so rejected and failed deliveries
+    // are visible on the dashboard too. Never let a recording failure block
+    // webhook processing.
+    const inserted = await recordWebhookDelivery(c.env, {
+      deliveryId,
+      eventName,
+      owner: null,
+      repo: null,
+      payload: rawBody,
+    }).catch(() => true);
+
+    // `owner`/`repo` become known after the payload parses; finish() links them.
+    let owner: string | null = null;
+    let repo: string | null = null;
+
+    // Finalize the delivery's outcome and return the response. Only the first
+    // sighting of a delivery id (inserted === true) writes an outcome, so a
+    // duplicate retry never clobbers the original delivery's recorded result.
+    const finish = async (
+      status: 200 | 202 | 401 | 500,
+      body: Record<string, unknown>,
+      outcome: DeliveryOutcome,
+      extra?: { action?: string; prNumber?: number; jobId?: string; error?: string },
+    ) => {
+      if (inserted) {
+        await finalizeWebhookDelivery(c.env, deliveryId, { outcome, owner, repo, ...extra }).catch(() => {});
+      }
+      return c.json(body, status);
+    };
 
     const webhookSecret = await getWorkerApiKey(c.env);
     const verified = await verifyGitHubWebhookSignature(webhookSecret, signature ?? null, rawBody);
     if (!verified) {
-      return jsonError('Invalid webhook signature.', 401);
+      return finish(401, { ok: false, error: 'Invalid webhook signature.' }, 'rejected_signature');
+    }
+
+    // Duplicate delivery (GitHub retry with the same id): acknowledge without
+    // reprocessing or overwriting the original outcome.
+    if (!inserted) {
+      return c.json({ ok: true, duplicate: true }, 202);
     }
 
     let payload: GitHubWebhookPayload;
     try {
       payload = JSON.parse(rawBody) as GitHubWebhookPayload;
     } catch {
+      await finalizeWebhookDelivery(c.env, deliveryId, { outcome: 'invalid_payload' }).catch(() => {});
       return jsonError('Invalid webhook JSON payload.', 400);
     }
 
-    const insertedDelivery = await recordWebhookDelivery(c.env, {
-      deliveryId,
-      eventName,
-      owner: 'repository' in payload ? payload.repository.owner.login : null,
-      repo: 'repository' in payload ? payload.repository.name : null,
-      payload,
-    });
-
-    if (!insertedDelivery) {
-      return c.json({ ok: true, duplicate: true }, 202);
+    if ('repository' in payload && payload.repository) {
+      owner = payload.repository.owner.login;
+      repo = payload.repository.name;
     }
 
-    const installationId = String(payload.installation?.id ?? '');
-    if (!('repository' in payload) || !payload.repository) {
-      return c.json({ ok: true, ignored: true }, 202);
-    }
+    try {
+      const installationId = String(payload.installation?.id ?? '');
+      if (!('repository' in payload) || !payload.repository) {
+        return finish(202, { ok: true, ignored: true }, 'ignored_no_repository');
+      }
 
-    if (!isSupportedGitHubWebhookEvent(eventName)) {
-      return c.json({ ok: true, ignored: true, eventName }, 202);
-    }
+      if (!isSupportedGitHubWebhookEvent(eventName)) {
+        return finish(202, { ok: true, ignored: true, eventName }, 'ignored_unsupported_event');
+      }
 
-    if (['star', 'watch', 'fork'].includes(eventName)) {
-      const { upsertRepo } = await import('@server/db/knowledge-base');
-      
-      if (eventName === 'star') {
-        const starPayload = payload as import('@shared/github').StarWebhookPayload;
-        await upsertRepo(c.env, {
-          github_id: starPayload.repository.id,
-          full_name: starPayload.repository.full_name,
-          language: starPayload.repository.language,
-          topics: starPayload.repository.topics,
-          is_starred: starPayload.action === 'created',
-          stargazers_count: starPayload.repository.stargazers_count,
-        });
-      } else if (eventName === 'watch') {
-        const watchPayload = payload as import('@shared/github').WatchWebhookPayload;
-        if (watchPayload.action === 'started') {
+      if (['star', 'watch', 'fork'].includes(eventName)) {
+        const { upsertRepo } = await import('@server/db/knowledge-base');
+
+        if (eventName === 'star') {
+          const starPayload = payload as import('@shared/github').StarWebhookPayload;
           await upsertRepo(c.env, {
-            github_id: watchPayload.repository.id,
-            full_name: watchPayload.repository.full_name,
-            language: watchPayload.repository.language,
-            topics: watchPayload.repository.topics,
-            is_watched: true,
-            stargazers_count: watchPayload.repository.stargazers_count,
+            github_id: starPayload.repository.id,
+            full_name: starPayload.repository.full_name,
+            language: starPayload.repository.language,
+            topics: starPayload.repository.topics,
+            is_starred: starPayload.action === 'created',
+            stargazers_count: starPayload.repository.stargazers_count,
+          });
+        } else if (eventName === 'watch') {
+          const watchPayload = payload as import('@shared/github').WatchWebhookPayload;
+          if (watchPayload.action === 'started') {
+            await upsertRepo(c.env, {
+              github_id: watchPayload.repository.id,
+              full_name: watchPayload.repository.full_name,
+              language: watchPayload.repository.language,
+              topics: watchPayload.repository.topics,
+              is_watched: true,
+              stargazers_count: watchPayload.repository.stargazers_count,
+            });
+          }
+        } else if (eventName === 'fork') {
+          const forkPayload = payload as import('@shared/github').ForkWebhookPayload;
+          await upsertRepo(c.env, {
+            github_id: forkPayload.forkee.id,
+            full_name: forkPayload.forkee.full_name,
+            language: forkPayload.forkee.language,
+            topics: forkPayload.forkee.topics,
+            is_forked_by_me: true,
+            stargazers_count: forkPayload.forkee.stargazers_count,
           });
         }
-      } else if (eventName === 'fork') {
-        const forkPayload = payload as import('@shared/github').ForkWebhookPayload;
-        await upsertRepo(c.env, {
-          github_id: forkPayload.forkee.id,
-          full_name: forkPayload.forkee.full_name,
-          language: forkPayload.forkee.language,
-          topics: forkPayload.forkee.topics,
-          is_forked_by_me: true,
-          stargazers_count: forkPayload.forkee.stargazers_count,
+
+        return finish(202, { ok: true, message: 'kb_updated' }, 'kb_updated', { action: 'kb_update' });
+      }
+
+      if (!installationId) {
+        return finish(202, { ok: true, ignored: true }, 'ignored_no_installation');
+      }
+
+      const repoConfig = await loadRepoConfig(c.env, {
+        installationId,
+        owner: payload.repository.owner.login,
+        repo: payload.repository.name,
+      });
+
+      if (repoConfig.enabled === false) {
+        return finish(202, { ok: true, ignored: true, reason: 'repository_disabled' }, 'ignored_repo_disabled');
+      }
+
+      const extracted = extractReviewRequest({
+        eventName,
+        payload,
+        botUsername: c.env.BOT_USERNAME,
+        config: repoConfig.parsedJson,
+      });
+
+      if (extracted?.trigger === 'mention' && eventName === 'issue_comment' && 'comment' in payload && payload.comment?.id) {
+        try {
+          const gh = new GitHubClient(c.env, installationId);
+          await gh.createIssueCommentReaction(
+            extracted.owner,
+            extracted.repo,
+            payload.comment.id,
+            'eyes'
+          );
+        } catch (err) {
+          console.error('Failed to add emoji reaction to comment:', err);
+        }
+      }
+
+      if (extracted?.commitSha && extracted.baseSha) {
+        const existingJob = await findExistingJobForHead(c.env, {
+          owner: extracted.owner,
+          repo: extracted.repo,
+          prNumber: extracted.prNumber,
+          commitSha: extracted.commitSha,
+          trigger: extracted.trigger,
+        });
+
+        if (existingJob) {
+          return finish(202, {
+            ok: true,
+            duplicate: true,
+            message: existingJob.status === 'queued' ? 'queued' : 'duplicate',
+            job: existingJob,
+          }, 'job_created', { action: 'review', prNumber: extracted.prNumber, jobId: existingJob.id });
+        }
+
+        const job = await insertJob(c.env, {
+          installationId: extracted.installationId,
+          owner: extracted.owner,
+          repo: extracted.repo,
+          prNumber: extracted.prNumber,
+          prTitle: extracted.prTitle,
+          prAuthor: extracted.prAuthor,
+          commitSha: extracted.commitSha,
+          baseSha: extracted.baseSha,
+          trigger: extracted.trigger,
+          headRef: extracted.headRef,
+          baseRef: extracted.baseRef,
+          configSnapshot: repoConfig.parsedJson,
+        });
+
+        await supersedeOlderJobs(c.env, {
+          installationId: extracted.installationId,
+          owner: extracted.owner,
+          repo: extracted.repo,
+          prNumber: extracted.prNumber,
+          newJobId: job.id,
+        });
+
+        const repoAgentId = c.env.RepoAgent.idFromName(`${extracted.owner}/${extracted.repo}`);
+        const repoAgent = c.env.RepoAgent.get(repoAgentId);
+
+        c.executionCtx.waitUntil(
+          repoAgent.fetch(new Request('https://repoagent/webhook', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          })).catch((err: unknown) => {
+            console.error('Failed to dispatch webhook to RepoAgent DO:', err);
+          })
+        );
+
+        return finish(202, { ok: true, message: 'delegated_to_repo_agent', job }, 'job_created', {
+          action: 'review',
+          prNumber: extracted.prNumber,
+          jobId: job.id,
         });
       }
 
-      return c.json({ ok: true, message: 'kb_updated' }, 202);
-    }
-
-    if (!installationId) {
-      return c.json({ ok: true, ignored: true }, 202);
-    }
-
-    const repoConfig = await loadRepoConfig(c.env, {
-      installationId,
-      owner: payload.repository.owner.login,
-      repo: payload.repository.name,
-    });
-
-    if (repoConfig.enabled === false) {
-      return c.json({ ok: true, ignored: true, reason: 'repository_disabled' }, 202);
-    }
-
-    const extracted = extractReviewRequest({
-      eventName,
-      payload,
-      botUsername: c.env.BOT_USERNAME,
-      config: repoConfig.parsedJson,
-    });
-
-    if (extracted?.trigger === 'mention' && eventName === 'issue_comment' && 'comment' in payload && payload.comment?.id) {
-      try {
-        const gh = new GitHubClient(c.env, installationId);
-        await gh.createIssueCommentReaction(
-          extracted.owner,
-          extracted.repo,
-          payload.comment.id,
-          'eyes'
-        );
-      } catch (err) {
-        console.error('Failed to add emoji reaction to comment:', err);
-      }
-    }
-
-    if (extracted?.commitSha && extracted.baseSha) {
-      const existingJob = await findExistingJobForHead(c.env, {
-        owner: extracted.owner,
-        repo: extracted.repo,
-        prNumber: extracted.prNumber,
-        commitSha: extracted.commitSha,
-        trigger: extracted.trigger,
+      // Events that do not produce a concrete job, such as PR close cleanup or
+      // mention events that need PR lookup, are still handled by the worker.
+      await c.env.REVIEW_QUEUE.send({
+        deliveryId,
+        eventName,
+        requestId: c.get('requestId'),
       });
 
-      if (existingJob) {
-        return c.json({
-          ok: true,
-          duplicate: true,
-          message: existingJob.status === 'queued' ? 'queued' : 'duplicate',
-          job: existingJob,
-        }, 202);
-      }
-
-      const job = await insertJob(c.env, {
-        installationId: extracted.installationId,
-        owner: extracted.owner,
-        repo: extracted.repo,
-        prNumber: extracted.prNumber,
-        prTitle: extracted.prTitle,
-        prAuthor: extracted.prAuthor,
-        commitSha: extracted.commitSha,
-        baseSha: extracted.baseSha,
-        trigger: extracted.trigger,
-        headRef: extracted.headRef,
-        baseRef: extracted.baseRef,
-        configSnapshot: repoConfig.parsedJson,
+      return finish(202, { ok: true, message: 'queued' }, 'queued', { action: 'queued' });
+    } catch (err) {
+      return finish(500, { ok: false, error: 'Webhook processing failed.' }, 'error', {
+        error: err instanceof Error ? err.message : String(err),
       });
-
-      await supersedeOlderJobs(c.env, {
-        installationId: extracted.installationId,
-        owner: extracted.owner,
-        repo: extracted.repo,
-        prNumber: extracted.prNumber,
-        newJobId: job.id,
-      });
-
-      const repoAgentId = c.env.RepoAgent.idFromName(`${extracted.owner}/${extracted.repo}`);
-      const repoAgent = c.env.RepoAgent.get(repoAgentId);
-      
-      c.executionCtx.waitUntil(
-        repoAgent.fetch(new Request('https://repoagent/webhook', {
-          method: 'POST',
-          body: JSON.stringify(payload)
-        })).catch((err: unknown) => {
-          console.error('Failed to dispatch webhook to RepoAgent DO:', err);
-        })
-      );
-
-      return c.json({ ok: true, message: 'delegated_to_repo_agent', job }, 202);
     }
-
-    // Events that do not produce a concrete job, such as PR close cleanup or
-    // mention events that need PR lookup, are still handled by the worker.
-    await c.env.REVIEW_QUEUE.send({
-      deliveryId,
-      eventName,
-      requestId: c.get('requestId'),
-    });
-
-    return c.json({ ok: true, message: 'queued' }, 202);
 }
 
 export function createWebhookRouter() {
