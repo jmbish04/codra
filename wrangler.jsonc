@@ -115,6 +115,7 @@
 			"/api/*",
 			"/auth/*",
 			"/webhook*",
+			"/reviews/*",
 			"/settings*",
 			"/best-practices*",
 			"/.well-known/*",
