@@ -13,9 +13,71 @@
 - Webhook HMAC secret source is **only** `await env.WORKER_API_KEY.get()` (via `getWorkerApiKey`). Do not read `GITHUB_WEBHOOK_SECRET` anywhere.
 - Delivery recording must never break webhook processing — wrap every delivery DB write in try/catch and swallow (log) failures.
 - The sync action must be idempotent: a PR head that already has a job is skipped.
-- Tests run with `npm test` (loads env from `.env.test`, requires `TEST_DATABASE_URL`, applies migrations, then `vitest run`). Follow existing patterns in `test/webhook-handling.spec.ts` and `test/helpers.ts` (`createTestEnv` sets `WORKER_API_KEY.get() => 'test-webhook-secret'`).
+- Tests run with `npm test`. **Prerequisite: Task 0 must land first** — at BASE the DB-backed specs are red because `createTestEnv().DB` is an empty stub. After Task 0, `createTestEnv` returns a real in-memory SQLite-backed D1 and the whole DB suite runs green. Follow existing patterns in `test/webhook-handling.spec.ts` and `test/helpers.ts` (`createTestEnv` sets `WORKER_API_KEY.get() => 'test-webhook-secret'`).
 - Dashboard API routes live behind the existing `requireSession` + `requireCsrfHeader` middleware (already applied to `/api/*` in `app.ts`).
 - New `insertJob` trigger value is `'sync'`; existing union is `'auto' | 'mention' | 'retry'`.
+
+---
+
+## Task 0: Repair the DB-backed test harness
+
+**Why:** At BASE, every DB-touching spec (`webhook-handling`, `review-flow`, `model-service`, `api`, `resumable-queue` — 15 tests) fails with `TypeError: this.client.prepare is not a function`. Cause: `createTestEnv()` sets `DB: {} as any`, but `getDb` uses the `drizzle-orm/d1` driver, which calls `.prepare()` on the binding. The app is D1/SQLite; the `scripts/migrate.mjs` Postgres path is vestigial and never backed the app's `env.DB`. This task wires a real in-memory SQLite-backed D1 into the test env so the plan's TDD steps mean something.
+
+**Files:**
+- Modify: `test/helpers.ts` (build and inject a real D1 into `createTestEnv().DB`)
+- Create: `test/d1-sqlite.ts` (a minimal D1 shim over `node:sqlite`)
+- Modify: `test/setup.ts` (drop the Postgres/`TEST_DATABASE_URL` requirement now that tests use in-memory SQLite)
+- Modify: `scripts/test.mjs` (stop invoking the Postgres `scripts/migrate.mjs`; keep env loading)
+- Possibly modify: `package.json` (no new runtime dep — `node:sqlite` is built into Node ≥ 22.5; this repo runs Node 26)
+
+**Interfaces:**
+- Produces: `createD1(migrationsDir: string): D1Database` — a synchronous in-memory SQLite database exposing the subset of the D1 `D1Database` interface that `drizzle-orm/d1` uses: `prepare(sql) -> { bind(...params), all(), run(), first(colName?), raw() }`, plus `batch(statements)`, `exec(sql)`, and `dump()` (the latter can throw "unsupported"). `createTestEnv` calls it and assigns the result to `DB`.
+
+### Approach
+
+Use Node's built-in `node:sqlite` (`DatabaseSync`) — no native dependency. Apply the existing SQLite migration files from `db/migrations/d1/*.sql` (sorted by filename) at construction so the schema matches production. Each test env gets a fresh `:memory:` database.
+
+**Critical D1 behaviors the shim must reproduce** (the existing tests depend on them):
+- **BLOB round-trip as `number[]`.** `jobs.commit_sha`/`base_sha` are `blob` columns; the app writes them as `Array.from(hexToBytes(...))` (a `number[]`) and reads them back through `bytesToHex(row.commit_sha)`. Real D1 accepts a `number[]`/`ArrayBuffer` bind param for a BLOB and returns BLOB columns as `ArrayBuffer`/`number[]`. In the shim: when binding, convert a `number[]` param to a `Uint8Array` for `node:sqlite`; when reading, `node:sqlite` returns a `Uint8Array` for BLOB — return it as-is (confirm `bytesToHex` handles `Uint8Array`; it accepts `any` and iterates bytes). Verify with the `review-flow` tests, which insert and read jobs.
+- **`.all()` returns `{ results, success, meta }`** in real D1, but `drizzle-orm/d1` accesses `.results`. Inspect how the installed `drizzle-orm/d1` session (`node_modules/.../src/d1/session.ts`) unwraps `.all()`/`.run()`/`.raw()`/`.first()` and match exactly those shapes. Do not guess — read that file.
+- **`.run()`** must execute and return meta with `changes`/`last_row_id` where drizzle reads them.
+- **`.raw()`** returns rows as arrays of column values (used by some drizzle paths).
+- Parameter binding is positional (`?`). `node:sqlite` `StatementSync` supports positional params via `.all(...params)` / `.run(...params)` / `.get(...params)`.
+
+Keep the shim minimal — implement only what `drizzle-orm/d1` actually calls (read the session source to enumerate it). Mark anything unsupported with a clear throw.
+
+- [ ] **Step 1: Read the drizzle-d1 session to learn the exact contract**
+
+Read `node_modules/.pnpm/drizzle-orm@*/node_modules/src/d1/session.ts` (and `sqlite-core/session.ts`). Enumerate every method/property the session reads off the binding and off prepared statements (`prepare`, `bind`, `all`, `run`, `raw`, `first`, `batch`, `values`, result `.results`/`.meta` shapes). The shim implements exactly these.
+
+- [ ] **Step 2: Write the shim `test/d1-sqlite.ts`**
+
+Implement `createD1(migrationsDir)` over `node:sqlite`'s `DatabaseSync`:
+- Open `new DatabaseSync(':memory:')`.
+- Read `db/migrations/d1/*.sql`, sort by filename, split on `--> statement-breakpoint`, and `db.exec()` each statement.
+- Return an object implementing the enumerated D1 surface, with the BLOB `number[]`↔`Uint8Array` conversions on bind and the result shapes drizzle expects.
+
+- [ ] **Step 3: Wire it into `createTestEnv`**
+
+In `test/helpers.ts`, replace `DB: {} as any` with `DB: createD1(path.resolve(process.cwd(), 'db/migrations/d1')) as any` (import `createD1` and `path`). Each `createTestEnv()` call gets a fresh in-memory DB — confirm tests that expect isolation still pass (they create their own env).
+
+- [ ] **Step 4: Drop the Postgres requirement**
+
+In `test/setup.ts`, remove `TEST_DATABASE_URL` (and the Postgres-specific keys `GITHUB_APP_WEBHOOK_SECRET` if it is not actually used by any test) from `REQUIRED_TEST_ENV_KEYS`, so the suite no longer demands a Postgres DB. In `scripts/test.mjs`, remove the `run(process.execPath, ['scripts/migrate.mjs'])` line (and the `TEST_DATABASE_URL` guard) — keep `loadEnvFiles()` and the `vitest run` invocation. Do not delete `scripts/migrate.mjs` itself (it is still used for real Postgres-free D1? no — leave it on disk untouched to minimize the diff).
+
+- [ ] **Step 5: Run the full suite**
+
+Run: `npm test`
+Expected: all previously-passing logic tests still pass AND the 15 previously-failing DB tests now pass. Zero failures. If a DB test fails on a shim gap, fix the shim (usually a result-shape or BLOB mismatch) — do not modify the app code or the existing tests to accommodate the shim.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add test/d1-sqlite.ts test/helpers.ts test/setup.ts scripts/test.mjs package.json pnpm-lock.yaml
+git commit -m "test: back createTestEnv with an in-memory node:sqlite D1 so DB specs run"
+```
+
+(Note: `package.json`/`pnpm-lock.yaml` already carry an added `postgres` devDep from environment setup; leave it — `migrate.mjs` still imports it and it is harmless.)
 
 ---
 
