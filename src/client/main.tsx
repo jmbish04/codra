@@ -27,6 +27,7 @@ const LoginPage = safeLazy(() => import('./pages/login').then(m => ({ default: m
 const JobsPage = safeLazy(() => import('./pages/jobs').then(m => ({ default: m.JobsPage })));
 const WebhooksPage = safeLazy(() => import('./pages/webhooks').then(m => ({ default: m.WebhooksPage })));
 const StandardizationPage = safeLazy(() => import('./pages/standardization').then(m => ({ default: m.StandardizationPage })));
+const ActionsPage = safeLazy(() => import('./pages/actions').then(m => ({ default: m.ActionsPage })));
 const JobDetailPage = safeLazy(() => import('./pages/job-detail').then(m => ({ default: m.JobDetailPage })));
 const JobLogsPage = safeLazy(() => import('./pages/job-logs').then(m => ({ default: m.JobLogsPage })));
 const ChangelogDetailPage = safeLazy(() => import('./pages/changelog-detail').then(m => ({ default: m.ChangelogDetailPage })));
@@ -122,6 +123,7 @@ const router = createBrowserRouter([
       { path: 'jobs', element: withSuspense(JobsPage) },
       { path: 'webhooks', element: withSuspense(WebhooksPage) },
       { path: 'standardization', element: withSuspense(StandardizationPage) },
+      { path: 'actions', element: withSuspense(ActionsPage) },
       { path: 'jobs/:id', element: withSuspense(JobDetailPage) },
       { path: 'jobs/:id/logs', element: withSuspense(JobLogsPage) },
       { path: 'changelog/:slug', element: withSuspense(ChangelogDetailPage) },

@@ -19,6 +19,7 @@ import { getOrCreateRepository } from '@server/db/repositories';
 import { buildChangelogPrompt, CHANGELOG_SYSTEM_PROMPT } from '@server/prompts/changelog';
 import { listEnabledStandardizationRules, type StandardizationStrategy } from '@server/db/standardization';
 import { applyStrategy, fetchSourceContent } from '@server/core/standardization';
+import { recordAgentAction } from '@server/db/agent-actions';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
 
@@ -430,7 +431,8 @@ async function runPreparePhase(
   // Post a status comment to the PR so the team knows Codra is active
   if (!job.statusCommentId) {
     try {
-      const statusBody = `## \u{1F50D} Code Review\n\nCodra is reviewing this pull request. A summary will be posted here when the review is complete.`;
+      const monitorLink = env.APP_URL ? `\n\n[👉 Click here to monitor progress](${env.APP_URL}/jobs/${job.id})` : '';
+      const statusBody = `## \u{1F50D} Code Review\n\nCodra is reviewing this pull request. A summary will be posted here when the review is complete.${monitorLink}`;
       const comment = await github.createIssueComment(job.owner, job.repo, job.prNumber, statusBody);
       await updateJobStatusComment(env, job.id, comment.id);
     } catch (err) {
@@ -1508,6 +1510,23 @@ Maintain the existing structure but improve details. DO NOT write any conversati
       base: defaultBranch,
     });
     logger.info(`Opened housekeeping PR #${housekeepingPR.number} (${housekeepingPR.html_url}) for ${job.owner}/${job.repo}`);
+
+    // Record the action + reasoning so it is auditable in the dashboard.
+    try {
+      await recordAgentAction(env, {
+        owner: job.owner,
+        repo: job.repo,
+        actionType: 'standardization',
+        summary: `Opened a standardization PR while reviewing PR #${job.prNumber}. Missing or drifted files detected on the default branch:\n${changedFiles}`,
+        files: changes.map((c) => c.path),
+        prNumber: housekeepingPR.number,
+        prUrl: housekeepingPR.html_url,
+        triggeringPrNumber: job.prNumber,
+        triggeringJobId: job.id,
+      });
+    } catch (err) {
+      logger.error('Failed to record standardization action', err);
+    }
   } catch (err) {
     logger.error('Failed to open housekeeping PR', err);
   }

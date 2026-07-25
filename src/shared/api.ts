@@ -131,3 +131,21 @@ export type StandardizationRulesResponse = {
 export type StandardizationRuleResponse = {
   rule: StandardizationRule;
 };
+
+export type AgentAction = {
+  id: string;
+  created_at: string;
+  owner: string;
+  repo: string;
+  action_type: string;
+  summary: string;
+  files: string[];
+  pr_number: number | null;
+  pr_url: string | null;
+  triggering_pr_number: number | null;
+  triggering_job_id: string | null;
+};
+
+export type AgentActionsResponse = {
+  actions: AgentAction[];
+};

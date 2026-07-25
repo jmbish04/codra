@@ -16,6 +16,7 @@ import type {
   StandardizationRulesResponse,
   StandardizationRuleResponse,
   StandardizationStrategy,
+  AgentActionsResponse,
 } from '@shared/api';
 import type { LlmApiFormat, LlmProvider, ModelConfig, RepoConfig, JobDetail, ChangelogEntry } from '@shared/schema';
 
@@ -184,6 +185,16 @@ export const api = {
   syncOpenPrs(repo?: string) {
     const query = repo ? `?repo=${encodeURIComponent(repo)}` : '';
     return request<PrSyncResponse>(`/api/webhooks/sync${query}`, { method: 'POST' });
+  },
+  getAgentActions(params: Record<string, QueryValue> = {}) {
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '') {
+        searchParams.set(key, String(value));
+      }
+    }
+    const query = searchParams.toString();
+    return request<AgentActionsResponse>(`/api/actions${query ? `?${query}` : ''}`);
   },
   getStandardizationRules() {
     return request<StandardizationRulesResponse>('/api/standardization');
