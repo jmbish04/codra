@@ -9,6 +9,8 @@ import {
   updateBestPractice,
   deleteBestPractice,
   listInfrastructures,
+  rejectBestPractice,
+  countPendingBestPractices,
 } from '@server/db/best-practices';
 
 const CreateBestPracticeSchema = z.object({
@@ -40,6 +42,21 @@ export function createBestPracticesRouter() {
     } catch (error) {
       return jsonError('Failed to fetch best practices', 500);
     }
+  });
+
+  // Count of practices codra proposed that are awaiting review (for the nav badge)
+  app.get('/pending-count', async (c) => {
+    const count = await countPendingBestPractices(c.env);
+    return c.json({ count });
+  });
+
+  // Reject a proposed practice with a reason (marks it rejected + inactive)
+  app.post('/:id/reject', async (c) => {
+    const body = await z.object({ reason: z.string().min(1) }).safeParseAsync(await c.req.json().catch(() => null));
+    if (!body.success) return jsonError('A rejection reason is required.', 400);
+    const item = await rejectBestPractice(c.env, c.req.param('id'), body.data.reason);
+    if (!item) return jsonError('Best practice not found.', 404);
+    return c.json({ bestPractice: item });
   });
 
   // Get all infrastructures

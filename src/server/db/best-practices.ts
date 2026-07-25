@@ -1,6 +1,6 @@
 import { getDb } from './client';
 import { bestPractices, infrastructures } from './schemas';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 export interface BestPracticeInput {
   name: string;
@@ -31,6 +31,11 @@ export async function listBestPractices(env: { DB: D1Database }) {
       criteria: bestPractices.criteria,
       instructions: bestPractices.instructions,
       isActive: bestPractices.is_active,
+      reviewStatus: bestPractices.review_status,
+      rejectionReason: bestPractices.rejection_reason,
+      source: bestPractices.source,
+      sourcePrNumber: bestPractices.source_pr_number,
+      sourceRepo: bestPractices.source_repo,
       createdAt: bestPractices.created_at,
       updatedAt: bestPractices.updated_at,
     })
@@ -49,6 +54,11 @@ export async function getBestPractice(env: { DB: D1Database }, id: string) {
       criteria: bestPractices.criteria,
       instructions: bestPractices.instructions,
       isActive: bestPractices.is_active,
+      reviewStatus: bestPractices.review_status,
+      rejectionReason: bestPractices.rejection_reason,
+      source: bestPractices.source,
+      sourcePrNumber: bestPractices.source_pr_number,
+      sourceRepo: bestPractices.source_repo,
       createdAt: bestPractices.created_at,
       updatedAt: bestPractices.updated_at,
     })
@@ -108,9 +118,52 @@ export async function updateBestPractice(env: { DB: D1Database }, id: string, in
   }
 
   updateData.updated_at = new Date().toISOString();
+  // Editing a proposed practice approves it — the pending state goes away.
+  updateData.review_status = 'active';
+  updateData.rejection_reason = null;
 
   await db.update(bestPractices).set(updateData).where(eq(bestPractices.id, id));
   return getBestPractice(env, id);
+}
+
+/** A best practice codra proposed from a docs review — applied, but pending human review. */
+export async function createProposedBestPractice(
+  env: { DB: D1Database },
+  input: BestPracticeInput & { source?: string; sourcePrNumber?: number | null; sourceRepo?: string | null },
+) {
+  const db = getDb(env);
+  const id = crypto.randomUUID();
+  const finalInfraId = await resolveInfraId(env, input.infraId, input.infraName);
+  await db.insert(bestPractices).values({
+    id,
+    name: input.name,
+    infra_id: finalInfraId,
+    criteria: input.criteria,
+    instructions: input.instructions,
+    is_active: true,
+    review_status: 'pending',
+    source: input.source ?? 'docs-review',
+    source_pr_number: input.sourcePrNumber ?? null,
+    source_repo: input.sourceRepo ?? null,
+  });
+  return getBestPractice(env, id);
+}
+
+export async function rejectBestPractice(env: { DB: D1Database }, id: string, reason: string) {
+  const db = getDb(env);
+  await db.update(bestPractices)
+    .set({ review_status: 'rejected', rejection_reason: reason, is_active: false, updated_at: new Date().toISOString() })
+    .where(eq(bestPractices.id, id));
+  return getBestPractice(env, id);
+}
+
+export async function countPendingBestPractices(env: { DB: D1Database }): Promise<number> {
+  const db = getDb(env);
+  const row = await db.select({ c: sql<number>`count(*)` })
+    .from(bestPractices)
+    .where(eq(bestPractices.review_status, 'pending'))
+    .get();
+  return Number(row?.c ?? 0);
 }
 
 export async function deleteBestPractice(env: { DB: D1Database }, id: string) {
