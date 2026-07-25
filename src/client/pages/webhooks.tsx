@@ -11,6 +11,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@client/components/ui/dialog';
 import { formatDateTime, formatNumber } from '@client/lib/format';
+import { JsonViewer } from '@client/components/json-viewer';
 import { Webhook, RefreshCw, DownloadCloud, ChevronLeft, ChevronRight, Inbox, X } from 'lucide-react';
 import type { WebhookDeliverySummary, WebhookOutcomeStat, WebhookRepoRef } from '@shared/api';
 
@@ -318,9 +319,9 @@ export function WebhooksPage() {
                 {selected.error && <Alert variant="destructive">{selected.error}</Alert>}
                 <div>
                   <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Payload</p>
-                  <pre className="max-h-80 overflow-auto rounded-md bg-secondary/60 p-3 text-xs">
-                    {JSON.stringify(selected.payload, null, 2)}
-                  </pre>
+                  <div className="max-h-96 overflow-auto rounded-md border border-border">
+                    <JsonViewer data={selected.payload as any} rootName="payload" defaultExpanded={2} />
+                  </div>
                 </div>
               </div>
             </>
