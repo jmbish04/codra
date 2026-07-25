@@ -13,3 +13,4 @@ export * from './agent-actions';
 export * from './secret-bindings';
 export * from './test-targets';
 export * from './dismissed-standards';
+export * from './docs-review';

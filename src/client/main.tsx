@@ -39,6 +39,7 @@ const StatsPage = safeLazy(() => import('./pages/stats').then(m => ({ default: m
 const SettingsPage = safeLazy(() => import('./pages/settings').then(m => ({ default: m.SettingsPage })));
 const PromptsPage = safeLazy(() => import('./pages/prompts').then(m => ({ default: m.PromptsPage })));
 const BestPracticesPage = safeLazy(() => import('./pages/best-practices').then(m => ({ default: m.BestPracticesPage })));
+const DocsReviewPage = safeLazy(() => import('./pages/docs-review').then(m => ({ default: m.DocsReviewPage })));
 const SetupGuidePage = safeLazy(() => import('./pages/setup-guide').then(m => ({ default: m.SetupGuidePage })));
 const CommandsPage = safeLazy(() => import('./pages/commands').then(m => ({ default: m.CommandsPage })));
 const NotFoundPage = safeLazy(() => import('./pages/not-found').then(m => ({ default: m.NotFoundPage })));
@@ -142,6 +143,7 @@ const router = createBrowserRouter([
       { path: 'settings', element: withSuspense(SettingsPage) },
       { path: 'prompts', element: withSuspense(PromptsPage) },
       { path: 'best-practices', element: withSuspense(BestPracticesPage) },
+      { path: 'docs-review', element: withSuspense(DocsReviewPage) },
       { path: 'setup', element: withSuspense(SetupGuidePage) },
       { path: 'commands', element: withSuspense(CommandsPage) },
     ],

@@ -164,6 +164,32 @@ export const TEST_TARGETS_SCHEMA = {
   },
 };
 
+/** Structured-output contract for a Cloudflare-docs review — gotchas to propose as best practices. */
+export const DOCS_REVIEW_SCHEMA = {
+  name: 'codra_docs_review',
+  description: 'Report gotchas where the PR code diverges from the official Cloudflare docs/best-practices for the given criteria.',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      gotchas: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            title: { type: 'string', description: 'Short name for the best practice (e.g. "Export Durable Objects from the Worker entrypoint").' },
+            criteria: { type: 'string', description: 'When this applies — the code pattern/files it governs.' },
+            instruction: { type: 'string', description: 'The correct approach per the Cloudflare docs, and why the code is wrong. Concrete and actionable.' },
+          },
+          required: ['title', 'criteria', 'instruction'],
+        },
+      },
+    },
+    required: ['gotchas'],
+  },
+};
+
 /** Structured-output contract for changelog generation. */
 export const CHANGELOG_SCHEMA = {
   name: 'codra_changelog_entry',

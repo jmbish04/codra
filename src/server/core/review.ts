@@ -25,6 +25,7 @@ import { listEnabledStandardSecretBindings, recordMissingSecret } from '@server/
 import { notifyJobsChanged } from '@server/core/jobs-feed';
 import { detectTestTargets } from '@server/core/test-detection';
 import { runAndReportPrTests } from '@server/core/test-runner';
+import { runDocsReview } from '@server/core/docs-review';
 import { listSecretsStoreSecrets, ensureSecretBindings, type SecretBindingSpec } from '@server/core/secrets-store';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
@@ -1076,6 +1077,10 @@ async function runFinalizePhase(
   if (detected > 0) {
     await runAndReportPrTests(env, github, testJob);
   }
+
+  // Cloudflare-docs review: check the PR against the official docs for any
+  // configured triggers, recording gotchas as pending best practices.
+  await runDocsReview(env, github, testJob, config);
 
   if (config.review.labels !== false) {
     const labels = config.review.labels;

@@ -32,6 +32,11 @@ export interface BestPractice {
   criteria: string;
   instructions: string;
   isActive: boolean;
+  reviewStatus?: 'active' | 'pending' | 'rejected';
+  rejectionReason?: string | null;
+  source?: string | null;
+  sourcePrNumber?: number | null;
+  sourceRepo?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -49,6 +54,11 @@ export function BestPracticesManager() {
   const [isSaving, setIsSaving] = useState(false);
   const [editingPractice, setEditingPractice] = useState<BestPractice | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+  // Reject-with-reason dialog for codra-proposed (pending) practices
+  const [rejectTarget, setRejectTarget] = useState<BestPractice | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [isRejecting, setIsRejecting] = useState(false);
 
   // Form states
   const [name, setName] = useState('');
@@ -159,6 +169,7 @@ export function BestPracticesManager() {
       setIsDialogOpen(false);
       fetchBestPractices();
       fetchInfrastructures();
+      window.dispatchEvent(new Event('bp-pending-changed'));
     } catch (err: any) {
       toast.error(err.message || 'Error occurred while saving');
     } finally {
@@ -195,6 +206,32 @@ export function BestPracticesManager() {
       toast.success(practice.isActive ? 'Best practice deactivated' : 'Best practice activated');
     } catch (err: any) {
       toast.error('Failed to toggle best practice state');
+    }
+  };
+
+  const handleReject = async () => {
+    if (!rejectTarget) return;
+    if (!rejectReason.trim()) {
+      toast.error('Please provide a reason for rejecting this practice.');
+      return;
+    }
+    try {
+      setIsRejecting(true);
+      const res = await fetch(`/api/best-practices/${rejectTarget.id}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: rejectReason }),
+      });
+      if (!res.ok) throw new Error('Failed to reject practice');
+      toast.success('Practice rejected');
+      setRejectTarget(null);
+      setRejectReason('');
+      fetchBestPractices();
+      window.dispatchEvent(new Event('bp-pending-changed'));
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to reject');
+    } finally {
+      setIsRejecting(false);
     }
   };
 
@@ -252,11 +289,42 @@ export function BestPracticesManager() {
                   <span className="rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                     {practice.infraName}
                   </span>
+                  {practice.reviewStatus === 'pending' && (
+                    <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500 uppercase tracking-wider">
+                      Pending review
+                    </span>
+                  )}
+                  {practice.reviewStatus === 'rejected' && (
+                    <span className="rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                      Rejected
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Terminal size={12} className="opacity-70" />
                   <span className="truncate">Criteria: <code className="bg-muted px-1 py-0.5 rounded text-[11px]">{practice.criteria}</code></span>
                 </div>
+                {practice.reviewStatus === 'pending' && practice.sourceRepo && (
+                  <p className="text-[11px] text-muted-foreground/80">
+                    Proposed by codra from{' '}
+                    {practice.sourcePrNumber ? (
+                      <a
+                        href={`https://github.com/${practice.sourceRepo}/pull/${practice.sourcePrNumber}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline hover:text-foreground"
+                      >
+                        {practice.sourceRepo}#{practice.sourcePrNumber}
+                      </a>
+                    ) : (
+                      practice.sourceRepo
+                    )}
+                    . Edit &amp; save to approve, or reject.
+                  </p>
+                )}
+                {practice.reviewStatus === 'rejected' && practice.rejectionReason && (
+                  <p className="text-[11px] text-muted-foreground/70">Rejected: {practice.rejectionReason}</p>
+                )}
               </div>
 
               {/* Controls */}
@@ -270,6 +338,18 @@ export function BestPracticesManager() {
                 </div>
 
                 <div className="flex items-center gap-1">
+                  {practice.reviewStatus === 'pending' && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => { setRejectTarget(practice); setRejectReason(''); }}
+                      className="h-8 gap-1 px-2 text-xs text-muted-foreground hover:bg-danger/5 hover:text-danger"
+                      aria-label="Reject proposed best practice"
+                    >
+                      <X size={13} />
+                      Reject
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -378,6 +458,53 @@ export function BestPracticesManager() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reject-with-reason dialog */}
+      <Dialog open={!!rejectTarget} onOpenChange={(open) => { if (!open) { setRejectTarget(null); setRejectReason(''); } }}>
+        <DialogContent className="max-w-md bg-card border border-border">
+          <DialogHeader>
+            <DialogTitle>Reject proposed practice</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Rejecting <span className="font-medium text-foreground">{rejectTarget?.name}</span>. It will no longer
+              be applied in reviews. Please record why.
+            </p>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
+                Reason for rejection
+              </label>
+              <textarea
+                autoFocus
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="e.g. Not applicable to our stack / already covered by an existing practice"
+                className="min-h-[90px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+          </div>
+          <DialogFooter className="pt-2">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => { setRejectTarget(null); setRejectReason(''); }}
+              disabled={isRejecting}
+              className="text-muted-foreground"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleReject}
+              disabled={isRejecting}
+              className="bg-danger text-danger-foreground hover:bg-danger/90"
+            >
+              {isRejecting ? <RefreshCw className="mr-1.5 h-3 w-3 animate-spin" /> : null}
+              Reject &amp; save reason
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </section>

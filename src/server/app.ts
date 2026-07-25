@@ -18,6 +18,7 @@ import { createBestPracticesRouter } from '@server/routes/api/best-practices';
 import { createChangelogRouter } from '@server/routes/api/changelog';
 import { createWebhooksRouter } from '@server/routes/api/webhooks';
 import { createStandardizationRouter } from '@server/routes/api/standardization';
+import { createDocsReviewRouter } from '@server/routes/api/docs-review';
 import { createActionsRouter } from '@server/routes/api/actions';
 import { createSecretBindingsRouter } from '@server/routes/api/secret-bindings';
 import { createTestConfigRouter } from '@server/routes/api/test-config';
@@ -117,6 +118,7 @@ export function createApp() {
   app.route('/api/actions', createActionsRouter());
   app.route('/api/secret-bindings', createSecretBindingsRouter());
   app.route('/api/test-config', createTestConfigRouter());
+  app.route('/api/docs-review-rules', createDocsReviewRouter());
 
   app.all('/mcp/*', verifyMcpAuth, async (c) => {
     return GitHubLikeMCP.serve('/mcp', { binding: 'GitHubLikeMCP' }).fetch(

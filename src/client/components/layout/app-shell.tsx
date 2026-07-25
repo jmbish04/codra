@@ -24,6 +24,7 @@ import {
   History,
   KeyRound,
   FlaskConical,
+  FileSearch,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
 import { useTheme } from '@client/lib/theme';
@@ -45,6 +46,7 @@ const links = [
   { to: '/stats', label: 'Stats', icon: BarChart2, end: false },
   { to: '/prompts', label: 'Prompts', icon: PenTool, end: false },
   { to: '/best-practices', label: 'Best Practices', icon: BookMarked, end: false },
+  { to: '/docs-review', label: 'Docs Review', icon: FileSearch, end: false },
   { to: '/standardization', label: 'Standardization', icon: FileCheck2, end: false },
   { to: '/secrets', label: 'Secret Bindings', icon: KeyRound, end: false },
   { to: '/testing', label: 'PR Testing', icon: FlaskConical, end: false },
@@ -85,6 +87,7 @@ export function AppShell() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => getStoredSidebarCollapsed());
   const [isDesktop, setIsDesktop] = useState<boolean>(() => getIsDesktop());
+  const [pendingBpCount, setPendingBpCount] = useState(0);
 
   const shellStyle = {
     '--app-sidebar-width': sidebarCollapsed
@@ -111,6 +114,21 @@ export function AppShell() {
       // ignore storage failures
     }
   }, [sidebarCollapsed]);
+
+  // Pending best-practice count for the nav badge: poll + refresh on local changes.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetch('/api/best-practices/pending-count')
+        .then(r => r.ok ? r.json() : { count: 0 })
+        .then((d: any) => { if (!cancelled) setPendingBpCount(Number(d?.count ?? 0)); })
+        .catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 30000);
+    window.addEventListener('bp-pending-changed', load);
+    return () => { cancelled = true; clearInterval(id); window.removeEventListener('bp-pending-changed', load); };
+  }, []);
 
   useEffect(() => {
     const query = window.matchMedia('(min-width: 1024px)');
@@ -304,6 +322,19 @@ export function AppShell() {
                     )}>
                       {label}
                     </span>
+
+                    {/* Pending-review badge (Best Practices) */}
+                    {to === '/best-practices' && pendingBpCount > 0 && (
+                      <span
+                        className={cn(
+                          'relative z-10 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white',
+                          sidebarCollapsed && 'lg:absolute lg:-right-0.5 lg:-top-0.5',
+                        )}
+                        aria-label={`${pendingBpCount} pending review`}
+                      >
+                        {pendingBpCount}
+                      </span>
+                    )}
                   </>
                 )}
               </NavLink>
