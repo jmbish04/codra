@@ -5,7 +5,7 @@ import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileRevi
 import { getResolvedModelConfig } from '@server/db/model-configs';
 import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
 import { parseFileReviewResponse } from './model-output';
-import { filterReviewableFiles, parseUnifiedDiff } from './diff';
+import { filterReviewableFiles, parseUnifiedDiff, renderFileDiff } from './diff';
 
 import { GitHubService } from '../services/github';
 import { GitHubClient } from './github';
@@ -540,6 +540,28 @@ async function runReviewPhase(
     return !(existingReview && countsAsHandledFileReview(existingReview));
   });
 
+  // Seed a pending row (with the file's diff) for every not-yet-recorded file so
+  // the dashboard lists all files immediately and can show each diff while the
+  // reviews are still in flight.
+  for (const file of pendingFiles) {
+    if (currentReviews.has(file.path)) continue;
+    await upsertFileReview(env, job.id, {
+      filePath: file.path,
+      fileStatus: 'pending',
+      modelUsed: 'pending',
+      diffLineCount: file.lineCount,
+      diffInput: renderFileDiff(file),
+      rawAiOutput: null,
+      parsedComments: [],
+      inputTokens: null,
+      outputTokens: null,
+      durationMs: null,
+      verdict: null,
+      fileSummary: null,
+      errorMessage: null,
+    });
+  }
+
   if (await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount })) {
     return;
   }
@@ -862,7 +884,7 @@ async function reviewAndPersistFile(
       modelUsed: response.modelUsed,
       modelProvider: response.provider,
       diffLineCount: file.lineCount,
-      diffInput: response.userPrompt,
+      diffInput: renderFileDiff(file),
       rawAiOutput: response.rawText,
       parsedComments: response.parsed.comments,
       inputTokens: response.inputTokens,

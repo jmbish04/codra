@@ -6,6 +6,7 @@ import { ChevronRight } from 'lucide-react';
 import { StatusBadge } from '@client/components/ui/badge';
 import type { FileReviewRecord, ParsedReviewComment } from '@shared/schema';
 import { CommentCard } from './comment-card';
+import { DiffViewer } from '@client/components/diff-viewer';
 
 const safeRehypePlugins = [rehypeRaw, rehypeSanitize];
 
@@ -33,6 +34,17 @@ export function FileFinding({ file }: FileFindingProps) {
       </summary>
 
       <div className="border-t border-border/40 px-5 pb-5 pt-4">
+        {/* Split diff — visible immediately, even while the review is pending */}
+        {file.diffInput && (
+          <div className="mb-4 overflow-x-auto rounded-md border border-border/50">
+            <DiffViewer patch={file.diffInput} layout="split" newTitle={file.filePath} className="text-xs" />
+          </div>
+        )}
+
+        {file.fileStatus === 'pending' && (
+          <p className="mb-4 text-xs text-muted-foreground">⏳ Codra is reviewing this file — findings will appear here when it finishes.</p>
+        )}
+
         {/* File-level error */}
         {file.fileStatus === 'failed' && file.errorMessage && (
           <div
