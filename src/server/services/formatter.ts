@@ -47,7 +47,13 @@ export class FormatterService {
       body = body.slice(firstLine.length).replace(/^[\n\r]+/, '');
     }
 
-    return `${this.severityIcon(comment.severity)} <strong>${comment.title}</strong>\n\n${body}`;
+    // A ```suggestion block renders as an applyable "Apply suggestion" change on
+    // the PR when the comment sits on the line(s) it replaces.
+    const suggestion = comment.codeSuggestion?.trim()
+      ? `\n\n\`\`\`suggestion\n${comment.codeSuggestion.replace(/\n$/, '')}\n\`\`\``
+      : '';
+
+    return `${this.severityIcon(comment.severity)} <strong>${comment.title}</strong>\n\n${body}${suggestion}`;
   }
 
   summarizeVerdict(comments: ParsedReviewComment[], hasFailures: boolean) {

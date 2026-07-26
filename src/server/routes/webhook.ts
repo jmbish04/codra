@@ -139,6 +139,21 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
         if (prPayload.action === 'closed') {
           const prNumber = prPayload.pull_request.number;
           const merged = prPayload.pull_request.merged === true;
+          const owner = payload.repository.owner.login;
+          const repo = payload.repository.name;
+
+          // A CLOSED (not merged) codra housekeeping PR means the maintainers
+          // rejected those standard files — never propose them again.
+          if (!merged && prPayload.pull_request.head?.ref?.startsWith('codra/housekeeping')) {
+            try {
+              const { getHousekeepingPrFiles, recordDismissedStandards } = await import('@server/db/dismissed-standards');
+              const files = await getHousekeepingPrFiles(c.env, owner, repo, prNumber);
+              await recordDismissedStandards(c.env, { owner, repo, targetPaths: files, closedPrNumber: prNumber });
+            } catch (err) {
+              console.error('Failed to record dismissed standards:', err);
+            }
+          }
+
           const gh = new GitHubClient(c.env, installationId);
           const cancelled = await cancelReviewsForClosedPr(
             c.env,
@@ -228,20 +243,18 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
           newJobId: job.id,
         });
 
-        const repoAgentId = c.env.RepoAgent.idFromName(`${extracted.owner}/${extracted.repo}`);
-        const repoAgent = c.env.RepoAgent.get(repoAgentId);
-
-        c.executionCtx.waitUntil(
-          repoAgent.fetch(new Request('https://repoagent/webhook', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-          })).catch((err: unknown) => {
-            console.error('Failed to dispatch webhook to RepoAgent DO:', err);
-          })
-        );
+        // Enqueue the job for the review pipeline (runReviewJob). This is the
+        // path that actually processes the job, updates its status, posts the
+        // formatted review, and runs test detection.
+        await c.env.REVIEW_QUEUE.send({
+          jobId: job.id,
+          deliveryId,
+          phase: 'prepare',
+          requestId: c.get('requestId'),
+        });
         c.executionCtx.waitUntil(notifyJobsChanged(c.env, { jobId: job.id, status: 'queued' }));
 
-        return finish(202, { ok: true, message: 'delegated_to_repo_agent', job }, 'job_created', {
+        return finish(202, { ok: true, message: 'queued', job }, 'job_created', {
           action: 'review',
           prNumber: extracted.prNumber,
           jobId: job.id,

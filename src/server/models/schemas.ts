@@ -63,7 +63,7 @@ export const CHANGELOG_RESPONSE_SCHEMA = {
   required: ['title', 'summary', 'area', 'problem', 'approach', 'changes', 'api_changes', 'diagrams', 'code'],
   properties: {
     title: { type: 'string', description: 'Short headline for this change, imperative mood.' },
-    summary: { type: 'string', description: 'One or two sentences describing what shipped and why.' },
+    summary: { type: 'string', description: 'A readable GitHub-markdown summary. Open with ONE short sentence of what shipped, then a blank line, then a bulleted list (2-5 items, one per line starting with "- ") of the concrete changes — name the actual routes, tables, columns, or functions. Use real newlines and blank lines; never write one long run-on sentence.' },
     area: { type: 'string', description: 'Subsystem touched, e.g. "API", "Database", "Frontend", "MCP".' },
     problem: { type: 'string', description: 'What was broken or missing before this PR.' },
     approach: { type: 'string', description: 'How the PR solves it.' },
@@ -133,6 +133,61 @@ export const REVIEW_SCHEMA = {
   description:
     'Submit the structured code review result with findings, overall explanation, correctness, and confidence score.',
   schema: REVIEW_RESPONSE_SCHEMA,
+};
+
+/** Structured-output contract for detecting read-only endpoints/pages to test. */
+export const TEST_TARGETS_SCHEMA = {
+  name: 'codra_test_targets',
+  description: 'List the read-only API endpoints, MCP tools, and frontend pages that this PR changed and that are safe to test.',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      targets: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            kind: { type: 'string', enum: ['api', 'mcp', 'frontend'] },
+            method: { type: 'string', description: 'HTTP method for api targets (GET/HEAD), else empty string.' },
+            target: { type: 'string', description: 'API path (e.g. /api/jobs/:id), MCP tool name, or frontend page path.' },
+            reason: { type: 'string', description: 'One line: what changed and why it is worth testing.' },
+            readOnly: { type: 'boolean', description: 'True only if this is a read/list/get — never create/update/delete.' },
+            params: { type: 'string', description: 'JSON string of example params/args to send, inferred from the code. Empty string if none.' },
+          },
+          required: ['kind', 'method', 'target', 'reason', 'readOnly', 'params'],
+        },
+      },
+    },
+    required: ['targets'],
+  },
+};
+
+/** Structured-output contract for a Cloudflare-docs review — gotchas to propose as best practices. */
+export const DOCS_REVIEW_SCHEMA = {
+  name: 'codra_docs_review',
+  description: 'Report gotchas where the PR code diverges from the official Cloudflare docs/best-practices for the given criteria.',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      gotchas: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            title: { type: 'string', description: 'Short name for the best practice (e.g. "Export Durable Objects from the Worker entrypoint").' },
+            criteria: { type: 'string', description: 'When this applies — the code pattern/files it governs.' },
+            instruction: { type: 'string', description: 'The correct approach per the Cloudflare docs, and why the code is wrong. Concrete and actionable.' },
+          },
+          required: ['title', 'criteria', 'instruction'],
+        },
+      },
+    },
+    required: ['gotchas'],
+  },
 };
 
 /** Structured-output contract for changelog generation. */

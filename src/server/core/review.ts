@@ -5,7 +5,7 @@ import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileRevi
 import { getResolvedModelConfig } from '@server/db/model-configs';
 import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
 import { parseFileReviewResponse } from './model-output';
-import { filterReviewableFiles, parseUnifiedDiff } from './diff';
+import { filterReviewableFiles, parseUnifiedDiff, renderFileDiff } from './diff';
 
 import { GitHubService } from '../services/github';
 import { GitHubClient } from './github';
@@ -20,8 +20,12 @@ import { buildChangelogPrompt, CHANGELOG_SYSTEM_PROMPT } from '@server/prompts/c
 import { listEnabledStandardizationRules, type StandardizationStrategy } from '@server/db/standardization';
 import { applyStrategy, fetchSourceContent } from '@server/core/standardization';
 import { recordAgentAction } from '@server/db/agent-actions';
+import { getDismissedStandards } from '@server/db/dismissed-standards';
 import { listEnabledStandardSecretBindings, recordMissingSecret } from '@server/db/secret-bindings';
 import { notifyJobsChanged } from '@server/core/jobs-feed';
+import { detectTestTargets } from '@server/core/test-detection';
+import { runAndReportPrTests } from '@server/core/test-runner';
+import { runDocsReview } from '@server/core/docs-review';
 import { listSecretsStoreSecrets, ensureSecretBindings, type SecretBindingSpec } from '@server/core/secrets-store';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
@@ -35,7 +39,15 @@ const JOB_LEASE_SECONDS = 15 * 60;
 const BUSY_RETRY_SECONDS = 60;
 const RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS = [60, 5 * 60, 15 * 60];
 /** Workers AI batches typically land within ~5 minutes; poll on a steady beat. */
-const BATCH_POLL_DELAY_SECONDS = 30;
+const BATCH_POLL_DELAY_SECONDS = 20;
+
+/**
+ * The async batch API trades minutes of queue latency for throughput and
+ * rate-limit headroom, so it only pays off on large PRs. Smaller reviews finish
+ * faster on the parallel synchronous path. Only submit a NEW batch at/above this
+ * many pending files. ponytail: a flat threshold; make it config if repos vary.
+ */
+const BATCH_MIN_PENDING_FILES = 12;
 
 const MAX_RETRYABLE_FILE_REVIEW_FAILURES = 3;
 
@@ -79,6 +91,9 @@ function shouldRetryExistingFileReview(review: { file_status: string; error_msg:
 }
 
 function countsAsHandledFileReview(review: { file_status: string; error_msg: string | null }) {
+  // A seeded 'pending' placeholder is NOT a completed review — it still needs to
+  // be reviewed. (Treating it as handled skips the file entirely.)
+  if (review.file_status === 'pending') return false;
   return !shouldRetryExistingFileReview(review);
 }
 
@@ -530,6 +545,28 @@ async function runReviewPhase(
     return !(existingReview && countsAsHandledFileReview(existingReview));
   });
 
+  // Seed a pending row (with the file's diff) for every not-yet-recorded file so
+  // the dashboard lists all files immediately and can show each diff while the
+  // reviews are still in flight.
+  for (const file of pendingFiles) {
+    if (currentReviews.has(file.path)) continue;
+    await upsertFileReview(env, job.id, {
+      filePath: file.path,
+      fileStatus: 'pending',
+      modelUsed: 'pending',
+      diffLineCount: file.lineCount,
+      diffInput: renderFileDiff(file),
+      rawAiOutput: null,
+      parsedComments: [],
+      inputTokens: null,
+      outputTokens: null,
+      durationMs: null,
+      verdict: null,
+      fileSummary: null,
+      errorMessage: null,
+    });
+  }
+
   if (await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount })) {
     return;
   }
@@ -678,6 +715,10 @@ async function runBatchReviewPhase(
   }
 
   if (pendingFiles.length === 0) return false;
+
+  // Small/medium PRs review faster on the parallel sync path than on the async
+  // batch queue — only batch when there are enough files to make it worthwhile.
+  if (pendingFiles.length < BATCH_MIN_PENDING_FILES) return false;
 
   const batchModel = await model.resolveBatchModel(config, totalLineCount);
   if (!batchModel) return false;
@@ -848,7 +889,7 @@ async function reviewAndPersistFile(
       modelUsed: response.modelUsed,
       modelProvider: response.provider,
       diffLineCount: file.lineCount,
-      diffInput: response.userPrompt,
+      diffInput: renderFileDiff(file),
       rawAiOutput: response.rawText,
       parsedComments: response.parsed.comments,
       inputTokens: response.inputTokens,
@@ -1028,6 +1069,18 @@ async function runFinalizePhase(
       body: formatter.formatInlineComment(comment),
     })),
   });
+
+  // Build codra's running list of read-only endpoints / MCP tools / frontend
+  // pages this PR touched, then test the API ones and report back (best-effort).
+  const testJob = { id: job.id, owner: job.owner, repo: job.repo, prNumber: job.prNumber };
+  const detected = await detectTestTargets(env, github, testJob, config);
+  if (detected > 0) {
+    await runAndReportPrTests(env, github, testJob);
+  }
+
+  // Cloudflare-docs review: check the PR against the official docs for any
+  // configured triggers, recording gotchas as pending best practices.
+  await runDocsReview(env, github, testJob, config);
 
   if (config.review.labels !== false) {
     const labels = config.review.labels;
@@ -1280,6 +1333,7 @@ async function runChangelogPhase(
     `**Findings:** ${findingsLine} · **Files:** ${files.length} · **Commit:** \`${job.commitSha.slice(0, 7)}\``,
     '',
     `📋 **[View the full changelog for this PR](${changelogUrl})** — schema diagrams, API changes, and the code that moved.`,
+    ...(env.APP_URL ? ['', `🔧 <a href="${env.APP_URL.replace(/\/+$/, '')}/jobs/${job.id}" target="_blank" rel="noopener noreferrer">View the findings on Codra</a> — read them in full and copy a ready-to-paste fix prompt for your coding agent.`] : []),
     ...(fixPrompt ? ['', '<details>', '<summary>Prompt for your coding agent to fix these findings</summary>', '', fixPrompt, '</details>'] : []),
   ].join('\n');
 
@@ -1397,7 +1451,7 @@ async function standardizeRepository(
 ) {
   const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
   const defaultBranch = (await github.getRepo(job.owner, job.repo)).default_branch;
-  const changes: HousekeepingChange[] = [];
+  let changes: HousekeepingChange[] = [];
 
   // 1. Config-driven standardization file rules — Cloudflare Worker repos only.
   // Each rule points at a reference file (GitHub URL) and a merge strategy; any
@@ -1561,6 +1615,17 @@ Maintain the existing structure but improve details. DO NOT write any conversati
     }
   } catch (err) {
     logger.error('Failed to evaluate AGENTS.md', err);
+  }
+
+  // Drop any files whose standard the maintainers already rejected by closing a
+  // previous housekeeping PR — never propose those again.
+  const dismissed = await getDismissedStandards(env, job.owner, job.repo).catch(() => new Set<string>());
+  if (dismissed.size > 0) {
+    const before = changes.length;
+    changes = changes.filter((c) => !dismissed.has(c.path));
+    if (changes.length !== before) {
+      logger.info(`Skipped ${before - changes.length} previously-rejected standard file(s) for ${job.owner}/${job.repo}`);
+    }
   }
 
   // 3. If there are changes, open a separate housekeeping PR

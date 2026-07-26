@@ -144,3 +144,5 @@ vite.config.ts.timestamp-*
 
 .agent
 deploy-secrets.env
+
+.DS_Store

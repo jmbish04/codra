@@ -32,6 +32,15 @@ const defaultSkipMatchers = ['**/*.lock', '**/package-lock.json', '**/pnpm-lock.
   picomatch(pattern, { dot: true }),
 );
 
+/** Serialize a parsed FileDiff back to a unified-diff patch string (for display). */
+export function renderFileDiff(file: FileDiff): string {
+  const prefix: Record<DiffLineKind, string> = { context: ' ', add: '+', del: '-' };
+  const body = file.hunks
+    .map((h) => [h.header, ...h.lines.map((l) => prefix[l.kind] + l.content)].join('\n'))
+    .join('\n');
+  return `--- a/${file.previousPath || file.path}\n+++ b/${file.path}\n${body}`;
+}
+
 export function parseUnifiedDiff(rawDiff: string): FileDiff[] {
   const lines = rawDiff.replace(/\r\n/g, '\n').split('\n');
   const files: FileDiff[] = [];

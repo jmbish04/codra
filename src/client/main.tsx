@@ -29,6 +29,8 @@ const WebhooksPage = safeLazy(() => import('./pages/webhooks').then(m => ({ defa
 const StandardizationPage = safeLazy(() => import('./pages/standardization').then(m => ({ default: m.StandardizationPage })));
 const ActionsPage = safeLazy(() => import('./pages/actions').then(m => ({ default: m.ActionsPage })));
 const SecretsPage = safeLazy(() => import('./pages/secrets').then(m => ({ default: m.SecretsPage })));
+const TestingPage = safeLazy(() => import('./pages/testing').then(m => ({ default: m.TestingPage })));
+const TestReportPage = safeLazy(() => import('./pages/test-report').then(m => ({ default: m.TestReportPage })));
 const JobDetailPage = safeLazy(() => import('./pages/job-detail').then(m => ({ default: m.JobDetailPage })));
 const JobLogsPage = safeLazy(() => import('./pages/job-logs').then(m => ({ default: m.JobLogsPage })));
 const ChangelogDetailPage = safeLazy(() => import('./pages/changelog-detail').then(m => ({ default: m.ChangelogDetailPage })));
@@ -37,6 +39,7 @@ const StatsPage = safeLazy(() => import('./pages/stats').then(m => ({ default: m
 const SettingsPage = safeLazy(() => import('./pages/settings').then(m => ({ default: m.SettingsPage })));
 const PromptsPage = safeLazy(() => import('./pages/prompts').then(m => ({ default: m.PromptsPage })));
 const BestPracticesPage = safeLazy(() => import('./pages/best-practices').then(m => ({ default: m.BestPracticesPage })));
+const DocsReviewPage = safeLazy(() => import('./pages/docs-review').then(m => ({ default: m.DocsReviewPage })));
 const SetupGuidePage = safeLazy(() => import('./pages/setup-guide').then(m => ({ default: m.SetupGuidePage })));
 const CommandsPage = safeLazy(() => import('./pages/commands').then(m => ({ default: m.CommandsPage })));
 const NotFoundPage = safeLazy(() => import('./pages/not-found').then(m => ({ default: m.NotFoundPage })));
@@ -118,6 +121,11 @@ const router = createBrowserRouter([
     element: withSuspense(LoginPage, true),
   },
   {
+    // Public test report — reachable via the link codra drops on the PR.
+    path: '/test-report/:jobId',
+    element: withSuspense(TestReportPage, true),
+  },
+  {
     element: <AppShell />,
     children: [
       { path: 'dashboard', element: withSuspense(DashboardPage) },
@@ -126,6 +134,7 @@ const router = createBrowserRouter([
       { path: 'standardization', element: withSuspense(StandardizationPage) },
       { path: 'actions', element: withSuspense(ActionsPage) },
       { path: 'secrets', element: withSuspense(SecretsPage) },
+      { path: 'testing', element: withSuspense(TestingPage) },
       { path: 'jobs/:id', element: withSuspense(JobDetailPage) },
       { path: 'jobs/:id/logs', element: withSuspense(JobLogsPage) },
       { path: 'changelog/:slug', element: withSuspense(ChangelogDetailPage) },
@@ -134,6 +143,7 @@ const router = createBrowserRouter([
       { path: 'settings', element: withSuspense(SettingsPage) },
       { path: 'prompts', element: withSuspense(PromptsPage) },
       { path: 'best-practices', element: withSuspense(BestPracticesPage) },
+      { path: 'docs-review', element: withSuspense(DocsReviewPage) },
       { path: 'setup', element: withSuspense(SetupGuidePage) },
       { path: 'commands', element: withSuspense(CommandsPage) },
     ],

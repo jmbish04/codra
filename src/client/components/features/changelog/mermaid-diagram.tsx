@@ -74,7 +74,10 @@ export function MermaidDiagram({ code, caption }: MermaidDiagramProps) {
     <figure className="space-y-2">
       <div className="overflow-x-auto rounded-xl bg-card/40 p-4 ring-1 ring-border/40">
         {error ? (
-          <pre className="whitespace-pre-wrap text-xs text-danger">Diagram error: {error}</pre>
+          <details className="text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none">Diagram couldn’t be rendered — view source</summary>
+            <pre className="mt-2 whitespace-pre-wrap rounded bg-secondary/60 p-2 font-mono">{code}</pre>
+          </details>
         ) : svg ? (
           <div
             className="flex justify-center [&_svg]:h-auto [&_svg]:max-w-full"
