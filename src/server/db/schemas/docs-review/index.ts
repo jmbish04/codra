@@ -18,6 +18,9 @@ export const docsReviewRules = sqliteTable('docs_review_rules', {
   // What to verify (free text — becomes part of the review prompt).
   criteria: text('criteria').notNull(),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  // When true, also query the live Cloudflare docs MCP (search_cloudflare_documentation)
+  // and include the results alongside the bundled skill in the review prompt.
+  use_live_docs: integer('use_live_docs', { mode: 'boolean' }).notNull().default(true),
   sort_order: integer('sort_order').notNull().default(0),
   updated_at: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });

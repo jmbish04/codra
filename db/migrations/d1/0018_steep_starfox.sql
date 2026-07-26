@@ -1,0 +1,1 @@
+ALTER TABLE `docs_review_rules` ADD `use_live_docs` integer DEFAULT true NOT NULL;

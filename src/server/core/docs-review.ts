@@ -6,6 +6,7 @@ import type { RepoConfig } from '@shared/schema';
 import { DOCS_REVIEW_SCHEMA } from '@server/models/schemas';
 import { listEnabledDocsReviewRules, type DocsReviewSkill } from '@server/db/docs-review';
 import { createProposedBestPractice } from '@server/db/best-practices';
+import { searchCloudflareDocs } from '@server/services/cloudflare-docs';
 
 import agentsSdkSkill from '../skills/agents-sdk/SKILL.md?raw';
 import workersBpSkill from '../skills/workers-best-practices/SKILL.md?raw';
@@ -54,6 +55,16 @@ export async function runDocsReview(
       const skillContent = SKILL_CONTENT[rule.skill as DocsReviewSkill];
       if (!skillContent) continue;
 
+      // Optionally augment the bundled skill with a live query to the official
+      // Cloudflare docs MCP (search_cloudflare_documentation). Best-effort.
+      let liveDocs = '';
+      if (rule.use_live_docs) {
+        liveDocs = await searchCloudflareDocs(rule.criteria, { maxChars: 8000 });
+      }
+      const docsBlock = liveDocs
+        ? `${skillContent.slice(0, 8000)}\n\n=== LIVE CLOUDFLARE DOCS (search_cloudflare_documentation) ===\n${liveDocs}`
+        : skillContent.slice(0, 12000);
+
       try {
         const res = await model.callModel(
           config.model?.main || '@cf/moonshotai/kimi-k2.7-code',
@@ -65,7 +76,7 @@ CONCERN: ${rule.criteria}
 Only report real, specific problems grounded in the docs and visible in the diff. If the code is correct, return an empty array. Do not invent issues.
 
 === CLOUDFLARE DOCS (${rule.skill}) ===
-${skillContent.slice(0, 12000)}`,
+${docsBlock}`,
             userPrompt: `PR diff (truncated):\n\n${diff.slice(0, 18000)}`,
           },
           DOCS_REVIEW_SCHEMA,

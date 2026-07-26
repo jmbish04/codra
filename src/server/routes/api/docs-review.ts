@@ -17,6 +17,7 @@ const CreateSchema = z.object({
   skill: z.enum(SKILLS),
   criteria: z.string().min(1),
   enabled: z.boolean().optional(),
+  use_live_docs: z.boolean().optional(),
   sort_order: z.number().int().optional(),
 });
 

@@ -21,6 +21,7 @@ interface DocsReviewRule {
   skill: string;
   criteria: string;
   enabled: boolean;
+  use_live_docs: boolean;
   sort_order: number;
   updated_at: string;
 }
@@ -43,6 +44,7 @@ export function DocsReviewManager() {
   const [trigger, setTrigger] = useState('');
   const [skill, setSkill] = useState('agents-sdk');
   const [criteria, setCriteria] = useState('');
+  const [useLiveDocs, setUseLiveDocs] = useState(true);
 
   const fetchRules = async () => {
     try {
@@ -67,12 +69,14 @@ export function DocsReviewManager() {
       setTrigger(rule.trigger);
       setSkill(rule.skill);
       setCriteria(rule.criteria);
+      setUseLiveDocs(rule.use_live_docs);
     } else {
       setEditing(null);
       setName('');
       setTrigger('');
       setSkill('agents-sdk');
       setCriteria('');
+      setUseLiveDocs(true);
     }
     setIsDialogOpen(true);
   };
@@ -84,7 +88,7 @@ export function DocsReviewManager() {
     if (!criteria.trim()) return toast.error('Describe what to review for.');
     try {
       setIsSaving(true);
-      const payload = { name, trigger, skill, criteria };
+      const payload = { name, trigger, skill, criteria, use_live_docs: useLiveDocs };
       const res = editing
         ? await fetch(`/api/docs-review-rules/${editing.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
         : await fetch('/api/docs-review-rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -167,6 +171,11 @@ export function DocsReviewManager() {
                   <span className="rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                     {rule.skill}
                   </span>
+                  {rule.use_live_docs && (
+                    <span className="rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary uppercase tracking-wider">
+                      Live docs
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground">{rule.criteria}</p>
                 <div className="text-xs text-muted-foreground">
@@ -226,6 +235,16 @@ export function DocsReviewManager() {
                 className="min-h-[110px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
             </div>
+
+            <label className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/20 px-3 py-2.5">
+              <span className="min-w-0">
+                <span className="block text-xs font-medium text-foreground">Query live Cloudflare docs</span>
+                <span className="block text-[11px] text-muted-foreground">
+                  Also call the official docs MCP (<code className="text-[10px]">search_cloudflare_documentation</code>) at review time and include the results.
+                </span>
+              </span>
+              <Switch checked={useLiveDocs} onCheckedChange={setUseLiveDocs} />
+            </label>
 
             <DialogFooter className="pt-2">
               <Button type="button" variant="ghost" onClick={() => setIsDialogOpen(false)} disabled={isSaving} className="text-muted-foreground">
