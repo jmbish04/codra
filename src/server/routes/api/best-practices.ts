@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '@server/env';
 import { jsonError } from '@server/core/http';
+import { logger } from '@server/core/logger';
 import {
   listBestPractices,
   getBestPractice,
@@ -77,6 +78,7 @@ export function createBestPracticesRouter() {
       const item = await createBestPractice(c.env, parsed.data);
       return c.json({ bestPractice: item }, 201);
     } catch (error) {
+      logger.error('Failed to create best practice', error instanceof Error ? error : new Error(String(error)));
       return jsonError('Failed to create best practice', 500);
     }
   });
@@ -96,6 +98,7 @@ export function createBestPracticesRouter() {
       }
       return c.json({ bestPractice: item });
     } catch (error) {
+      logger.error('Failed to update best practice', error instanceof Error ? error : new Error(String(error)));
       return jsonError('Failed to update best practice', 500);
     }
   });

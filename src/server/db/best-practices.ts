@@ -75,6 +75,12 @@ export async function resolveInfraId(env: { DB: D1Database }, infraId: string, i
       return slug;
     }
   }
+  // best_practices.infra_id is a FK to infrastructures. Built-in ids
+  // (cloudflare-workers, python, ...) may not be seeded on a given DB, so a
+  // save would fail the FK with an opaque 500. Ensure the row exists.
+  await db.insert(infrastructures)
+    .values({ id: infraId, name: infraName ?? infraId })
+    .onConflictDoNothing();
   return infraId;
 }
 
