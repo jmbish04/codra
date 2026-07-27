@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { AppEnv } from '@server/env';
 import { requireSession } from '@server/middleware/auth';
+import { computeJobHealth } from '@server/core/health';
 import { requireCsrfHeader } from '@server/middleware/csrf';
 import { observability } from '@server/middleware/observability';
 import { createAuthRouter } from '@server/routes/auth';
@@ -101,6 +102,16 @@ export function createApp() {
   // Mount OAuth endpoints
   app.route('/oauth', createMcpOAuthRouter());
 
+  // Unauthenticated liveness probe for uptime monitors. Returns only
+  // operational status (no job contents) and 503 when the pipeline is stuck.
+  app.get('/healthz', async (c) => {
+    const health = await computeJobHealth(c.env);
+    return c.json(
+      { healthy: health.healthy, checkedAt: health.checkedAt, reasons: health.reasons, stuckCount: health.stuck.length },
+      health.healthy ? 200 : 503,
+    );
+  });
+
   app.use('/api/*', requireSession);
   app.use('/api/*', requireCsrfHeader);
 
@@ -109,6 +120,7 @@ export function createApp() {
   app.route('/api/changelog', createChangelogRouter());
   app.route('/api/repos', createReposRouter());
   app.route('/api/stats', createStatsRouter());
+  app.get('/api/health', async (c) => c.json(await computeJobHealth(c.env)));
   app.route('/api/dlq', createDlqRouter());
   app.route('/api/models', createModelsRouter());
   app.route('/api/prompts', createPromptsRouter());

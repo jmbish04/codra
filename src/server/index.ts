@@ -4,6 +4,7 @@ import { reviewJobMessageSchema } from '@shared/schema';
 import { logger } from '@server/core/logger';
 
 import { runBestEffortJobMaintenance } from '@server/core/job-recovery';
+import { soundHealthAlarmIfUnhealthy } from '@server/core/health';
 import { notifyJobsChanged } from '@server/core/jobs-feed';
 
 const app = createApp();
@@ -56,6 +57,13 @@ export default {
 
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     const { runFullSync } = await import('@server/services/sync/github-sync');
+    // Sound the health alarm on cron: a loud error log (visible in observability)
+    // whenever the review pipeline has stuck jobs.
+    ctx.waitUntil(
+      soundHealthAlarmIfUnhealthy(env).catch((error) => {
+        logger.error('Scheduled health check failed', error instanceof Error ? error : new Error(String(error)));
+      })
+    );
     ctx.waitUntil(
       runFullSync(env).catch((error) => {
         logger.error('Scheduled full sync failed', error instanceof Error ? error : new Error(String(error)));
