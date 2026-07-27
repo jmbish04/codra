@@ -1,0 +1,15 @@
+{
+  "id": "d1-fk-unseeded-parent",
+  "title": "D1 foreign key to an unseeded parent row causes an opaque 500 on insert",
+  "infra": ["cloudflare-workers", "d1", "drizzle"],
+  "severity": "P1",
+  "detect": {
+    "content_any": ["\\.references\\(", "infra_id", "foreign key", "FK"],
+    "path_any": ["db/", "schema"],
+    "signal": "inserting a row whose FK column points at a parent table that may not have the referenced row seeded (e.g. best_practices.infra_id -> infrastructures.id)"
+  },
+  "directive": "D1 enforces foreign keys. Inserting a child row whose FK parent does not exist fails with 'FOREIGN KEY constraint failed', and API handlers that catch-and-return a generic 500 hide it. When a child insert takes a caller-supplied parent id, ENSURE the parent exists first (upsert with onConflictDoNothing) for ANY id, not just a special 'other' case. Also: never swallow the real error — logger.error(actual) before returning 500, or you debug blind.",
+  "fix_example": "await db.insert(parent).values({ id, name: name ?? id }).onConflictDoNothing();\n// then insert the child that references parent.id",
+  "evidence": "2026-07-23: saving a best_practice with infra_id='cloudflare-workers' 500'd because resolveInfraId only created the infrastructures row for infraId==='other'. Fixed in db/best-practices.ts.",
+  "source": "codra-incident-2026-07-23"
+}

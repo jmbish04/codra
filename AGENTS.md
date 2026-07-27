@@ -54,3 +54,19 @@ driver** anywhere in the runtime.
 - **DB**: Cloudflare D1 (SQLite) via Drizzle ORM
 - **Other bindings**: Cloudflare KV, Queues (+ DLQ), Workers AI, Durable Objects
 - **Dashboard**: React, Vite, Tailwind, Radix UI, Recharts
+
+## URLs — never hardcode a base URL
+
+The deployed base URL lives in one place: `env.APP_URL` (a `vars` entry in
+[wrangler.jsonc](wrangler.jsonc)). Never hardcode a domain or a placeholder like
+`codra.example.com`.
+
+- Server: build links from `env.APP_URL` (e.g. via `FormatterService`).
+- Tests: derive it — `const APP_URL = createTestEnv().APP_URL` — never a literal domain.
+
+## Gotchas catalog
+
+Known hard-won gotchas live in [data/gotchas/](data/gotchas/) as
+detection-signal + decisive-directive JSON (e.g. the D1 100-bound-param cap and
+the FK-to-unseeded-parent 500). Add an entry when a non-obvious bug bites; seed
+into the DB with `node scripts/ops/seed-gotchas.mjs`.
