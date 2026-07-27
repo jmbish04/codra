@@ -284,4 +284,22 @@ export const api = {
       body: JSON.stringify(config),
     });
   },
+  getBugs() {
+    return request<{ ok: boolean; bugs: any[] }>('/api/feedback/bugs');
+  },
+  updateBugStatus(id: number, status: 'open' | 'in_progress' | 'resolved') {
+    return request<{ ok: boolean; bug: any }>(`/api/feedback/bugs/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  },
+  getFeatures() {
+    return request<{ ok: boolean; features: any[] }>('/api/feedback/features');
+  },
+  updateFeatureStatus(id: number, updates: { status?: 'open' | 'in_progress' | 'shipped', votes?: number }) {
+    return request<{ ok: boolean; feature: any }>(`/api/feedback/features/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+  },
 };

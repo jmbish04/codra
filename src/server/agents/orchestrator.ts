@@ -24,6 +24,9 @@ import {
 import { BrowserConnector, DurableBrowserSessionStore } from "agents/browser";
 import { GithubConnector } from "./codemode";
 import { RepoApiConnector } from "./codemode";
+import { getDb } from "@server/db/client";
+import { feedback_bugs, feedback_features } from "@server/db/schemas/feedback";
+import { eq, desc } from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
 // Demo MCP server — a couple of reads and one approval-gated write.
@@ -251,6 +254,103 @@ export class GitHubLikeMCP extends McpAgent<any> {
               text: JSON.stringify({ success: true }),
             },
           ],
+        };
+      }
+    );
+
+    this.server.tool(
+      "report_bug",
+      "Report a bug in the Codra system.",
+      {
+        title: z.string().describe("Short title of the bug"),
+        description: z.string().describe("Detailed description of the bug and how to reproduce it"),
+        reporter: z.string().optional().describe("Who is reporting the bug"),
+      } as any,
+      async ({ title, description, reporter }: { title: string; description: string; reporter?: string }) => {
+        const db = getDb(this.env);
+        const result = await db.insert(feedback_bugs).values({ title, description, reporter }).returning();
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result[0], null, 2) }],
+        };
+      }
+    );
+
+    this.server.tool(
+      "list_bugs",
+      "List reported bugs in the Codra system.",
+      {} as any,
+      async () => {
+        const db = getDb(this.env);
+        const bugs = await db.select().from(feedback_bugs).orderBy(desc(feedback_bugs.created_at));
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(bugs, null, 2) }],
+        };
+      }
+    );
+
+    this.server.tool(
+      "update_bug_status",
+      "Update the status of a bug in the Codra system.",
+      {
+        id: z.number().describe("The ID of the bug"),
+        status: z.enum(['open', 'in_progress', 'resolved']).describe("The new status"),
+      } as any,
+      async ({ id, status }: { id: number; status: 'open' | 'in_progress' | 'resolved' }) => {
+        const db = getDb(this.env);
+        const result = await db.update(feedback_bugs).set({ status, updated_at: new Date().toISOString() }).where(eq(feedback_bugs.id, id)).returning();
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result[0] || { error: "Not found" }, null, 2) }],
+        };
+      }
+    );
+
+    this.server.tool(
+      "request_feature",
+      "Request a new feature for the Codra system.",
+      {
+        title: z.string().describe("Short title of the feature"),
+        description: z.string().describe("Detailed description of the feature and why it is needed"),
+        reporter: z.string().optional().describe("Who is requesting the feature"),
+      } as any,
+      async ({ title, description, reporter }: { title: string; description: string; reporter?: string }) => {
+        const db = getDb(this.env);
+        const result = await db.insert(feedback_features).values({ title, description, reporter }).returning();
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result[0], null, 2) }],
+        };
+      }
+    );
+
+    this.server.tool(
+      "list_features",
+      "List requested features in the Codra system.",
+      {} as any,
+      async () => {
+        const db = getDb(this.env);
+        const features = await db.select().from(feedback_features).orderBy(desc(feedback_features.votes), desc(feedback_features.created_at));
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(features, null, 2) }],
+        };
+      }
+    );
+
+    this.server.tool(
+      "update_feature_status",
+      "Update the status or votes of a feature request.",
+      {
+        id: z.number().describe("The ID of the feature request"),
+        status: z.enum(['open', 'in_progress', 'shipped']).optional().describe("The new status"),
+        votes: z.number().optional().describe("The new vote count"),
+      } as any,
+      async ({ id, status, votes }: { id: number; status?: 'open' | 'in_progress' | 'shipped'; votes?: number }) => {
+        const db = getDb(this.env);
+        const result = await db.update(feedback_features).set({ 
+          ...(status && { status }),
+          ...(votes !== undefined && { votes }),
+          updated_at: new Date().toISOString() 
+        }).where(eq(feedback_features.id, id)).returning();
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result[0] || { error: "Not found" }, null, 2) }],
         };
       }
     );

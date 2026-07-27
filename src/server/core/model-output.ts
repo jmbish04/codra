@@ -392,26 +392,44 @@ export function parseFileReviewResponse(raw: string, file: FileDiff): {
       };
       const severity = finding.priority !== undefined ? priorityMap[finding.priority] || 'P2' : 'P2';
 
-      const cleanText = (text: string) => {
+      const cleanTitle = (text: string) => {
         let current = text.trim();
         let prev = '';
         while (current !== prev) {
           prev = current;
           current = current
             .replace(/^([\u{1F300}-\u{1F9FF}]|\[QUALITY\]|\[SECURITY\]|\[BUG\]|\[PERFORMANCE\]|\[CORRECTNESS\]|\[P[0-3]\]|\[NIT\]|QUALITY|SECURITY|BUG|P[0-3]|NIT|[:\-\s\uFE0F]|[^\w\s])+/giu, '')
-            .replace(/\n\s*/g, ' ') // Flatten newlines in titles/snippets
+            .replace(/\n\s*/g, ' ') // Flatten newlines in titles
             .trim();
         }
         return current;
       };
 
-      const title = cleanText(finding.title);
-      let body = cleanText(finding.body);
+      const cleanBody = (text: string) => {
+        let current = text.trim();
+        let prev = '';
+        while (current !== prev) {
+          prev = current;
+          current = current
+            .replace(/^([\u{1F300}-\u{1F9FF}]|\[QUALITY\]|\[SECURITY\]|\[BUG\]|\[PERFORMANCE\]|\[CORRECTNESS\]|\[P[0-3]\]|\[NIT\]|QUALITY|SECURITY|BUG|P[0-3]|NIT|[:\-\s\uFE0F]|[^\w\s])+/giu, '')
+            .trim();
+        }
+        // Preserve paragraph breaks (double newlines) but collapse single
+        // newlines into spaces so inline line-wrapping doesn't create awkward
+        // one-word lines on GitHub.
+        return current
+          .replace(/\n{2,}/g, '\n\n')       // normalize 3+ newlines to exactly 2
+          .replace(/(?<!\n)\n(?!\n)/g, ' ')  // single newline → space
+          .trim();
+      };
+
+      const title = cleanTitle(finding.title);
+      let body = cleanBody(finding.body);
 
       // If the body starts with the title or a similar variant, strip it
-      const bodyPrefix = cleanText(body.split('\n')[0]);
+      const bodyPrefix = cleanTitle(body.split('\n')[0]);
       if (bodyPrefix.toLowerCase().startsWith(title.toLowerCase()) || title.toLowerCase().startsWith(bodyPrefix.toLowerCase())) {
-        body = cleanText(body.slice(body.split('\n')[0].length));
+        body = cleanBody(body.slice(body.split('\n')[0].length));
       }
 
       return parsedReviewCommentSchema.parse({
@@ -431,7 +449,10 @@ export function parseFileReviewResponse(raw: string, file: FileDiff): {
   let fileSummary = parsed.overall_explanation;
 
   if (orphanedComments.length > 0) {
-    fileSummary += `\n\n### Additional Comments (Off-diff)\n${orphanedComments.join('\n')}`;
+    const formattedOrphans = orphanedComments
+      .map(c => c.replace(/^- \*\*(.+?):\*\* (.+)$/, '- **$1**\n\n  $2'))
+      .join('\n\n');
+    fileSummary += `\n\n### Additional Comments (Off-diff)\n\n${formattedOrphans}`;
   }
 
   return {

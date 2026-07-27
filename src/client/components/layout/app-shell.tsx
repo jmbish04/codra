@@ -39,6 +39,8 @@ const links = [
   { to: '/stats', label: 'Stats', icon: BarChart2, end: false },
   { to: '/prompts', label: 'Prompts', icon: PenTool, end: false },
   { to: '/best-practices', label: 'Best Practices', icon: BookMarked, end: false },
+  { to: '/bugs', label: 'Bugs', icon: Activity, end: false },
+  { to: '/features', label: 'Features', icon: Star, end: false },
   { to: '/setup', label: 'Setup Guide', icon: BookOpen, end: false },
   { to: '/commands', label: 'Commands', icon: Terminal, end: false },
   { to: '/settings', label: 'Settings', icon: Settings, end: false },

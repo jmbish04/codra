@@ -1064,14 +1064,34 @@ async function runFinalizePhase(
     try {
       const successSummaries = fileSummaries
         .filter(f => f.verdict !== 'failed' && f.summary)
-        .map(f => f.summary);
-      const changeSummary = successSummaries.length > 0
-        ? successSummaries.join(' ').replace(/\s+/g, ' ').trim()
-        : `This pull request modifies ${files.length} file${files.length === 1 ? '' : 's'}.`;
+        .map(f => f.summary!.trim());
+
+      // Build the change summary preserving paragraph breaks between file
+      // summaries.  Each file_summary may already contain markdown headings
+      // (e.g. "### Additional Comments (Off-diff)"), so we must NOT collapse
+      // whitespace into a single line — doing so produces a wall of text.
+      let changeSummary: string;
+      if (successSummaries.length === 0) {
+        changeSummary = `This pull request modifies ${files.length} file${files.length === 1 ? '' : 's'}.`;
+      } else if (successSummaries.length <= 5) {
+        // Few enough files to show each summary as its own paragraph.
+        changeSummary = successSummaries.join('\n\n');
+      } else {
+        // Many files — collapse each summary to its first sentence so the
+        // comment stays manageable, then append a count for what was elided.
+        const condensed = successSummaries
+          .map(s => s.split(/\n/)[0].replace(/\s+/g, ' ').trim())
+          .filter(Boolean);
+        changeSummary = condensed.join('\n\n');
+        const omitted = successSummaries.length - condensed.length;
+        if (omitted > 0) {
+          changeSummary += `\n\n_…and ${omitted} more file${omitted === 1 ? '' : 's'}._`;
+        }
+      }
 
       const topFindings = finalComments.slice(0, 3).map(c => c.title).filter(Boolean);
       const findingsText = topFindings.length > 0
-        ? ` The review feedback ${topFindings.length === 1 ? 'points out' : 'highlights'} ${topFindings.map(t => t.toLowerCase()).join(', and ')}.`
+        ? `\n\nThe review feedback ${topFindings.length === 1 ? 'points out' : 'highlights'} ${topFindings.map(t => t.toLowerCase()).join(', and ')}.`
         : '';
 
       const failureNote = hasFailures
@@ -1081,10 +1101,12 @@ async function runFinalizePhase(
       const narrativeBody = [
         `## Code Review`,
         ``,
-        `${changeSummary}${findingsText}${failureNote}`,
+        changeSummary,
+        findingsText,
+        failureNote,
         ``,
         `**Reviewed commit:** \`${pr.head.sha.slice(0, 10)}\` · **Files:** ${files.length} · **Comments:** ${finalComments.length}`,
-      ].join('\n');
+      ].filter(line => line !== undefined).join('\n');
 
       await github.updateIssueComment(job.owner, job.repo, job.statusCommentId, narrativeBody);
     } catch (err) {

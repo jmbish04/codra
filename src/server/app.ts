@@ -15,6 +15,7 @@ import { createModelsRouter } from '@server/routes/api/models';
 import { createPromptsRouter } from '@server/routes/api/prompts';
 import { createBestPracticesRouter } from '@server/routes/api/best-practices';
 import { createChangelogRouter } from '@server/routes/api/changelog';
+import { createFeedbackRouter } from '@server/routes/api/feedback';
 import { createMcpOAuthRouter } from '@server/routes/api/mcp-oauth';
 import { GitHubLikeMCP } from '@server/agents/orchestrator';
 import { getSecretStoreBinding } from '@server/utils/secrets';
@@ -98,6 +99,7 @@ export function createApp() {
   app.route('/api/auth', createAuthApiRouter());
   app.route('/api/jobs', createJobsRouter());
   app.route('/api/changelog', createChangelogRouter());
+  app.route('/api/feedback', createFeedbackRouter());
   app.route('/api/repos', createReposRouter());
   app.route('/api/stats', createStatsRouter());
   app.route('/api/dlq', createDlqRouter());
