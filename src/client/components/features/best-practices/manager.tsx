@@ -17,6 +17,7 @@ import {
   Plus,
   Trash2,
   Edit2,
+  Check,
   RefreshCw,
   X,
   BookOpen,
@@ -181,6 +182,25 @@ export function BestPracticesManager() {
     }
   };
 
+  // Inactive practices are treated as "pending review" (e.g. system-suggested).
+  // Accept = activate it in one click, no need to open the editor.
+  const handleAccept = async (practice: BestPractice) => {
+    try {
+      const res = await fetch(`/api/best-practices/${practice.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: true }),
+      });
+      if (!res.ok) throw new Error('Failed to accept');
+      setPractices(current =>
+        current.map(p => (p.id === practice.id ? { ...p, isActive: true } : p))
+      );
+      toast.success('Best practice accepted');
+    } catch (err: any) {
+      toast.error('Failed to accept best practice');
+    }
+  };
+
   const handleToggleActive = async (practice: BestPractice) => {
     try {
       const res = await fetch(`/api/best-practices/${practice.id}`, {
@@ -252,6 +272,11 @@ export function BestPracticesManager() {
                   <span className="rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                     {practice.infraName}
                   </span>
+                  {!practice.isActive && (
+                    <span className="rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning uppercase tracking-wider">
+                      Pending review
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Terminal size={12} className="opacity-70" />
@@ -270,6 +295,17 @@ export function BestPracticesManager() {
                 </div>
 
                 <div className="flex items-center gap-1">
+                  {!practice.isActive && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleAccept(practice)}
+                      className="h-8 gap-1.5 px-2.5 text-xs font-medium text-success hover:bg-success/10"
+                      aria-label="Accept best practice suggestion"
+                    >
+                      <Check size={13} /> Accept
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"
