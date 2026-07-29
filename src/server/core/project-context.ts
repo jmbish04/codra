@@ -8,8 +8,9 @@ import { logger } from './logger';
  * the wrangler bindings and the repo's AGENTS.md/CLAUDE.md conventions.
  */
 
-// Agent/assistant instruction files, in priority order.
-const INSTRUCTION_FILES = ['AGENTS.md', 'CLAUDE.md', '.cursorrules', '.github/copilot-instructions.md'];
+// Agent/assistant instruction files, in priority order. Kept small — each is a
+// GitHub subrequest on the review hot path (cached after the first chunk).
+const INSTRUCTION_FILES = ['AGENTS.md', 'CLAUDE.md'];
 // Stack/binding declarations — first one that exists is included.
 const CONFIG_FILES = ['wrangler.jsonc', 'wrangler.json', 'wrangler.toml'];
 

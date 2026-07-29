@@ -4,6 +4,7 @@ import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, normali
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview, recordFileReviewCost } from '@server/db/file-reviews';
 import { getPricingSnapshot, buildCostBreakdown, sumBreakdown, type PricingSnapshot, type UsageAmounts } from '@server/core/guardian-pricing';
 import { getProjectContext } from '@server/core/project-context';
+import { withTimeout } from '@server/core/timeout';
 import { getResolvedModelConfig } from '@server/db/model-configs';
 import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
 import { parseFileReviewResponse } from './model-output';
@@ -538,8 +539,16 @@ async function runReviewPhase(
 
   // The repo's own instructions (AGENTS.md/CLAUDE.md) + declared stack
   // (wrangler bindings), fetched once and KV-cached, so every file review
-  // respects the project's chosen technologies and conventions.
-  const projectContext = await getProjectContext(env, github, job.owner, job.repo, pr.head.sha);
+  // respects the project's chosen technologies and conventions. Best-effort:
+  // time-bounded so a slow GitHub read can never stall the review.
+  const projectContext = await withTimeout(
+    'project-context',
+    12000,
+    () => getProjectContext(env, github, job.owner, job.repo, pr.head.sha),
+  ).catch((err) => {
+    logger.warn('Project context unavailable; reviewing without it', err);
+    return '';
+  });
 
   // Bail before spending model calls if a newer commit superseded this job
   // while standardization / diff-fetch was running.

@@ -1,5 +1,10 @@
 import { getWorkerApiKey } from '@server/utils/secrets';
 import { logger } from './logger';
+import { withTimeout } from './timeout';
+
+// Guardian is best-effort context on the review hot path — never let a slow
+// pricing endpoint stall a review; time out and fall back to public rates.
+const GUARDIAN_FETCH_TIMEOUT_MS = 5000;
 
 /**
  * Price multipliers for a review, sourced from the core-guardian worker:
@@ -185,9 +190,12 @@ function matchInfraKey(product: string, metric: string): UsageType | null {
 
 async function guardianGet<T>(env: Env, path: string): Promise<T> {
   const key = await getWorkerApiKey(env);
-  const res = await fetch(`${GUARDIAN_BASE_URL}${path}`, {
-    headers: { 'X-API-Key': key, Authorization: `Bearer ${key}`, Accept: 'application/json' },
-  });
+  const res = await withTimeout(`guardian ${path}`, GUARDIAN_FETCH_TIMEOUT_MS, (signal) =>
+    fetch(`${GUARDIAN_BASE_URL}${path}`, {
+      headers: { 'X-API-Key': key, Authorization: `Bearer ${key}`, Accept: 'application/json' },
+      signal,
+    }),
+  );
   if (!res.ok) throw new Error(`guardian ${path} -> ${res.status}`);
   return (await res.json()) as T;
 }
