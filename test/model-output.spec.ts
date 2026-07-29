@@ -138,6 +138,52 @@ unescaped newlines",
     expect(result.comments[0].line).toBe(3);
   });
 
+  it('anchors findings whose code_location is a string ("52, 77") instead of dropping them', () => {
+    const rawOutput = `
+{
+  "findings": [
+    { "title": "String single line", "body": "Single line reference should anchor.", "priority": 2, "code_location": "2" },
+    { "title": "String multi line", "body": "Multiple line reference should anchor to the first.", "priority": 2, "code_location": "2, 3" },
+    { "title": "String range", "body": "Range reference should anchor to the start.", "priority": 2, "code_location": "2-3" },
+    { "title": "Bare number", "body": "Bare numeric location should anchor.", "priority": 2, "code_location": 2 }
+  ],
+  "overall_correctness": "issues found",
+  "overall_explanation": "explanation"
+}`;
+
+    const result = parseFileReviewResponse(rawOutput, mockFile);
+    // All four resolve to the valid diff line 2 and post as inline comments,
+    // rather than being orphaned off-diff.
+    expect(result.comments).toHaveLength(4);
+    for (const comment of result.comments) {
+      expect(comment.line).toBe(2);
+      expect(comment.position).toBeDefined();
+    }
+  });
+
+  it('keeps off-diff findings (no locatable line) as COMMENT instead of hiding them', () => {
+    const rawOutput = `
+{
+  "findings": [{
+    "title": "Off-diff concern",
+    "body": "This applies to code not in the diff.",
+    "priority": 2
+  }],
+  "overall_correctness": "patch is correct",
+  "overall_explanation": "explanation"
+}`;
+
+    const result = parseFileReviewResponse(rawOutput, mockFile);
+    // Kept as a structured comment (frontend + JSON), with no line so it never
+    // posts as a GitHub inline comment.
+    expect(result.comments).toHaveLength(1);
+    expect(result.comments[0].line ?? null).toBeNull();
+    expect(result.comments[0].position ?? null).toBeNull();
+    expect(result.comments[0].body).toContain('Off-diff finding');
+    // A file with findings is a COMMENT even when it claims "patch is correct".
+    expect(result.verdict).toBe('comment');
+  });
+
   it('does not treat reviewed source snippets as review JSON', () => {
     const rawOutput = `
 \`\`\`ts

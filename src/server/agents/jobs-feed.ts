@@ -5,9 +5,17 @@ import { DurableObject } from 'cloudflare:workers';
  * WebSocket (`/ws`); the worker POSTs `/broadcast` whenever a job is created or
  * changes status, and every connected client is notified to refresh in
  * real time. Broadcast-only — no durable storage.
+ *
+ * Uses the Durable Object WebSocket Hibernation API (`ctx.acceptWebSocket` /
+ * `ctx.getWebSockets`) so connections are owned by the runtime and survive the
+ * DO evicting between broadcasts instead of living in an in-memory Set.
  */
 export class JobsFeed extends DurableObject {
-  private sessions = new Set<WebSocket>();
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // Keep idle clients alive across hibernation without waking the DO.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
+  }
 
   async fetch(request: Request) {
     const url = new URL(request.url);
@@ -17,22 +25,33 @@ export class JobsFeed extends DurableObject {
         return new Response('Expected Upgrade: websocket', { status: 400 });
       }
       const [client, server] = Object.values(new WebSocketPair());
-      server.accept();
-      this.sessions.add(server);
-      server.addEventListener('close', () => this.sessions.delete(server));
-      server.addEventListener('error', () => this.sessions.delete(server));
+      this.ctx.acceptWebSocket(server);
       try { server.send(JSON.stringify({ type: 'connected' })); } catch { /* ignore */ }
       return new Response(null, { status: 101, webSocket: client });
     }
 
     if (url.pathname === '/broadcast' && request.method === 'POST') {
       const payload = await request.text();
-      for (const session of this.sessions) {
-        try { session.send(payload); } catch { this.sessions.delete(session); }
+      for (const socket of this.ctx.getWebSockets()) {
+        try { socket.send(payload); } catch { try { socket.close(); } catch { /* gone */ } }
       }
       return new Response('OK');
     }
 
     return new Response('Not found', { status: 404 });
+  }
+
+  // Broadcast-only: clients aren't expected to send, but the hibernation API
+  // needs a message handler for the socket to receive at all.
+  async webSocketMessage(_ws: WebSocket, _message: string | ArrayBuffer) {
+    // no-op
+  }
+
+  async webSocketClose(ws: WebSocket, code: number) {
+    try { ws.close(code); } catch { /* already closing */ }
+  }
+
+  async webSocketError(ws: WebSocket) {
+    try { ws.close(); } catch { /* already gone */ }
   }
 }

@@ -18,6 +18,7 @@ export async function getStats(env: Pick<Env, 'DB'>, days = 30) {
       input_tokens: sum(jobs.total_input_tokens),
       output_tokens: sum(jobs.total_output_tokens),
       comments: sum(jobs.comment_count),
+      cost_usd: sum(jobs.total_cost_usd),
     }).from(jobs).get(),
 
     db.select({
@@ -26,6 +27,7 @@ export async function getStats(env: Pick<Env, 'DB'>, days = 30) {
       input_tokens: sum(jobs.total_input_tokens),
       output_tokens: sum(jobs.total_output_tokens),
       comments: sum(jobs.comment_count),
+      cost_usd: sum(jobs.total_cost_usd),
     })
     .from(jobs)
     .where(sql`${jobs.created_at} >= datetime('now', '-' || ${clampedDays} || ' days')`)
@@ -60,13 +62,15 @@ export async function getStats(env: Pick<Env, 'DB'>, days = 30) {
       inputTokens: Number(totals?.input_tokens ?? 0),
       outputTokens: Number(totals?.output_tokens ?? 0),
       comments: Number(totals?.comments ?? 0),
+      costUsd: Number(totals?.cost_usd ?? 0),
     },
-    trend: dailyRows.map((row) => ({ 
-      day: row.day, 
+    trend: dailyRows.map((row) => ({
+      day: row.day,
       jobs: row.jobs,
       inputTokens: Number(row.input_tokens ?? 0),
       outputTokens: Number(row.output_tokens ?? 0),
-      comments: Number(row.comments ?? 0)
+      comments: Number(row.comments ?? 0),
+      costUsd: Number(row.cost_usd ?? 0)
     })),
     verdicts: verdictRows.map((row) => ({ verdict: row.verdict as 'approve' | 'comment' | null, count: row.count })),
     models: modelRows.map((row) => ({
@@ -75,6 +79,7 @@ export async function getStats(env: Pick<Env, 'DB'>, days = 30) {
       calls: row.calls,
       inputTokens: Number(row.input_tokens ?? 0),
       outputTokens: Number(row.output_tokens ?? 0),
+      costUsd: Number(row.cost_usd ?? 0),
     })),
     topRepos: topRepos.map((row) => ({ owner: row.owner, repo: row.repo, jobs: row.jobs })),
   });

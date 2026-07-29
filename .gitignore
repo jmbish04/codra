@@ -149,3 +149,6 @@ deploy-secrets.env
 
 # Generated gotcha seed SQL
 scripts/ops/gotchas.sql
+
+# Stray embedded scratch checkout — not a submodule
+scratch_repo/

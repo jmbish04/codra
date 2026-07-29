@@ -1,7 +1,10 @@
 import { logger } from './logger';
 import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHubWebhookPayload, type IssueCommentWebhookPayload, type PullRequestWebhookPayload } from '@shared/github';
 import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
-import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview } from '@server/db/file-reviews';
+import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview, recordFileReviewCost } from '@server/db/file-reviews';
+import { getPricingSnapshot, buildCostBreakdown, sumBreakdown, type PricingSnapshot, type UsageAmounts } from '@server/core/guardian-pricing';
+import { getProjectContext } from '@server/core/project-context';
+import { withTimeout } from '@server/core/timeout';
 import { getResolvedModelConfig } from '@server/db/model-configs';
 import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
 import { parseFileReviewResponse } from './model-output';
@@ -37,7 +40,11 @@ const REVIEW_CHUNK_FILE_LIMIT = 3;
 const REVIEW_CHUNK_WALL_CLOCK_MS = 12 * 60 * 1000;
 const JOB_LEASE_SECONDS = 15 * 60;
 const BUSY_RETRY_SECONDS = 60;
-const RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS = [60, 5 * 60, 15 * 60];
+// Backoff between retries of a file that keeps hitting transient model/provider
+// errors. Kept short on purpose: with MAX_RETRYABLE_FILE_REVIEW_FAILURES=3 this
+// bounds the "frozen on the last file(s)" window to ~6min before the job
+// finalizes as a partial review, instead of the ~21min a 15-minute tail caused.
+const RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS = [30, 90, 4 * 60];
 /** Workers AI batches typically land within ~5 minutes; poll on a steady beat. */
 const BATCH_POLL_DELAY_SECONDS = 20;
 
@@ -530,6 +537,23 @@ async function runReviewPhase(
   const startedAt = Date.now();
   let processedThisChunk = 0;
 
+  // One rate snapshot per review chunk (KV-cached, ~0 subrequests) shared by
+  // every file so all costs in this run price against the same rates.
+  const pricing = await getPricingSnapshot(env, Date.now());
+
+  // The repo's own instructions (AGENTS.md/CLAUDE.md) + declared stack
+  // (wrangler bindings), fetched once and KV-cached, so every file review
+  // respects the project's chosen technologies and conventions. Best-effort:
+  // time-bounded so a slow GitHub read can never stall the review.
+  const projectContext = await withTimeout(
+    'project-context',
+    12000,
+    () => getProjectContext(env, github, job.owner, job.repo, pr.head.sha),
+  ).catch((err) => {
+    logger.warn('Project context unavailable; reviewing without it', err);
+    return '';
+  });
+
   // Bail before spending model calls if a newer commit superseded this job
   // while standardization / diff-fetch was running.
   await checkSuperseded(env, job.id);
@@ -567,7 +591,7 @@ async function runReviewPhase(
     });
   }
 
-  if (await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount })) {
+  if (await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount, projectContext })) {
     return;
   }
 
@@ -582,15 +606,16 @@ async function runReviewPhase(
     const inherited = parentReviews.get(file.path);
     const reviewTask = async () => {
       if (!inherited) {
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, resolveFailureModelProvider, existingReview);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, resolveFailureModelProvider, existingReview);
         return;
       }
 
       if (!canInheritParentFileReview(config, inherited)) {
         logger.info(`Ignoring inherited review for ${file.path}; parent model ${inherited.model_used} is not in the current model strategy`);
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, resolveFailureModelProvider, existingReview);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, resolveFailureModelProvider, existingReview);
       } else {
-        await upsertFileReview(env, job.id, {
+        const inheritedComments = inherited.parsed_comments as ParsedReviewComment[];
+        const fileReviewId = await upsertFileReview(env, job.id, {
           filePath: file.path,
           fileStatus: 'done',
           modelUsed: inherited.model_used,
@@ -598,7 +623,7 @@ async function runReviewPhase(
           diffLineCount: inherited.diff_line_count ?? 0,
           diffInput: inherited.diff_input,
           rawAiOutput: inherited.raw_ai_output,
-          parsedComments: inherited.parsed_comments as ParsedReviewComment[],
+          parsedComments: inheritedComments,
           inputTokens: inherited.input_tokens,
           outputTokens: inherited.output_tokens,
           durationMs: inherited.duration_ms,
@@ -607,6 +632,22 @@ async function runReviewPhase(
           overallCorrectness: inherited.overall_correctness,
           confidenceScore: inherited.confidence_score,
           errorMessage: null,
+        });
+        // Re-price the inherited tokens for this job's own ledger (no new model
+        // call, so no DO streaming / fresh subrequests attributed here).
+        await recordFileCost(env, pricing, {
+          fileReviewId,
+          jobId: job.id,
+          modelUsed: inherited.model_used,
+          usage: {
+            aiInputTokens: inherited.input_tokens ?? 0,
+            aiOutputTokens: inherited.output_tokens ?? 0,
+            doRequests: 0,
+            doDurationGbs: 0,
+            d1RowsWritten: 1 + inheritedComments.length,
+            d1RowsRead: 2,
+            subrequests: 0,
+          },
         });
         currentReviews.set(file.path, inherited);
       }
@@ -672,9 +713,10 @@ async function runBatchReviewPhase(
     files: ReturnType<typeof parseUnifiedDiff>;
     pendingFiles: ReturnType<typeof parseUnifiedDiff>;
     totalLineCount: number;
+    projectContext: string;
   },
 ) {
-  const { pr, config, files, pendingFiles, totalLineCount } = ctx;
+  const { pr, config, files, pendingFiles, totalLineCount, projectContext } = ctx;
 
   if (job.batchRequestId && job.batchModel) {
     let result: Awaited<ReturnType<ModelService['pollReviewBatch']>>;
@@ -731,6 +773,7 @@ async function runBatchReviewPhase(
         prDescription: pr.body ?? null,
         config,
         totalLineCount,
+        projectContext,
       }),
     ),
   );
@@ -860,6 +903,39 @@ async function recordBatchFileFailure(
   });
 }
 
+/**
+ * Convert Durable Object active wall-time (ms) into billable GB-seconds at the
+ * default 128MB DO class, so the metered amount lines up with how Cloudflare
+ * prices DO duration.
+ */
+const DO_MEMORY_GB = 128 / 1024;
+function msToGbSeconds(ms: number): number {
+  return (ms / 1000) * DO_MEMORY_GB;
+}
+
+/**
+ * Price a single file review's metered usage and store the per-usage-type
+ * breakdown + file rollup. Best-effort: a pricing failure must never fail the
+ * review itself, so it's logged and swallowed.
+ */
+async function recordFileCost(
+  env: Env,
+  pricing: PricingSnapshot,
+  args: { fileReviewId: string; jobId: string; modelUsed: string | null; usage: UsageAmounts },
+) {
+  try {
+    const rows = buildCostBreakdown(pricing, args.modelUsed, args.usage);
+    await recordFileReviewCost(env, {
+      fileReviewId: args.fileReviewId,
+      jobId: args.jobId,
+      rows,
+      totalCostUsd: sumBreakdown(rows),
+    });
+  } catch (err) {
+    logger.warn(`Failed to record cost for file review ${args.fileReviewId}`, err);
+  }
+}
+
 async function reviewAndPersistFile(
   env: Env,
   job: PersistedReviewJob,
@@ -868,6 +944,8 @@ async function reviewAndPersistFile(
   config: RepoConfig,
   totalLineCount: number,
   model: ModelService,
+  pricing: PricingSnapshot,
+  projectContext: string,
   resolveFailureModelProvider: () => Promise<string | null>,
   previousReview?: { transient_error_count: number },
 ) {
@@ -881,9 +959,10 @@ async function reviewAndPersistFile(
       config,
       totalLineCount,
       compactPrompt,
+      projectContext,
     });
 
-    await upsertFileReview(env, job.id, {
+    const fileReviewId = await upsertFileReview(env, job.id, {
       filePath: file.path,
       fileStatus: 'done',
       modelUsed: response.modelUsed,
@@ -902,21 +981,51 @@ async function reviewAndPersistFile(
       errorMessage: null,
     });
 
-    if (response.parsed.comments && response.parsed.comments.length > 0) {
+    const comments = response.parsed.comments ?? [];
+    let doRequests = 0;
+    let doDurationGbs = 0;
+    // Measure only the DO streaming loop — capturing the start before the
+    // zero-comment guard would bill downstream work (recordFileCost etc.) as
+    // DO time even when the Durable Object is never contacted.
+    if (comments.length > 0) {
+      const doStartedAt = Date.now();
       try {
         const streamId = (env as any).PrReviewStream.idFromName(`${job.owner}/${job.repo}/${job.prNumber}`);
         const streamStub = (env as any).PrReviewStream.get(streamId);
-        for (const comment of response.parsed.comments) {
+        for (const comment of comments) {
           await streamStub.fetch(new Request('http://do/comment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(comment),
           }));
+          doRequests += 1;
         }
       } catch (streamErr) {
         logger.error('Failed to stream real-time comment to Durable Object', streamErr);
       }
+      doDurationGbs = msToGbSeconds(Date.now() - doStartedAt);
     }
+
+    // Metered per-file usage. AI tokens are exact; DO requests are the exact
+    // count of stream fetches with measured active duration; D1 rows are the
+    // rows this file's persistence writes/reads; subrequests = model call + DO
+    // fetches. ponytail: D1 rows are counted from the write shape (1 review row
+    // + N comment rows), not the D1 `meta` field — dollars here are rounding
+    // level; swap to result.meta.rows_read/written if precision ever matters.
+    await recordFileCost(env, pricing, {
+      fileReviewId,
+      jobId: job.id,
+      modelUsed: response.modelUsed,
+      usage: {
+        aiInputTokens: response.inputTokens ?? 0,
+        aiOutputTokens: response.outputTokens ?? 0,
+        doRequests,
+        doDurationGbs,
+        d1RowsWritten: 1 + comments.length,
+        d1RowsRead: 2,
+        subrequests: 1 + doRequests,
+      },
+    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown file review error';
     const modelId = config.model?.main ?? 'unconfigured';
@@ -977,6 +1086,44 @@ async function reviewAndPersistFile(
       errorMessage.toLowerCase().includes('allocation');
 
     if (isHardLimit) {
+      // Per-invocation budget exhaustion (subrequests / allocation). Retrying in
+      // a fresh invocation usually clears it — but a single file that busts the
+      // budget on EVERY attempt would re-throw forever and freeze the job on
+      // that file. Bound it: count attempts and, past the cap, mark the file
+      // failed so the job finalizes as a partial review instead of looping.
+      const failureCount = await recordRetryableFileReviewFailure(env, job.id, {
+        filePath: file.path,
+        modelUsed: modelId,
+        modelProvider,
+        diffLineCount: file.lineCount,
+        diffInput: '',
+        durationMs: Date.now() - startedAt,
+        // "retrying later" keeps it retryable-classified so it re-attempts in a
+        // fresh invocation until the cap below.
+        errorMessage: `${errorMessage} — resource limit, retrying later`,
+      });
+
+      if (failureCount >= MAX_RETRYABLE_FILE_REVIEW_FAILURES) {
+        await upsertFileReview(env, job.id, {
+          filePath: file.path,
+          fileStatus: 'failed',
+          modelUsed: modelId,
+          modelProvider,
+          diffLineCount: file.lineCount,
+          diffInput: '',
+          rawAiOutput: null,
+          parsedComments: [],
+          inputTokens: null,
+          outputTokens: null,
+          durationMs: Date.now() - startedAt,
+          verdict: null,
+          fileSummary: null,
+          errorMessage: `Review skipped after ${failureCount} attempts that exceeded the per-invocation resource limit. The file may be too large to review in one pass.`,
+        });
+        logger.error(`File ${file.path} permanently skipped after repeated hard-limit failures`, { attempts: failureCount });
+        return;
+      }
+
       throw error;
     }
 
@@ -1058,6 +1205,24 @@ async function runFinalizePhase(
     formattedSummary += `\n\n> [!NOTE]\n> **${omittedCount} comments were omitted** from this review to reduce noise and respect the configured \`max_comments\` limit (${config.review.max_comments}). Showing the most critical issues.`;
   }
 
+  // Tell a human (or an AI agent) exactly which files carry inline comments, how
+  // many, and where to read them — so they know to look on the PR itself and not
+  // only in the summary body.
+  if (finalComments.length > 0) {
+    const countsByFile = new Map<string, number>();
+    for (const comment of finalComments) {
+      countsByFile.set(comment.path, (countsByFile.get(comment.path) ?? 0) + 1);
+    }
+    const fileLines = Array.from(countsByFile.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([path, count]) => `> - \`${path}\` — ${count} comment${count === 1 ? '' : 's'}`)
+      .join('\n');
+    const jobLink = env.APP_URL
+      ? `\n>\n> 🔗 [View all findings on Codra](${env.APP_URL.replace(/\/+$/, '')}/jobs/${job.id})`
+      : '';
+    formattedSummary += `\n\n> [!IMPORTANT]\n> **Codra left ${finalComments.length} inline comment${finalComments.length === 1 ? '' : 's'}** across ${countsByFile.size} file${countsByFile.size === 1 ? '' : 's'} on this pull request. Fetch this PR's review comments to read them inline:\n${fileLines}${jobLink}`;
+  }
+
   await updateJobStep(env, job.id, 'Completing', { status: 'running' });
   const review = await github.createReview(job.owner, job.repo, job.prNumber, {
     commitSha: pr.head.sha,
@@ -1065,6 +1230,8 @@ async function runFinalizePhase(
     body: formattedSummary,
     comments: finalComments.map(comment => ({
       path: comment.path,
+      line: comment.line ?? undefined,
+      side: 'RIGHT',
       position: comment.position ?? undefined,
       body: formatter.formatInlineComment(comment),
     })),
@@ -1112,6 +1279,7 @@ async function runFinalizePhase(
 
   const fileInputTokens = reviews.reduce((sum, review) => sum + (review.input_tokens ?? 0), 0);
   const fileOutputTokens = reviews.reduce((sum, review) => sum + (review.output_tokens ?? 0), 0);
+  const fileCostTotal = reviews.reduce((sum, review) => sum + (review.total_cost_usd ?? 0), 0);
   const partialErrorMessage = hasFailures
     ? `Partial review: ${failedFileCount} of ${files.length} file${files.length === 1 ? '' : 's'} could not be reviewed after repeated model/provider outages.`
     : null;
@@ -1121,6 +1289,7 @@ async function runFinalizePhase(
     commentCount: finalComments.length,
     totalInputTokens: fileInputTokens,
     totalOutputTokens: fileOutputTokens,
+    totalCostUsd: fileCostTotal,
     summaryMarkdown: formattedSummary,
     reviewId: review.id,
     summaryModel: null,

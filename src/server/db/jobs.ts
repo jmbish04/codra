@@ -1,7 +1,7 @@
 import { getDb, parseJsonColumn } from './client';
 import { defaultRepoConfig, jobDetailSchema, jobSummarySchema, repoConfigSchema, type RepoConfig } from '@shared/schema';
 import { getOrCreateRepository } from './repositories';
-import { jobs, repositories, fileReviews, reviewComments } from './schemas';
+import { jobs, repositories, fileReviews, reviewComments, fileReviewCosts } from './schemas';
 import { eq, and, sql, or, lt, gt, like, desc, asc, inArray, notInArray, isNull, isNotNull, ne } from 'drizzle-orm';
 
 export type JobRow = typeof jobs.$inferSelect;
@@ -83,6 +83,7 @@ export function mapJob(row: any) {
       commentCount: row.comment_count ?? 0,
       totalInputTokens: row.total_input_tokens ?? 0,
       totalOutputTokens: row.total_output_tokens ?? 0,
+      costUsd: row.total_cost_usd ?? null,
       createdAt: row.created_at,
       updatedAt,
       nextRetryAt,
@@ -246,6 +247,7 @@ export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) 
   if (!jobRow) return null;
 
   const rows = await db.select({
+    fileReviewId: reviewComments.file_review_id,
     path: reviewComments.path,
     line: reviewComments.line,
     severity: reviewComments.severity,
@@ -260,6 +262,44 @@ export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) 
     .orderBy(asc(reviewComments.id))
     .all();
 
+  // Every reviewed file, so a consumer sees per-file summaries + which files
+  // carry comments (an approved file has zero, and that's meaningful signal).
+  const fileRows = await db.select({
+    id: fileReviews.id,
+    path: fileReviews.file_path,
+    status: fileReviews.file_status,
+    verdict: fileReviews.verdict,
+    summary: fileReviews.file_summary,
+    costUsd: fileReviews.total_cost_usd,
+  })
+    .from(fileReviews)
+    .where(eq(fileReviews.job_id, jobId))
+    .orderBy(asc(fileReviews.created_at))
+    .all();
+
+  const commentsByFileReview = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const list = commentsByFileReview.get(row.fileReviewId) ?? [];
+    list.push(row);
+    commentsByFileReview.set(row.fileReviewId, list);
+  }
+
+  const files = fileRows.map((fr) => {
+    const comments = (commentsByFileReview.get(fr.id) ?? []).map(({ fileReviewId, ...comment }) => comment);
+    return {
+      path: fr.path,
+      status: fr.status,
+      verdict: fr.verdict,
+      summary: fr.summary,
+      costUsd: fr.costUsd,
+      commentCount: comments.length,
+      comments,
+    };
+  });
+
+  // Flat list kept for backward compatibility with existing consumers.
+  const suggestions = rows.map(({ fileReviewId, ...comment }) => comment);
+
   return {
     jobId: jobRow.id,
     repo: `${jobRow.owner}/${jobRow.repo}`,
@@ -268,8 +308,11 @@ export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) 
     verdict: jobRow.verdict,
     status: jobRow.status,
     finishedAt: jobRow.finishedAt,
-    suggestionCount: rows.length,
-    suggestions: rows,
+    suggestionCount: suggestions.length,
+    fileCount: files.length,
+    filesWithComments: files.filter((f) => f.commentCount > 0).length,
+    files,
+    suggestions,
   };
 }
 
@@ -292,7 +335,8 @@ export async function getJobDetail(env: Pick<Env, 'DB'>, jobId: string) {
   
   let files: any[] = [];
   if (reviews.length > 0) {
-    const comments = await db.select().from(reviewComments).where(inArray(reviewComments.file_review_id, reviews.map(r => r.id!))).orderBy(asc(reviewComments.id)).all();
+    const reviewIds = reviews.map(r => r.id!);
+    const comments = await db.select().from(reviewComments).where(inArray(reviewComments.file_review_id, reviewIds)).orderBy(asc(reviewComments.id)).all();
     const commentsByReviewId = new Map<string, any[]>();
     for (const c of comments) {
       if (!commentsByReviewId.has(c.file_review_id)) commentsByReviewId.set(c.file_review_id, []);
@@ -305,6 +349,21 @@ export async function getJobDetail(env: Pick<Env, 'DB'>, jobId: string) {
         title: c.title,
         body: c.body,
         codeSuggestion: c.code_suggestion
+      });
+    }
+
+    const costRows = await db.select().from(fileReviewCosts).where(inArray(fileReviewCosts.file_review_id, reviewIds)).all();
+    const costsByReviewId = new Map<string, any[]>();
+    for (const cost of costRows) {
+      if (!costsByReviewId.has(cost.file_review_id)) costsByReviewId.set(cost.file_review_id, []);
+      costsByReviewId.get(cost.file_review_id)!.push({
+        usageType: cost.usage_type,
+        usageAmount: cost.usage_amount,
+        unitPrice: cost.unit_price,
+        perUnits: cost.per_units,
+        currency: cost.currency,
+        totalCost: cost.total_cost,
+        rateSource: cost.rate_source,
       });
     }
 
@@ -324,6 +383,8 @@ export async function getJobDetail(env: Pick<Env, 'DB'>, jobId: string) {
       fileSummary: fr.file_summary,
       errorMessage: fr.error_msg,
       createdAt: fr.created_at,
+      costUsd: fr.total_cost_usd ?? null,
+      costBreakdown: costsByReviewId.get(fr.id!) || [],
       parsedComments: commentsByReviewId.get(fr.id!) || []
     }));
   }
@@ -512,6 +573,7 @@ export async function completeJob(
     commentCount: number;
     totalInputTokens: number;
     totalOutputTokens: number;
+    totalCostUsd?: number | null;
     summaryMarkdown: string;
     reviewId: number | null;
     summaryModel: string | null;
@@ -550,6 +612,7 @@ export async function completeJob(
     comment_count: input.commentCount,
     total_input_tokens: input.totalInputTokens,
     total_output_tokens: input.totalOutputTokens,
+    total_cost_usd: input.totalCostUsd ?? null,
     summary_markdown: input.summaryMarkdown,
     review_id: input.reviewId,
     summary_model: input.summaryModel,

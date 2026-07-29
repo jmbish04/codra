@@ -1,6 +1,7 @@
 import type { ParsedReviewComment } from '@shared/schema';
+import type { CostRow } from '@server/core/guardian-pricing';
 import { getDb } from './client';
-import { fileReviews, reviewComments } from './schemas';
+import { fileReviews, reviewComments, fileReviewCosts } from './schemas';
 import { eq, and, sql, inArray, desc } from 'drizzle-orm';
 
 export async function insertFileReview(
@@ -148,6 +149,37 @@ export async function upsertFileReview(
     }));
     await db.insert(reviewComments).values(commentsToInsert);
   }
+
+  return reviewRow.id;
+}
+
+/**
+ * Persist the per-usage-type cost breakdown for one file review (snapshot at
+ * review time) and roll the total up onto the file_reviews row. Idempotent:
+ * replaces any prior cost rows so a retried review re-prices cleanly.
+ * 7 usage types x 9 cols = 63 bound params — safely under D1's 100-param cap.
+ */
+export async function recordFileReviewCost(
+  env: Pick<Env, 'DB'>,
+  input: { fileReviewId: string; jobId: string; rows: CostRow[]; totalCostUsd: number },
+) {
+  const db = getDb(env);
+  await db.delete(fileReviewCosts).where(eq(fileReviewCosts.file_review_id, input.fileReviewId));
+  if (input.rows.length > 0) {
+    await db.insert(fileReviewCosts).values(input.rows.map((r) => ({
+      file_review_id: input.fileReviewId,
+      job_id: input.jobId,
+      usage_type: r.usageType,
+      usage_amount: r.usageAmount,
+      unit_price: r.unitPrice,
+      per_units: r.perUnits,
+      currency: r.currency,
+      total_cost: r.totalCost,
+      rate_source: r.rateSource,
+      priced_at: r.pricedAt,
+    })));
+  }
+  await db.update(fileReviews).set({ total_cost_usd: input.totalCostUsd }).where(eq(fileReviews.id, input.fileReviewId));
 }
 
 export async function recordRetryableFileReviewFailure(
@@ -224,6 +256,7 @@ export async function getModelUsageStats(env: Pick<Env, 'DB'>) {
     calls: sql<number>`COUNT(*)`.as('calls'),
     input_tokens: sql<number>`COALESCE(SUM(${fileReviews.input_tokens}), 0)`.as('input_tokens'),
     output_tokens: sql<number>`COALESCE(SUM(${fileReviews.output_tokens}), 0)`.as('output_tokens'),
+    cost_usd: sql<number>`COALESCE(SUM(${fileReviews.total_cost_usd}), 0)`.as('cost_usd'),
   })
   .from(fileReviews)
   .groupBy(fileReviews.model_used)

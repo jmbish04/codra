@@ -16,6 +16,9 @@ export const jobs = sqliteTable('jobs', {
   total_output_tokens: integer('total_output_tokens').default(0),
   file_count: integer('file_count').default(0),
   comment_count: integer('comment_count').default(0),
+  // Rollup of every file_reviews.total_cost_usd for this job (USD). Sum here
+  // powers per-review and N-day dashboard cost without re-aggregating children.
+  total_cost_usd: real('total_cost_usd'),
   overall_confidence_score: real('overall_confidence_score'),
   commit_sha: blob('commit_sha').notNull(),
   base_sha: blob('base_sha').notNull(),

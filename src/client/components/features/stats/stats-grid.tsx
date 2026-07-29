@@ -20,10 +20,11 @@ export function StatsGrid({ items, columns = 4, className, ...props }: StatsGrid
   const gridCols = {
     2: 'grid-cols-2',
     4: 'grid-cols-2 sm:grid-cols-4',
-  }[columns as 2 | 4] || 'grid-cols-2 sm:grid-cols-4';
+    5: 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5',
+  }[columns as 2 | 4 | 5] || 'grid-cols-2 sm:grid-cols-4';
 
   return (
-    <div 
+    <div
       className={cn(
         'surface surface-static-shadow grid divide-x divide-y divide-border overflow-hidden',
         gridCols,
