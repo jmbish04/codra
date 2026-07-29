@@ -970,8 +970,12 @@ async function reviewAndPersistFile(
 
     const comments = response.parsed.comments ?? [];
     let doRequests = 0;
-    const doStartedAt = Date.now();
+    let doDurationGbs = 0;
+    // Measure only the DO streaming loop — capturing the start before the
+    // zero-comment guard would bill downstream work (recordFileCost etc.) as
+    // DO time even when the Durable Object is never contacted.
     if (comments.length > 0) {
+      const doStartedAt = Date.now();
       try {
         const streamId = (env as any).PrReviewStream.idFromName(`${job.owner}/${job.repo}/${job.prNumber}`);
         const streamStub = (env as any).PrReviewStream.get(streamId);
@@ -986,6 +990,7 @@ async function reviewAndPersistFile(
       } catch (streamErr) {
         logger.error('Failed to stream real-time comment to Durable Object', streamErr);
       }
+      doDurationGbs = msToGbSeconds(Date.now() - doStartedAt);
     }
 
     // Metered per-file usage. AI tokens are exact; DO requests are the exact
@@ -1002,7 +1007,7 @@ async function reviewAndPersistFile(
         aiInputTokens: response.inputTokens ?? 0,
         aiOutputTokens: response.outputTokens ?? 0,
         doRequests,
-        doDurationGbs: msToGbSeconds(Date.now() - doStartedAt),
+        doDurationGbs,
         d1RowsWritten: 1 + comments.length,
         d1RowsRead: 2,
         subrequests: 1 + doRequests,
