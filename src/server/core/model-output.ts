@@ -159,15 +159,48 @@ function coerceReviewNumber(value: unknown) {
   return undefined;
 }
 
+/**
+ * Models frequently report `code_location` as a string ("52", "52, 77",
+ * "68-74", "L52", "52:10") or a bare number rather than the documented
+ * `{ line, line_range }` object. Left unparsed, every such finding loses its
+ * line, is treated as off-diff, and never reaches the PR as an inline comment.
+ * Return the anchor line (and range when a clean "a-b" span is given).
+ */
+function parseLooseCodeLocation(raw: unknown): { line?: number; start?: number; end?: number } {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return { line: raw };
+  if (typeof raw !== 'string' || isPlaceholderString(raw)) return {};
+  const trimmed = raw.trim();
+  // Whole string is a clean "a-b" span (allow leading label / trailing text).
+  const range = trimmed.match(/^\D*?(\d+)\s*[-–—]\s*(\d+)\D*$/);
+  if (range) return { start: Number(range[1]), end: Number(range[2]) };
+  // Otherwise anchor on the first integer ("52, 77" -> 52, "L52:10" -> 52).
+  const first = trimmed.match(/\d+/);
+  return first ? { line: Number(first[0]) } : {};
+}
+
 function normalizeFinding(finding: unknown) {
   if (!finding || typeof finding !== 'object') return null;
   const f = finding as Record<string, unknown>;
   if (isPlaceholderString(f.title) || isPlaceholderString(f.body)) return null;
 
   const location = f.code_location && typeof f.code_location === 'object' ? (f.code_location as Record<string, unknown>) : {};
-  const line = coerceReviewNumber(location.line);
-  const start = coerceReviewNumber(location.line_range && typeof location.line_range === 'object' ? (location.line_range as Record<string, unknown>).start : undefined);
-  const end = coerceReviewNumber(location.line_range && typeof location.line_range === 'object' ? (location.line_range as Record<string, unknown>).end : undefined);
+  let line = coerceReviewNumber(location.line);
+  let start = coerceReviewNumber(location.line_range && typeof location.line_range === 'object' ? (location.line_range as Record<string, unknown>).start : undefined);
+  let end = coerceReviewNumber(location.line_range && typeof location.line_range === 'object' ? (location.line_range as Record<string, unknown>).end : undefined);
+
+  // Fall back to string/number code_location forms, then to any top-level line
+  // field, so findings that don't use the object shape still get an anchor.
+  if (line === undefined && start === undefined && end === undefined) {
+    const loose = parseLooseCodeLocation(f.code_location);
+    line = loose.line;
+    start = loose.start;
+    end = loose.end;
+    if (line === undefined && start === undefined) {
+      const topLine = coerceReviewNumber(f.line ?? (f as Record<string, unknown>).lineNumber ?? (f as Record<string, unknown>).line_number);
+      if (topLine !== undefined) line = topLine;
+    }
+  }
+
   const priority = coerceReviewNumber(f.priority);
 
   const codeLocation: Record<string, unknown> = {

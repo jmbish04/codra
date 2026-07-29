@@ -138,6 +138,29 @@ unescaped newlines",
     expect(result.comments[0].line).toBe(3);
   });
 
+  it('anchors findings whose code_location is a string ("52, 77") instead of dropping them', () => {
+    const rawOutput = `
+{
+  "findings": [
+    { "title": "String single line", "body": "Single line reference should anchor.", "priority": 2, "code_location": "2" },
+    { "title": "String multi line", "body": "Multiple line reference should anchor to the first.", "priority": 2, "code_location": "2, 3" },
+    { "title": "String range", "body": "Range reference should anchor to the start.", "priority": 2, "code_location": "2-3" },
+    { "title": "Bare number", "body": "Bare numeric location should anchor.", "priority": 2, "code_location": 2 }
+  ],
+  "overall_correctness": "issues found",
+  "overall_explanation": "explanation"
+}`;
+
+    const result = parseFileReviewResponse(rawOutput, mockFile);
+    // All four resolve to the valid diff line 2 and post as inline comments,
+    // rather than being orphaned off-diff.
+    expect(result.comments).toHaveLength(4);
+    for (const comment of result.comments) {
+      expect(comment.line).toBe(2);
+      expect(comment.position).toBeDefined();
+    }
+  });
+
   it('does not treat reviewed source snippets as review JSON', () => {
     const rawOutput = `
 \`\`\`ts
