@@ -386,11 +386,24 @@ export function parseFileReviewResponse(raw: string, file: FileDiff): {
   const validLines = getValidNewLines(file);
   const validPositions = getValidPositions(file);
 
-  const orphanedComments: string[] = [];
+  const cleanText = (text: string) => {
+    let current = text.trim();
+    let prev = '';
+    while (current !== prev) {
+      prev = current;
+      current = current
+        .replace(/^([\u{1F300}-\u{1F9FF}]|\[QUALITY\]|\[SECURITY\]|\[BUG\]|\[PERFORMANCE\]|\[CORRECTNESS\]|\[P[0-3]\]|\[NIT\]|QUALITY|SECURITY|BUG|P[0-3]|NIT|[:\-\s\uFE0F]|[^\w\s])+/giu, '')
+        .replace(/\n\s*/g, ' ') // Flatten newlines in titles/snippets
+        .trim();
+    }
+    return current;
+  };
+
   const comments = (parsed.findings || [])
     .map((finding) => {
       // Codex style findings use start/end or line
       let line = finding.code_location.line || finding.code_location.line_range?.start;
+      const referencedLine = line; // the model's original line, before snapping
       let position: number | undefined;
 
       // Try to find position for the line
@@ -398,11 +411,7 @@ export function parseFileReviewResponse(raw: string, file: FileDiff): {
         // Find if the line exists in the diff
         if (!validLines.has(line)) {
           const closest = findClosestValidLine(file, line);
-          if (closest !== undefined) {
-            line = closest;
-          } else {
-            line = undefined;
-          }
+          line = closest; // may be undefined if the diff has no lines
         }
 
         if (line !== undefined) {
@@ -410,11 +419,11 @@ export function parseFileReviewResponse(raw: string, file: FileDiff): {
         }
       }
 
-      // Final validation
-      if (position === undefined || !validPositions.has(position)) {
-        orphanedComments.push(`- **${finding.title}:** ${finding.body}`);
-        return null;
-      }
+      // A finding is "anchored" only when it maps to a real position in the
+      // diff. Anchored findings post as GitHub inline comments; off-diff ones
+      // are kept as first-class comments (Codra frontend + JSON feed + COMMENT
+      // verdict) but carry no line/position so they never 422 a GitHub review.
+      const anchored = position !== undefined && validPositions.has(position);
 
       // Map priority to severity
       const priorityMap: Record<number, typeof reviewSeverities[number]> = {
@@ -425,19 +434,6 @@ export function parseFileReviewResponse(raw: string, file: FileDiff): {
       };
       const severity = finding.priority !== undefined ? priorityMap[finding.priority] || 'P2' : 'P2';
 
-      const cleanText = (text: string) => {
-        let current = text.trim();
-        let prev = '';
-        while (current !== prev) {
-          prev = current;
-          current = current
-            .replace(/^([\u{1F300}-\u{1F9FF}]|\[QUALITY\]|\[SECURITY\]|\[BUG\]|\[PERFORMANCE\]|\[CORRECTNESS\]|\[P[0-3]\]|\[NIT\]|QUALITY|SECURITY|BUG|P[0-3]|NIT|[:\-\s\uFE0F]|[^\w\s])+/giu, '')
-            .replace(/\n\s*/g, ' ') // Flatten newlines in titles/snippets
-            .trim();
-        }
-        return current;
-      };
-
       const title = cleanText(finding.title);
       let body = cleanText(finding.body);
 
@@ -447,25 +443,34 @@ export function parseFileReviewResponse(raw: string, file: FileDiff): {
         body = cleanText(body.slice(body.split('\n')[0].length));
       }
 
+      // Drop only truly empty findings; keep off-diff ones.
+      if (!title && !body) return null;
+
+      const offDiffNote = anchored
+        ? ''
+        : referencedLine !== undefined
+          ? `\n\n_Off-diff finding \u2014 the model referenced around line ${referencedLine}, which isn't part of this diff._`
+          : `\n\n_Off-diff finding \u2014 not tied to a specific line in this diff._`;
+
       return parsedReviewCommentSchema.parse({
         path: file.path,
-        line: line,
-        position,
+        line: anchored ? line : null,
+        position: anchored ? position : null,
         severity,
         category: 'quality', // Default for now
-        title,
-        body: withSuggestion(body, finding.code_suggestion),
+        title: title || 'Code finding',
+        body: withSuggestion(body + offDiffNote, finding.code_suggestion),
         codeSuggestion: finding.code_suggestion,
       });
     })
     .filter((comment): comment is ParsedReviewComment => Boolean(comment));
 
-  const verdict = parsed.overall_correctness.toLowerCase().includes('patch is correct') ? 'approve' : 'comment';
-  let fileSummary = parsed.overall_explanation;
-
-  if (orphanedComments.length > 0) {
-    fileSummary += `\n\n### Additional Comments (Off-diff)\n${orphanedComments.join('\n')}`;
-  }
+  // If the model raised any findings, the file is a COMMENT \u2014 even when it also
+  // claims "patch is correct". A clean pass only when there are no findings.
+  const verdict = comments.length > 0
+    ? 'comment'
+    : (parsed.overall_correctness.toLowerCase().includes('patch is correct') ? 'approve' : 'comment');
+  const fileSummary = parsed.overall_explanation;
 
   return {
     comments,

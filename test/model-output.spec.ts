@@ -161,6 +161,29 @@ unescaped newlines",
     }
   });
 
+  it('keeps off-diff findings (no locatable line) as COMMENT instead of hiding them', () => {
+    const rawOutput = `
+{
+  "findings": [{
+    "title": "Off-diff concern",
+    "body": "This applies to code not in the diff.",
+    "priority": 2
+  }],
+  "overall_correctness": "patch is correct",
+  "overall_explanation": "explanation"
+}`;
+
+    const result = parseFileReviewResponse(rawOutput, mockFile);
+    // Kept as a structured comment (frontend + JSON), with no line so it never
+    // posts as a GitHub inline comment.
+    expect(result.comments).toHaveLength(1);
+    expect(result.comments[0].line ?? null).toBeNull();
+    expect(result.comments[0].position ?? null).toBeNull();
+    expect(result.comments[0].body).toContain('Off-diff finding');
+    // A file with findings is a COMMENT even when it claims "patch is correct".
+    expect(result.verdict).toBe('comment');
+  });
+
   it('does not treat reviewed source snippets as review JSON', () => {
     const rawOutput = `
 \`\`\`ts
