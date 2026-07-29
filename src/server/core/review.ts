@@ -40,7 +40,11 @@ const REVIEW_CHUNK_FILE_LIMIT = 3;
 const REVIEW_CHUNK_WALL_CLOCK_MS = 12 * 60 * 1000;
 const JOB_LEASE_SECONDS = 15 * 60;
 const BUSY_RETRY_SECONDS = 60;
-const RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS = [60, 5 * 60, 15 * 60];
+// Backoff between retries of a file that keeps hitting transient model/provider
+// errors. Kept short on purpose: with MAX_RETRYABLE_FILE_REVIEW_FAILURES=3 this
+// bounds the "frozen on the last file(s)" window to ~6min before the job
+// finalizes as a partial review, instead of the ~21min a 15-minute tail caused.
+const RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS = [30, 90, 4 * 60];
 /** Workers AI batches typically land within ~5 minutes; poll on a steady beat. */
 const BATCH_POLL_DELAY_SECONDS = 20;
 
@@ -1082,6 +1086,44 @@ async function reviewAndPersistFile(
       errorMessage.toLowerCase().includes('allocation');
 
     if (isHardLimit) {
+      // Per-invocation budget exhaustion (subrequests / allocation). Retrying in
+      // a fresh invocation usually clears it — but a single file that busts the
+      // budget on EVERY attempt would re-throw forever and freeze the job on
+      // that file. Bound it: count attempts and, past the cap, mark the file
+      // failed so the job finalizes as a partial review instead of looping.
+      const failureCount = await recordRetryableFileReviewFailure(env, job.id, {
+        filePath: file.path,
+        modelUsed: modelId,
+        modelProvider,
+        diffLineCount: file.lineCount,
+        diffInput: '',
+        durationMs: Date.now() - startedAt,
+        // "retrying later" keeps it retryable-classified so it re-attempts in a
+        // fresh invocation until the cap below.
+        errorMessage: `${errorMessage} — resource limit, retrying later`,
+      });
+
+      if (failureCount >= MAX_RETRYABLE_FILE_REVIEW_FAILURES) {
+        await upsertFileReview(env, job.id, {
+          filePath: file.path,
+          fileStatus: 'failed',
+          modelUsed: modelId,
+          modelProvider,
+          diffLineCount: file.lineCount,
+          diffInput: '',
+          rawAiOutput: null,
+          parsedComments: [],
+          inputTokens: null,
+          outputTokens: null,
+          durationMs: Date.now() - startedAt,
+          verdict: null,
+          fileSummary: null,
+          errorMessage: `Review skipped after ${failureCount} attempts that exceeded the per-invocation resource limit. The file may be too large to review in one pass.`,
+        });
+        logger.error(`File ${file.path} permanently skipped after repeated hard-limit failures`, { attempts: failureCount });
+        return;
+      }
+
       throw error;
     }
 

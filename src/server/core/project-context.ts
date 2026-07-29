@@ -14,8 +14,11 @@ const INSTRUCTION_FILES = ['AGENTS.md', 'CLAUDE.md'];
 // Stack/binding declarations — first one that exists is included.
 const CONFIG_FILES = ['wrangler.jsonc', 'wrangler.json', 'wrangler.toml'];
 
-const PER_FILE_CAP = 6000;
-const TOTAL_CAP = 16000;
+// Kept modest: this context is prepended to EVERY file-review prompt, so a
+// large AGENTS.md must not crowd out the diff or tip big files over a model's
+// request limit (a repeated failure there stalls the review on that file).
+const PER_FILE_CAP = 3000;
+const TOTAL_CAP = 5000;
 
 function cap(text: string, limit: number): string {
   if (text.length <= limit) return text;
