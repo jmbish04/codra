@@ -1,10 +1,30 @@
 import { DurableObject } from "cloudflare:workers";
 
+/**
+ * Real-time channel for a single PR's review comments. Clients connect via
+ * WebSocket (`/ws`); the worker POSTs `/comment` and `/feedback` and every
+ * connected client is notified.
+ *
+ * Uses the Durable Object WebSocket Hibernation API (`ctx.acceptWebSocket` /
+ * `ctx.getWebSockets`) rather than an in-memory Set: connections are owned by
+ * the runtime, so they survive the DO being evicted between broadcasts and the
+ * DO doesn't stay pinned in memory just to hold idle sockets.
+ */
 export class PrReviewStream extends DurableObject {
-  private sessions = new Set<WebSocket>();
-
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    // Keep idle clients alive across hibernation without waking the DO.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
+  }
+
+  private broadcast(payload: string) {
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        socket.send(payload);
+      } catch {
+        try { socket.close(); } catch { /* already gone */ }
+      }
+    }
   }
 
   async fetch(request: Request) {
@@ -17,15 +37,9 @@ export class PrReviewStream extends DurableObject {
       }
 
       const [client, server] = Object.values(new WebSocketPair());
-      server.accept();
-      this.sessions.add(server);
-
-      server.addEventListener("close", () => {
-        this.sessions.delete(server);
-      });
-      server.addEventListener("error", () => {
-        this.sessions.delete(server);
-      });
+      // Hibernatable accept — the runtime tracks this socket and delivers
+      // messages/closes to webSocketMessage/webSocketClose below.
+      this.ctx.acceptWebSocket(server);
 
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -33,38 +47,37 @@ export class PrReviewStream extends DurableObject {
     // Handle HTTP POST to add a new comment to be broadcasted
     if (url.pathname === "/comment" && request.method === "POST") {
       const body = await request.json<any>();
-      // Broadcast to all active sessions
-      const payload = JSON.stringify({ type: "comment", data: body });
-      for (const session of this.sessions) {
-        try {
-          session.send(payload);
-        } catch {
-          this.sessions.delete(session);
-        }
-      }
+      this.broadcast(JSON.stringify({ type: "comment", data: body }));
       return new Response("OK");
     }
 
     // Handle feedback from coding agents
     if (url.pathname === "/feedback" && request.method === "POST") {
       const body = await request.json<any>();
-      
+
       // Log lesson learned to EDGRAPH service binding
       await this.logLessonLearned(body);
-      
+
       // Broadcast feedback to other sessions
-      const payload = JSON.stringify({ type: "feedback", data: body });
-      for (const session of this.sessions) {
-        try {
-          session.send(payload);
-        } catch {
-          this.sessions.delete(session);
-        }
-      }
+      this.broadcast(JSON.stringify({ type: "feedback", data: body }));
       return new Response(JSON.stringify({ success: true }));
     }
 
     return new Response("Not found", { status: 404 });
+  }
+
+  // Broadcast-only channel: clients aren't expected to send anything, but the
+  // hibernation API requires a handler for the socket to receive at all.
+  async webSocketMessage(_ws: WebSocket, _message: string | ArrayBuffer) {
+    // no-op
+  }
+
+  async webSocketClose(ws: WebSocket, code: number) {
+    try { ws.close(code); } catch { /* already closing */ }
+  }
+
+  async webSocketError(ws: WebSocket) {
+    try { ws.close(); } catch { /* already gone */ }
   }
 
   async logLessonLearned(feedback: any) {
