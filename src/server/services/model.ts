@@ -352,6 +352,7 @@ export class ModelService {
     config: RepoConfig;
     totalLineCount: number;
     compactPrompt?: boolean;
+    projectContext?: string;
   }) {
     const configuredLineCap = params.config.review.max_diff_lines_per_file;
     const modelLineCap = params.compactPrompt
@@ -389,6 +390,7 @@ Lesson #${idx + 1}:
         ...params.config.review,
         custom_rules: customRules,
       },
+      projectContext: params.projectContext,
     });
 
     return { systemPrompt, userPrompt, reviewFile };
@@ -401,6 +403,7 @@ Lesson #${idx + 1}:
     config: RepoConfig;
     totalLineCount: number;
     compactPrompt?: boolean;
+    projectContext?: string;
   }) {
     const { systemPrompt, userPrompt, reviewFile } = await this.buildReviewPrompt(params);
 

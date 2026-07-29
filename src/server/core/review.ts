@@ -3,6 +3,7 @@ import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHub
 import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview, recordFileReviewCost } from '@server/db/file-reviews';
 import { getPricingSnapshot, buildCostBreakdown, sumBreakdown, type PricingSnapshot, type UsageAmounts } from '@server/core/guardian-pricing';
+import { getProjectContext } from '@server/core/project-context';
 import { getResolvedModelConfig } from '@server/db/model-configs';
 import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
 import { parseFileReviewResponse } from './model-output';
@@ -535,6 +536,11 @@ async function runReviewPhase(
   // every file so all costs in this run price against the same rates.
   const pricing = await getPricingSnapshot(env, Date.now());
 
+  // The repo's own instructions (AGENTS.md/CLAUDE.md) + declared stack
+  // (wrangler bindings), fetched once and KV-cached, so every file review
+  // respects the project's chosen technologies and conventions.
+  const projectContext = await getProjectContext(env, github, job.owner, job.repo, pr.head.sha);
+
   // Bail before spending model calls if a newer commit superseded this job
   // while standardization / diff-fetch was running.
   await checkSuperseded(env, job.id);
@@ -572,7 +578,7 @@ async function runReviewPhase(
     });
   }
 
-  if (await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount })) {
+  if (await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount, projectContext })) {
     return;
   }
 
@@ -587,13 +593,13 @@ async function runReviewPhase(
     const inherited = parentReviews.get(file.path);
     const reviewTask = async () => {
       if (!inherited) {
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, resolveFailureModelProvider, existingReview);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, resolveFailureModelProvider, existingReview);
         return;
       }
 
       if (!canInheritParentFileReview(config, inherited)) {
         logger.info(`Ignoring inherited review for ${file.path}; parent model ${inherited.model_used} is not in the current model strategy`);
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, resolveFailureModelProvider, existingReview);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, resolveFailureModelProvider, existingReview);
       } else {
         const inheritedComments = inherited.parsed_comments as ParsedReviewComment[];
         const fileReviewId = await upsertFileReview(env, job.id, {
@@ -694,9 +700,10 @@ async function runBatchReviewPhase(
     files: ReturnType<typeof parseUnifiedDiff>;
     pendingFiles: ReturnType<typeof parseUnifiedDiff>;
     totalLineCount: number;
+    projectContext: string;
   },
 ) {
-  const { pr, config, files, pendingFiles, totalLineCount } = ctx;
+  const { pr, config, files, pendingFiles, totalLineCount, projectContext } = ctx;
 
   if (job.batchRequestId && job.batchModel) {
     let result: Awaited<ReturnType<ModelService['pollReviewBatch']>>;
@@ -753,6 +760,7 @@ async function runBatchReviewPhase(
         prDescription: pr.body ?? null,
         config,
         totalLineCount,
+        projectContext,
       }),
     ),
   );
@@ -924,6 +932,7 @@ async function reviewAndPersistFile(
   totalLineCount: number,
   model: ModelService,
   pricing: PricingSnapshot,
+  projectContext: string,
   resolveFailureModelProvider: () => Promise<string | null>,
   previousReview?: { transient_error_count: number },
 ) {
@@ -937,6 +946,7 @@ async function reviewAndPersistFile(
       config,
       totalLineCount,
       compactPrompt,
+      projectContext,
     });
 
     const fileReviewId = await upsertFileReview(env, job.id, {

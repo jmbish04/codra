@@ -35,15 +35,34 @@ export function buildFileReviewPrompts(input: {
   prTitle: string | null;
   prDescription: string | null;
   config: RepoConfig['review'];
+  projectContext?: string;
 }) {
   const languageInfo = getLanguageForFile(input.file.path);
   const rules = input.config.custom_rules.length > 0 ? input.config.custom_rules.map((rule) => `- ${rule}`).join('\n') : '- None';
   const systemPrompt = buildFileReviewSystemPrompt(input.config, languageInfo?.persona);
-  const languageGuidelines = languageInfo 
+  const languageGuidelines = languageInfo
     ? `Language: ${languageInfo.language}\nSpecific Guidelines:\n${languageInfo.guidelines.map(g => `- ${g}`).join('\n')}`
     : 'Language: Generic\nSpecific Guidelines: Follow general best practices.';
 
+  // The repo's own instructions + declared stack. Authoritative: the model must
+  // work within the chosen technologies (e.g. Cloudflare D1/KV/R2 bindings from
+  // wrangler) rather than proposing to swap them for alternatives.
+  const projectContextBlock = input.projectContext && input.projectContext.trim().length > 0
+    ? [
+        '=== PROJECT CONTEXT (authoritative) ===',
+        "The following are the repository's own agent-instruction files and stack/binding declarations. Respect them:",
+        '- Do NOT suggest replacing a technology the project has already chosen (e.g. do not propose swapping a configured Cloudflare D1 binding for Supabase/Postgres, or KV for Redis). Work within the declared stack.',
+        '- Follow any conventions, constraints, and preferences stated in AGENTS.md / CLAUDE.md.',
+        '- Configured wrangler bindings are the source of truth for available infrastructure.',
+        '',
+        input.projectContext.trim(),
+        '=== END PROJECT CONTEXT ===',
+        '',
+      ].join('\n')
+    : '';
+
   const userPrompt = [
+    projectContextBlock,
     `PR title: ${input.prTitle ?? 'Untitled PR'}`,
     `File path: ${input.file.path}`,
     languageGuidelines,
@@ -53,7 +72,7 @@ export function buildFileReviewPrompts(input: {
     '',
     'Unified diff:',
     renderFileDiff(input.file),
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   return { systemPrompt, userPrompt };
 }
