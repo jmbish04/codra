@@ -32,7 +32,7 @@ import { Button } from '@client/components/ui/button';
 import { useIsDarkMode } from '@client/hooks/use-is-dark-mode';
 import { usePolling } from '@client/hooks/use-polling';
 import { api } from '@client/lib/api';
-import { fmtNumber } from '@client/lib/utils';
+import { fmtNumber, fmtUsd } from '@client/lib/utils';
 import type { StatsPayload } from '@shared/schema';
 import { AiUsage } from '@client/components/features/ai-usage';
 
@@ -257,6 +257,7 @@ function GraphCardGallery({ stats, days, isDark }: { stats: StatsPayload; days: 
                 <div className="min-w-0">
                   <div className="flex items-center justify-between gap-3 text-xs">
                     <span className="truncate font-semibold text-foreground">{modelName(model.modelUsed)}</span>
+                    <span className="shrink-0 font-mono tabular-nums text-muted-foreground" title="Total cost attributed to this model">{fmtUsd(model.costUsd)}</span>
                   </div>
                   <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-secondary">
                     <div className="h-full rounded-full bg-[oklch(54%_0.17_295)]" style={{ width: `${percent(model.calls, modelMax)}%` }} />

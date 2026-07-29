@@ -2,6 +2,7 @@ import { ExternalLink, Check, Minus, X, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@client/components/ui/card';
 import { Badge, StatusBadge } from '@client/components/ui/badge';
+import { fmtUsd } from '@client/lib/utils';
 import type { JobDetail, JobStep } from '@shared/schema';
 
 interface JobMetaCardsProps {
@@ -116,6 +117,11 @@ export function JobMetaCards({ job }: JobMetaCardsProps) {
               { label: 'Tokens',  value:
                   <span className="font-mono text-sm tabular-nums">
                     {(job.totalInputTokens + job.totalOutputTokens).toLocaleString()}
+                  </span>
+              },
+              { label: 'Review cost', value:
+                  <span className="font-mono text-sm tabular-nums font-semibold text-foreground" title="Total cost of reviewing this PR (AI tokens + infrastructure)">
+                    {fmtUsd(job.costUsd)}
                   </span>
               },
             ].map(({ label, value }) => (

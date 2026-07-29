@@ -90,6 +90,11 @@ type PullRequestRecord = {
 
 export type GitHubReviewComment = {
   path: string;
+  // Preferred: line in the file's new version + side. GitHub's current review
+  // API resolves these against the diff far more reliably than legacy `position`
+  // (the diff offset), which silently drops comments when miscomputed.
+  line?: number;
+  side?: 'LEFT' | 'RIGHT';
   position?: number;
   body: string;
 };
@@ -622,12 +627,12 @@ export class GitHubClient {
         event: input.event,
         body: input.body,
         comments: input.comments
-          .filter((comment) => comment.position)
-          .map((comment) => ({
-            path: comment.path,
-            position: comment.position,
-            body: comment.body,
-          })),
+          .filter((comment) => comment.line != null || comment.position != null)
+          .map((comment) =>
+            comment.line != null
+              ? { path: comment.path, line: comment.line, side: comment.side ?? 'RIGHT', body: comment.body }
+              : { path: comment.path, position: comment.position, body: comment.body },
+          ),
       };
 
       const reviewPath = `${repoApiPath(owner, repo)}/pulls/${pullNumber}/reviews`;

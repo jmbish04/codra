@@ -197,6 +197,7 @@ export const jobSummarySchema = z.object({
   commentCount: z.number().int(),
   totalInputTokens: z.number().int(),
   totalOutputTokens: z.number().int(),
+  costUsd: z.number().nullable().optional(),
   createdAt: dateStringSchema,
   updatedAt: dateStringSchema,
   nextRetryAt: dateStringSchema.nullable().optional(),
@@ -224,6 +225,16 @@ export const jobsQuerySchema = z.object({
 export type JobsQuery = z.infer<typeof jobsQuerySchema>;
 export type JobStep = z.infer<typeof jobStepSchema>;
 
+export const costBreakdownItemSchema = z.object({
+  usageType: z.string(),
+  usageAmount: z.number(),
+  unitPrice: z.number(),
+  perUnits: z.number(),
+  currency: z.string(),
+  totalCost: z.number(),
+  rateSource: z.string(),
+});
+
 export const fileReviewRecordSchema = z.object({
   id: z.string().uuid(),
   jobId: z.string().uuid(),
@@ -244,6 +255,8 @@ export const fileReviewRecordSchema = z.object({
   confidenceScore: z.number().nullable().optional(),
   errorMessage: z.string().nullable(),
   createdAt: dateStringSchema,
+  costUsd: z.number().nullable().optional(),
+  costBreakdown: z.array(costBreakdownItemSchema).default([]),
 });
 
 export const jobDetailSchema = jobSummarySchema.extend({
@@ -278,6 +291,7 @@ export const statsSchema = z.object({
     inputTokens: z.number().int(),
     outputTokens: z.number().int(),
     comments: z.number().int(),
+    costUsd: z.number().default(0),
   }),
   trend: z.array(
     z.object({
@@ -286,6 +300,7 @@ export const statsSchema = z.object({
       inputTokens: z.number().int(),
       outputTokens: z.number().int(),
       comments: z.number().int(),
+      costUsd: z.number().default(0),
     }),
   ),
   verdicts: z.array(
@@ -301,6 +316,7 @@ export const statsSchema = z.object({
       calls: z.number().int(),
       inputTokens: z.number().int(),
       outputTokens: z.number().int(),
+      costUsd: z.number().default(0),
     }),
   ),
   topRepos: z.array(
@@ -353,6 +369,7 @@ export function normalizeRepoConfig(config: RepoConfig): RepoConfig {
 
 export type ReviewJobMessage = z.infer<typeof reviewJobMessageSchema>;
 export type JobSummary = z.infer<typeof jobSummarySchema>;
+export type CostBreakdownItem = z.infer<typeof costBreakdownItemSchema>;
 export type FileReviewRecord = z.infer<typeof fileReviewRecordSchema>;
 export type JobDetail = z.infer<typeof jobDetailSchema>;
 export type RepoConfigRecord = z.infer<typeof repoConfigRecordSchema>;

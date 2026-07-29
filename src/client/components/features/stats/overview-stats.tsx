@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
-import { Activity, ArrowUpRight, Cpu, MessageSquare } from 'lucide-react';
+import { Activity, ArrowUpRight, Cpu, MessageSquare, DollarSign } from 'lucide-react';
 import { StatsGrid } from './stats-grid';
-import { fmtNumber } from '@client/lib/utils';
+import { fmtNumber, fmtUsd } from '@client/lib/utils';
 import type { StatsPayload } from '@shared/schema';
 
 interface OverviewStatsProps {
@@ -29,7 +29,19 @@ export function OverviewStats({ stats, days }: OverviewStatsProps) {
     comments: generateMockTrend(20, days),
   }), [days]);
 
+  // Real cost sparkline from the daily trend (not mocked like the others).
+  const costTrend = useMemo(
+    () => (stats ? stats.trend.map((point) => point.costUsd) : Array(days).fill(0)),
+    [stats, days],
+  );
+
   const items = [
+    {
+      icon: DollarSign,
+      label: `Cost · ${days}d`,
+      value: stats ? fmtUsd(stats.totals.costUsd) : null,
+      trend: costTrend,
+    },
     {
       icon: Activity,
       label: 'Total reviews',
@@ -56,5 +68,5 @@ export function OverviewStats({ stats, days }: OverviewStatsProps) {
     },
   ];
 
-  return <StatsGrid items={items} />;
+  return <StatsGrid items={items} columns={5} />;
 }

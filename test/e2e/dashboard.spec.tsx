@@ -47,7 +47,7 @@ describe('Frontend UI Flows (JSDOM)', () => {
   it('displays the dashboard with stats and activity', async () => {
     vi.mocked(api.getStats).mockResolvedValue({
       stats: {
-        totals: { jobs: 10, inputTokens: 500, outputTokens: 250, comments: 5 },
+        totals: { jobs: 10, inputTokens: 500, outputTokens: 250, comments: 5, costUsd: 0.42 },
         trend: [],
         verdicts: [],
         models: [],
