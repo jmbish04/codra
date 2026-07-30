@@ -537,6 +537,19 @@ export class GitHubClient {
     });
   }
 
+  /** Best-effort: ISO date of the file's last commit, or null (missing file / any failure). */
+  async getFileLastCommitDate(owner: string, repo: string, path: string): Promise<string | null> {
+    try {
+      return await withRetry(`getFileLastCommitDate ${owner}/${repo}/${path}`, async () => {
+        const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/commits?path=${encodeURIComponent(path)}&per_page=1`);
+        const json = (await response.json()) as Array<{ commit?: { committer?: { date?: string } } }>;
+        return json[0]?.commit?.committer?.date ?? null;
+      });
+    } catch {
+      return null;
+    }
+  }
+
   async createCheckRun(
     owner: string,
     repo: string,
@@ -887,6 +900,23 @@ export class GitHubClient {
       if (params.per_page) query.set('per_page', String(params.per_page));
       const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/pulls?${query.toString()}`);
       return (await response.json()) as Array<{ number: number; title: string; head: { ref: string } }>;
+    });
+  }
+
+  async getRepoActionsPublicKey(owner: string, repo: string) {
+    return withRetry(`getRepoActionsPublicKey ${owner}/${repo}`, async () => {
+      const res = await this.requestAndCheck(`${repoApiPath(owner, repo)}/actions/secrets/public-key`);
+      return (await res.json()) as { key_id: string; key: string };
+    });
+  }
+
+  async putRepoActionsSecret(owner: string, repo: string, name: string, encrypted_value: string, key_id: string) {
+    return withRetry(`putRepoActionsSecret ${owner}/${repo} ${name}`, async () => {
+      await this.requestAndCheck(`${repoApiPath(owner, repo)}/actions/secrets/${encodeURIComponent(name)}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ encrypted_value, key_id }),
+      });
     });
   }
 }

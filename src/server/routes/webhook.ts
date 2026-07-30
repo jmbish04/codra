@@ -161,6 +161,15 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
             { owner: payload.repository.owner.login, repo: payload.repository.name, prNumber },
             merged ? 'merged' : 'closed',
           ).catch((err) => { console.error('Failed to cancel reviews for closed PR:', err); return 0; });
+
+          if (merged) {
+            const { launchStagedJulesSessions } = await import('@server/core/jules');
+            c.executionCtx.waitUntil(
+              launchStagedJulesSessions(c.env, gh, { owner, repo, prNumber })
+                .catch((err) => console.error('Jules launch on merge failed:', err)),
+            );
+          }
+
           return finish(
             202,
             { ok: true, message: 'pr_closed', cancelledReviews: cancelled },

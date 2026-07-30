@@ -106,6 +106,8 @@ export const reviewConfigSchema = z.object({
       on_file_types: ['.ts', '.tsx', '.js'],
       command: 'npm run lint && npm run typecheck',
     }),
+  jules: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
+  deployWorkflow: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
 });
 
 export const repoConfigSchema = z.object({
@@ -132,6 +134,8 @@ export const repoConfigSchema = z.object({
       on_file_types: ['.ts', '.tsx', '.js'],
       command: 'npm run lint && npm run typecheck',
     },
+    jules: { enabled: true },
+    deployWorkflow: { enabled: true },
   }),
   model: z
     .object({

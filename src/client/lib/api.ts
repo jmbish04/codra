@@ -24,6 +24,7 @@ import type {
   StandardSecretBindingsResponse,
   StandardSecretBinding,
   MissingSecretReportsResponse,
+  JulesSessionsResponse,
 } from '@shared/api';
 import type { LlmApiFormat, LlmProvider, ModelConfig, RepoConfig, JobDetail, ChangelogEntry } from '@shared/schema';
 
@@ -235,6 +236,16 @@ export const api = {
     }
     const query = searchParams.toString();
     return request<AgentActionsResponse>(`/api/actions${query ? `?${query}` : ''}`);
+  },
+  getJulesSessions(params: Record<string, QueryValue> = {}) {
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '') {
+        searchParams.set(key, String(value));
+      }
+    }
+    const query = searchParams.toString();
+    return request<JulesSessionsResponse>(`/api/jules-sessions${query ? `?${query}` : ''}`);
   },
   getStandardizationRules() {
     return request<StandardizationRulesResponse>('/api/standardization');

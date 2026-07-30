@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '@client/lib/api';
 import { Badge } from '@client/components/ui/badge';
 import { Alert } from '@client/components/ui/alert';
@@ -27,6 +28,11 @@ export function ActionsPage() {
         title="Codra actions"
         description="Every follow-up PR codra opened on its own — what it changed, why, and which PR review triggered it."
       />
+
+      <p className="text-sm text-muted-foreground">
+        Jules documentation sessions have moved to{' '}
+        <Link to="/jules/operations" className="text-primary hover:underline">Jules Ops</Link>.
+      </p>
 
       {error && <Alert variant="destructive">{error}</Alert>}
 

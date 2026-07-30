@@ -60,6 +60,10 @@ export class GitHubService {
     return this.client.getRepoTree(owner, repo, sha);
   }
 
+  async getFileLastCommitDate(owner: string, repo: string, path: string) {
+    return this.client.getFileLastCommitDate(owner, repo, path);
+  }
+
   async createIssueComment(owner: string, repo: string, issueNumber: number, body: string) {
     return this.client.createIssueComment(owner, repo, issueNumber, body);
   }
@@ -94,5 +98,13 @@ export class GitHubService {
     params: { state?: 'open' | 'closed' | 'all'; head?: string; base?: string; per_page?: number },
   ) {
     return this.client.listPullRequests(owner, repo, params);
+  }
+
+  async getRepoActionsPublicKey(owner: string, repo: string) {
+    return this.client.getRepoActionsPublicKey(owner, repo);
+  }
+
+  async putRepoActionsSecret(owner: string, repo: string, name: string, encrypted_value: string, key_id: string) {
+    return this.client.putRepoActionsSecret(owner, repo, name, encrypted_value, key_id);
   }
 }

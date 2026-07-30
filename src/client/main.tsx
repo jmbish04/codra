@@ -42,6 +42,8 @@ const BestPracticesPage = safeLazy(() => import('./pages/best-practices').then(m
 const DocsReviewPage = safeLazy(() => import('./pages/docs-review').then(m => ({ default: m.DocsReviewPage })));
 const SetupGuidePage = safeLazy(() => import('./pages/setup-guide').then(m => ({ default: m.SetupGuidePage })));
 const CommandsPage = safeLazy(() => import('./pages/commands').then(m => ({ default: m.CommandsPage })));
+const JulesIntegrationPage = safeLazy(() => import('./pages/jules-integration').then(m => ({ default: m.JulesIntegrationPage })));
+const JulesOperationsPage = safeLazy(() => import('./pages/jules-operations').then(m => ({ default: m.JulesOperationsPage })));
 const NotFoundPage = safeLazy(() => import('./pages/not-found').then(m => ({ default: m.NotFoundPage })));
 
 import './app.css';
@@ -146,6 +148,8 @@ const router = createBrowserRouter([
       { path: 'docs-review', element: withSuspense(DocsReviewPage) },
       { path: 'setup', element: withSuspense(SetupGuidePage) },
       { path: 'commands', element: withSuspense(CommandsPage) },
+      { path: 'jules', element: withSuspense(JulesIntegrationPage) },
+      { path: 'jules/operations', element: withSuspense(JulesOperationsPage) },
     ],
   },
   {

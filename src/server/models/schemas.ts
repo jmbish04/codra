@@ -196,3 +196,24 @@ export const CHANGELOG_SCHEMA = {
   description: 'Submit the structured changelog entry for this pull request.',
   schema: CHANGELOG_RESPONSE_SCHEMA,
 };
+
+/**
+ * Structured output for judging whether AGENTS.md/README.md/frontend docs are
+ * reflective and up-to-date relative to the PR's changes. Heuristics decide
+ * presence/staleness; this schema only refines the "needs work" verdict.
+ */
+export const DOCS_GAP_SCHEMA = {
+  name: 'codra_docs_gap',
+  description: 'Judge whether AGENTS.md, README.md, and the frontend docs suite reflect this PR\'s changes.',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['agents_needs_work', 'readme_needs_work', 'frontend_docs_needs_work', 'reasons'],
+    properties: {
+      agents_needs_work: { type: 'boolean', description: 'True if AGENTS.md is missing, stale, or no longer reflects the code.' },
+      readme_needs_work: { type: 'boolean', description: 'True if README.md is missing, stale, or no longer reflects the code.' },
+      frontend_docs_needs_work: { type: 'boolean', description: 'True if the docs/ suite is missing, stale, or incomplete for the frontend.' },
+      reasons: { type: 'array', items: { type: 'string' }, description: 'One short reason per true verdict above.' },
+    },
+  },
+} as const;

@@ -64,6 +64,19 @@ The deployed base URL lives in one place: `env.APP_URL` (a `vars` entry in
 - Server: build links from `env.APP_URL` (e.g. via `FormatterService`).
 - Tests: derive it — `const APP_URL = createTestEnv().APP_URL` — never a literal domain.
 
+## Docs-gap Jules tasks & deploy workflow
+
+- The review pipeline (`src/server/core/review.ts`) has two opt-out toggles in
+  `config.review`: `jules.enabled` (docs-gap → Jules session, launched only
+  on PR merge) and `deployWorkflow.enabled` (separate `codra/deploy-workflow-*`
+  PR adding `.github/workflows/deploy.yml`). Both default to `true` — see
+  `src/server/core/jules.ts`, `src/server/core/jules-docs-gap.ts`, and
+  `src/server/core/deploy-workflow.ts`.
+- Auto-setting the `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_TOKEN` Actions
+  secrets (`src/server/core/github-secrets.ts`) requires the GitHub App's
+  **Actions Secrets: write** permission; without it, Codra writes the secret
+  names and setup steps into the deploy-workflow PR body instead.
+
 ## Gotchas catalog
 
 Known hard-won gotchas live in [data/gotchas/](data/gotchas/) as

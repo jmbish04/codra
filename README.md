@@ -71,6 +71,33 @@ Codra listens to GitHub pull request events, runs AI-powered review jobs, posts 
 - **GitHub**: GitHub App webhooks, checks, reviews, and OAuth
 - **Quality**: TypeScript, Zod, Vitest, Playwright browser tests
 
+## Docs-gap Jules tasks & deploy workflow
+
+Two extra steps run during review, alongside the usual findings:
+
+- **Docs-gap → Jules task.** Codra checks the PR's changed files for missing
+  or stale docs — `AGENTS.md`/`CLAUDE.md`, `README.md`, a frontend `docs/`
+  suite, or low docstring coverage. If gaps are found, Codra comments on the
+  PR that a Jules session will open once the PR merges, and stages a
+  `jules_sessions` row. **Only on merge** (not on close-without-merge) does
+  Codra open a [Jules](https://jules.google) agent session — this requires
+  the repository connected to Jules and a `JULES_API_KEY` — and stores the
+  session id and link, shown on the Codra Actions dashboard with a copy-id
+  button and an open-in-Jules link. Opt out per repo with
+  `review.jules.enabled: false` (default `true`).
+- **Deploy workflow PR.** For Cloudflare Worker repositories that don't already
+  have a deploy workflow, Codra opens a separate PR (`codra/deploy-workflow-*`,
+  distinct from housekeeping PRs) adding `.github/workflows/deploy.yml` built
+  on `cloudflare/wrangler-action@v4`, with manual `workflow_dispatch` actions
+  (deploy / migrate-db / check-logs) and a commented-out push-to-main
+  auto-deploy block you can uncomment later. Codra also tries to set the
+  repo's `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` Actions secrets via
+  the GitHub API (libsodium sealed box). This needs the GitHub App's
+  **Actions Secrets: write** permission — without it, Codra degrades
+  gracefully and writes the secret names plus setup instructions into the PR
+  body instead. Opt out per repo with `review.deployWorkflow.enabled: false`
+  (default `true`).
+
 ## Documentation
 
 The full setup and operations guides live at [codra.run/docs](https://codra.run/docs).
