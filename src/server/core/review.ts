@@ -30,6 +30,8 @@ import { detectTestTargets } from '@server/core/test-detection';
 import { runAndReportPrTests } from '@server/core/test-runner';
 import { runDocsReview } from '@server/core/docs-review';
 import { listSecretsStoreSecrets, ensureSecretBindings, type SecretBindingSpec } from '@server/core/secrets-store';
+import { evaluateDocsGaps, buildJulesPrompt } from '@server/core/jules-docs-gap';
+import { stageJulesSession } from '@server/db/jules-sessions';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
 
@@ -518,6 +520,20 @@ async function runReviewPhase(
     } catch (err) {
       logger.error('Failed to run repository standardization checks', err);
       await updateJobStep(env, job.id, 'Standardization', { status: 'failed', error: String(err) });
+    }
+  }
+
+  if (!hasCompletedStep(job, 'Docs Gap')) {
+    try {
+      await updateJobStep(env, job.id, 'Docs Gap', { status: 'running' });
+      const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
+      if (config.review?.jules?.enabled !== false) {
+        await evaluateAndStageJulesDocsTask(env, job, github, model, config);
+      }
+      await updateJobStep(env, job.id, 'Docs Gap', { status: 'done' });
+    } catch (err) {
+      logger.error('Failed to evaluate docs gap for Jules', err);
+      await updateJobStep(env, job.id, 'Docs Gap', { status: 'failed', error: String(err) });
     }
   }
 
@@ -1610,6 +1626,36 @@ type HousekeepingChange = {
   /** SHA of the existing file (for updates), undefined for new files. */
   existingSha?: string;
 };
+
+async function evaluateAndStageJulesDocsTask(
+  env: Env, job: PersistedReviewJob, github: GitHubService, model: ModelService, config: RepoConfig,
+) {
+  const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
+  const defaultBranch = (await github.getRepo(job.owner, job.repo)).default_branch;
+
+  const report = await evaluateDocsGaps(
+    env, github,
+    { id: job.id, owner: job.owner, repo: job.repo, prNumber: job.prNumber, headSha: pr.head.sha },
+    config, model,
+  );
+  if (report.items.length === 0) return;
+
+  const prompt = buildJulesPrompt(report, {
+    owner: job.owner, repo: job.repo, defaultBranch,
+    router: 'react-router-dom createBrowserRouter (see src/client/main.tsx); match the repo\'s actual router',
+  });
+
+  const comment = await github.createIssueComment(job.owner, job.repo, job.prNumber,
+    `📚 **Codra found documentation gaps**\n\n${report.summary}\n\nOnce this PR is **merged**, Codra will open a Jules agent session to address them. (Nothing happens if the PR is closed without merging.)`,
+  ).catch(() => null);
+
+  await stageJulesSession(env, {
+    owner: job.owner, repo: job.repo,
+    triggeringPrNumber: job.prNumber, triggeringJobId: job.id,
+    prompt, gapSummary: report.summary,
+    prCommentId: comment?.id ?? null,
+  });
+}
 
 async function standardizeRepository(
   env: Env,
