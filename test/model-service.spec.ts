@@ -336,6 +336,8 @@ describe('ModelService', () => {
               on_file_types: ['.ts'],
               command: 'npm run lint',
             },
+            jules: { enabled: true },
+            deployWorkflow: { enabled: true },
           },
           model: {
             main: '@cf/zai-org/glm-4.7-flash',
