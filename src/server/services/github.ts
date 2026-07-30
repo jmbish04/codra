@@ -60,6 +60,10 @@ export class GitHubService {
     return this.client.getRepoTree(owner, repo, sha);
   }
 
+  async getFileLastCommitDate(owner: string, repo: string, path: string) {
+    return this.client.getFileLastCommitDate(owner, repo, path);
+  }
+
   async createIssueComment(owner: string, repo: string, issueNumber: number, body: string) {
     return this.client.createIssueComment(owner, repo, issueNumber, body);
   }

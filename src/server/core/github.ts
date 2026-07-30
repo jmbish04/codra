@@ -537,6 +537,19 @@ export class GitHubClient {
     });
   }
 
+  /** Best-effort: ISO date of the file's last commit, or null (missing file / any failure). */
+  async getFileLastCommitDate(owner: string, repo: string, path: string): Promise<string | null> {
+    try {
+      return await withRetry(`getFileLastCommitDate ${owner}/${repo}/${path}`, async () => {
+        const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/commits?path=${encodeURIComponent(path)}&per_page=1`);
+        const json = (await response.json()) as Array<{ commit?: { committer?: { date?: string } } }>;
+        return json[0]?.commit?.committer?.date ?? null;
+      });
+    } catch {
+      return null;
+    }
+  }
+
   async createCheckRun(
     owner: string,
     repo: string,
