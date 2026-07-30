@@ -107,15 +107,20 @@ export async function evaluateDocsGaps(
       items.push({ kind: 'agents', reason: agentsMissing ? 'AGENTS.md/CLAUDE.md is missing.' : `${agentsPath} hasn't been updated in over ${STALE_DAYS} days.` });
     }
 
+    // A repo only needs a frontend docs suite if it has a frontend at all.
+    const frontendPrefixes = ['src/client/', 'app/', 'pages/', 'components/', 'src/pages/', 'src/components/'];
+    const hasFrontend = (tree?.tree ?? []).some(
+      (n) => n.type === 'blob' && (/\.(tsx|jsx)$/.test(n.path) || frontendPrefixes.some((p) => n.path.startsWith(p))),
+    );
     const hasDocsDir = (tree?.tree ?? []).some((n) => n.type === 'blob' && n.path.startsWith('docs/'));
-    if (!hasDocsDir) {
+    if (hasFrontend && !hasDocsDir) {
       items.push({ kind: 'frontend-docs', reason: 'No docs/ directory found in the repo.' });
     }
 
     // ponytail: docstring scope is deliberately limited to this PR's changed files,
     // not a full-repo sweep — broaden only if pre-existing gaps become a recurring complaint.
     const changedFiles = await getChangedFileContents(github, owner, repo, prNumber, headSha).catch(() => []);
-    const docstringResults = analyzeChangedFiles(changedFiles);
+    const docstringResults = analyzeChangedFiles(changedFiles).filter((r) => r.requiresJulesTask);
     if (docstringResults.length > 0) {
       items.push({
         kind: 'docstrings',
@@ -148,7 +153,7 @@ export async function evaluateDocsGaps(
         const reason = parsed.reasons?.[0] || 'The docs no longer reflect the current code.';
         if (parsed.readme_needs_work && !readmeMissing && !readmeStale) items.push({ kind: 'readme', reason });
         if (parsed.agents_needs_work && !agentsMissing && !agentsStale) items.push({ kind: 'agents', reason });
-        if (parsed.frontend_docs_needs_work && hasDocsDir) items.push({ kind: 'frontend-docs', reason });
+        if (parsed.frontend_docs_needs_work && hasFrontend && hasDocsDir) items.push({ kind: 'frontend-docs', reason });
       }
     } catch (error) {
       logger.warn('Docs-gap model refinement failed; falling back to heuristic-only verdicts', {

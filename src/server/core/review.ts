@@ -1657,7 +1657,7 @@ async function evaluateAndStageJulesDocsTask(
 
   const prompt = buildJulesPrompt(report, {
     owner: job.owner, repo: job.repo, defaultBranch,
-    router: 'react-router-dom createBrowserRouter (see src/client/main.tsx); match the repo\'s actual router',
+    router: "Match the repository's existing routing setup — inspect how routes/pages are already registered (e.g. react-router, Next.js app router, file-based routing) and follow that exact pattern; do NOT assume a framework.",
   });
 
   const comment = await github.createIssueComment(job.owner, job.repo, job.prNumber,

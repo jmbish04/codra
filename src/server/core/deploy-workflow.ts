@@ -170,7 +170,8 @@ export async function ensureDeployWorkflow(
     if (secretResult.ok) {
       body += '\nCodra set the `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` Actions secrets automatically.\n';
     } else {
-      body += `\n**Manual step required:** add these repository Actions secrets before running the workflow:\n- \`CLOUDFLARE_ACCOUNT_ID\` — Cloudflare dashboard → Workers & Pages → Overview (right sidebar)\n- \`CLOUDFLARE_API_TOKEN\` — Cloudflare dashboard → My Profile → API Tokens → create a scoped Workers/D1 deploy token\n\n(${secretResult.reason ?? 'secret not set'})\n`;
+      const shortReason = String(secretResult.reason ?? 'secret not set').slice(0, 200);
+      body += `\n**Manual step required:** add these repository Actions secrets before running the workflow:\n- \`CLOUDFLARE_ACCOUNT_ID\` — Cloudflare dashboard → Workers & Pages → Overview (right sidebar)\n- \`CLOUDFLARE_API_TOKEN\` — Cloudflare dashboard → My Profile → API Tokens → create a scoped Workers/D1 deploy token\n\n(${shortReason})\n`;
     }
 
     const openedPr = await github.createPullRequest(owner, repo, {
