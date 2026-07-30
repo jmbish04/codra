@@ -26,6 +26,11 @@ export async function launchStagedJulesSessions(
     if (!apiKey) {
       for (const row of staged) {
         await markJulesOutcome(env, row.id, { state: 'skipped', errorMsg: 'JULES_API_KEY not configured' }).catch(() => {});
+        if (row.pr_comment_id != null) {
+          await github.updateIssueComment(ctx.owner, ctx.repo, row.pr_comment_id,
+            `📚 Codra staged a Jules docs session, but \`JULES_API_KEY\` is not configured, so no session was opened.`,
+          ).catch(() => {});
+        }
       }
       return 0;
     }

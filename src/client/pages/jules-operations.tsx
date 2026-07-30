@@ -75,7 +75,7 @@ export function JulesOperationsPage() {
               {s.session_id && (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <CopyButton value={s.session_id} label="Copy session ID" copiedLabel="Copied" />
-                  {s.session_url && (
+                  {s.session_url && s.session_url.startsWith('https://') && (
                     <a href={s.session_url} target="_blank" rel="noopener noreferrer"
                        className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
                       Open in Jules <ExternalLink className="h-3.5 w-3.5" />

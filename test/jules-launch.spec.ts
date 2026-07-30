@@ -37,6 +37,19 @@ describe('launchStagedJulesSessions', () => {
     expect(outcome).toHaveBeenCalledWith(expect.anything(), 'row2', expect.objectContaining({ state: 'skipped' }));
   });
 
+  it('comments on the PR and marks skipped when JULES_API_KEY is not configured', async () => {
+    vi.spyOn(db, 'listStagedJulesSessions').mockResolvedValue([
+      { id: 'row3', owner: 'o', repo: 'r', triggering_pr_number: 7, prompt: 'P', pr_comment_id: 42 } as any,
+    ]);
+    const outcome = vi.spyOn(db, 'markJulesOutcome').mockResolvedValue();
+    const env = { JULES_API_KEY: { get: async () => '' } } as any;
+    const github = fakeGithub();
+    const count = await launchStagedJulesSessions(env, github, { owner: 'o', repo: 'r', prNumber: 7 });
+    expect(count).toBe(0);
+    expect(outcome).toHaveBeenCalledWith(expect.anything(), 'row3', expect.objectContaining({ state: 'skipped', errorMsg: 'JULES_API_KEY not configured' }));
+    expect(github.updateIssueComment).toHaveBeenCalledWith('o', 'r', 42, expect.stringContaining('JULES_API_KEY'));
+  });
+
   it('never throws on internal failure', async () => {
     vi.spyOn(db, 'listStagedJulesSessions').mockRejectedValue(new Error('db down'));
     await expect(launchStagedJulesSessions(fakeEnv(), fakeGithub(), { owner: 'o', repo: 'r', prNumber: 1 })).resolves.toBe(0);

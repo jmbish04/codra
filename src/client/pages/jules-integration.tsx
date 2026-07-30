@@ -40,7 +40,7 @@ export function JulesIntegrationPage() {
       <PageHeader
         category="Integrations"
         title="Jules integration"
-        description="How codra detects documentation gaps during a review and hands them off to Jules (jules.google) as a follow-up agent task."
+        description="How codra detects documentation gaps during a review and hands them off to Jules (jules.google.com) as a follow-up agent task."
       />
 
       <Section icon={FileSearch} title="What it does">
@@ -69,7 +69,7 @@ export function JulesIntegrationPage() {
 
       <Section icon={ShieldCheck} title="Prerequisites">
         <ul className="list-disc list-inside space-y-1 ml-1">
-          <li>The repository must be connected to the Jules GitHub app (<a href="https://jules.google" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">jules.google</a>).</li>
+          <li>The repository must be connected to the Jules GitHub app (<a href="https://jules.google.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">jules.google.com</a>).</li>
           <li>
             A <code className="rounded bg-secondary px-1 py-0.5 font-mono text-xs">JULES_API_KEY</code> must be
             configured (Cloudflare secret-store binding — already wired for this deployment).
@@ -121,6 +121,11 @@ export function JulesIntegrationPage() {
             codra sets these <strong className="text-foreground">automatically</strong> if the GitHub App has the{' '}
             <strong className="text-foreground">Actions Secrets: write</strong> repository permission. Otherwise it
             degrades gracefully and writes manual setup instructions into the PR body instead.
+          </p>
+          <p>
+            Auto-set also requires that codra&apos;s own <code className="rounded bg-secondary px-1 py-0.5 font-mono text-xs">CF_ACCOUNT_ID</code> and{' '}
+            <code className="rounded bg-secondary px-1 py-0.5 font-mono text-xs">CF_API_TOKEN</code> secret-store bindings are populated on this
+            deployment — if either is empty, codra falls back to the manual instructions below even when the App permission is present.
           </p>
 
           <Alert variant="default">
