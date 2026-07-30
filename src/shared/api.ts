@@ -187,3 +187,20 @@ export type RepoTestConfig = {
   hasFrontendPassword: boolean;
 };
 export type TestConfigResponse = { repo: string; config: RepoTestConfig };
+
+export type JulesSessionDto = {
+  id: string;
+  created_at: string;
+  owner: string;
+  repo: string;
+  triggering_pr_number: number;
+  state: 'staged' | 'launched' | 'skipped' | 'error';
+  prompt: string;
+  gap_summary: string;
+  session_id: string | null;
+  session_url: string | null;
+  session_state: string | null;
+  error_msg: string | null;
+};
+
+export type JulesSessionsResponse = { sessions: JulesSessionDto[] };
