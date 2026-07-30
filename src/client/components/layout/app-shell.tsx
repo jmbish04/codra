@@ -25,6 +25,8 @@ import {
   KeyRound,
   FlaskConical,
   FileSearch,
+  Bot,
+  ListChecks,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
 import { useTheme } from '@client/lib/theme';
@@ -51,6 +53,8 @@ const links = [
   { to: '/secrets', label: 'Secret Bindings', icon: KeyRound, end: false },
   { to: '/testing', label: 'PR Testing', icon: FlaskConical, end: false },
   { to: '/actions', label: 'Codra Actions', icon: History, end: false },
+  { to: '/jules', label: 'Jules', icon: Bot, end: true },
+  { to: '/jules/operations', label: 'Jules Ops', icon: ListChecks, end: false },
   { to: '/setup', label: 'Setup Guide', icon: BookOpen, end: false },
   { to: '/commands', label: 'Commands', icon: Terminal, end: false },
   { to: '/settings', label: 'Settings', icon: Settings, end: false },
