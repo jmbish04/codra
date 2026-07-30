@@ -1,0 +1,26 @@
+import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+
+/**
+ * A Jules coding-agent session Codra stages when it detects a documentation
+ * gap during a PR review. Staged at review time; launched only once the
+ * triggering PR merges (Jules starts from GitHub HEAD).
+ */
+export const julesSessions = sqliteTable('jules_sessions', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  created_at: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updated_at: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  owner: text('owner').notNull(),
+  repo: text('repo').notNull(),
+  triggering_pr_number: integer('triggering_pr_number').notNull(),
+  triggering_job_id: text('triggering_job_id'),
+  // 'staged' | 'launched' | 'skipped' | 'error'
+  state: text('state').notNull().default('staged'),
+  prompt: text('prompt').notNull(),
+  gap_summary: text('gap_summary').notNull(),
+  session_id: text('session_id'),
+  session_url: text('session_url'),
+  session_state: text('session_state'),
+  error_msg: text('error_msg'),
+  pr_comment_id: integer('pr_comment_id'),
+});

@@ -14,3 +14,4 @@ export * from './secret-bindings';
 export * from './test-targets';
 export * from './dismissed-standards';
 export * from './docs-review';
+export * from './jules-sessions';
