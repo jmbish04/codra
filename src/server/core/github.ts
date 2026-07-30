@@ -902,4 +902,21 @@ export class GitHubClient {
       return (await response.json()) as Array<{ number: number; title: string; head: { ref: string } }>;
     });
   }
+
+  async getRepoActionsPublicKey(owner: string, repo: string) {
+    return withRetry(`getRepoActionsPublicKey ${owner}/${repo}`, async () => {
+      const res = await this.requestAndCheck(`${repoApiPath(owner, repo)}/actions/secrets/public-key`);
+      return (await res.json()) as { key_id: string; key: string };
+    });
+  }
+
+  async putRepoActionsSecret(owner: string, repo: string, name: string, encrypted_value: string, key_id: string) {
+    return withRetry(`putRepoActionsSecret ${owner}/${repo} ${name}`, async () => {
+      await this.requestAndCheck(`${repoApiPath(owner, repo)}/actions/secrets/${encodeURIComponent(name)}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ encrypted_value, key_id }),
+      });
+    });
+  }
 }

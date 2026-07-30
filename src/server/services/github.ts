@@ -99,4 +99,12 @@ export class GitHubService {
   ) {
     return this.client.listPullRequests(owner, repo, params);
   }
+
+  async getRepoActionsPublicKey(owner: string, repo: string) {
+    return this.client.getRepoActionsPublicKey(owner, repo);
+  }
+
+  async putRepoActionsSecret(owner: string, repo: string, name: string, encrypted_value: string, key_id: string) {
+    return this.client.putRepoActionsSecret(owner, repo, name, encrypted_value, key_id);
+  }
 }
