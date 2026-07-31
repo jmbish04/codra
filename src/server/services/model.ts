@@ -12,6 +12,7 @@ import { reviewWithAnthropic } from '../models/anthropic';
 import { buildFileReviewPrompts } from '../prompts/file-review';
 import { buildSummaryPrompt, SUMMARY_SYSTEM_PROMPT } from '../prompts/summary';
 import { parseFileReviewResponse } from '../core/model-output';
+import { withTimeout } from '../core/timeout';
 import { truncateFileDiff } from '../core/diff';
 import type { RepoConfig } from '@shared/schema';
 import type { TokenTracker } from '../core/token-tracker';
@@ -608,7 +609,11 @@ Lesson #${idx + 1}:
 async function fetchLessonsLearned(env: any, filePath: string): Promise<any[]> {
   if (!env.EDGRAPH) return [];
   try {
-    const res = await env.EDGRAPH.fetch(`https://github.com/jmbish04/core-github-api-edgraph/api/lessons?file=${encodeURIComponent(filePath)}`);
+    // Supplementary context — never let a hung EDGRAPH binding stall a file
+    // review. Time-bounded; the catch below turns a timeout into an empty list.
+    const res = await withTimeout<Response>('EDGRAPH lessons', 10000, (signal) =>
+      env.EDGRAPH.fetch(`https://github.com/jmbish04/core-github-api-edgraph/api/lessons?file=${encodeURIComponent(filePath)}`, { signal }),
+    );
     if (!res.ok) return [];
     const data = await res.json() as any;
     return data.lessons || [];

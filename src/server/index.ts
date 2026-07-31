@@ -57,6 +57,16 @@ export default {
 
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     const { runFullSync } = await import('@server/services/sync/github-sync');
+    // Backstop recovery on cron: the same expired-lease requeue that runs pre/post
+    // every queue batch and on dashboard reads. Those cover active periods; this
+    // catches a job stalled during a dead-quiet stretch (no webhooks, no dashboard
+    // views) that would otherwise never self-heal. ponytail: piggybacks the 6h
+    // sync cron — worst-case 6h heal; add a tighter cron only if that's too slow.
+    ctx.waitUntil(
+      runBestEffortJobMaintenance(env).catch((error) => {
+        logger.error('Scheduled job maintenance failed', error instanceof Error ? error : new Error(String(error)));
+      })
+    );
     // Sound the health alarm on cron: a loud error log (visible in observability)
     // whenever the review pipeline has stuck jobs.
     ctx.waitUntil(
