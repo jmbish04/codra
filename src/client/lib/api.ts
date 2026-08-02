@@ -29,6 +29,18 @@ import type {
 } from '@shared/api';
 import type { LlmApiFormat, LlmProvider, ModelConfig, RepoConfig, JobDetail, ChangelogEntry } from '@shared/schema';
 
+export interface WatcherAgentDto {
+  agent_id: string;
+  hostname: string | null;
+  version: string | null;
+  active_sessions: number;
+  last_seen_at: string;
+}
+export interface WatcherAgentsResponse {
+  agents: WatcherAgentDto[];
+  alive: boolean;
+}
+
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 function pathSegment(value: string) {
@@ -250,6 +262,9 @@ export const api = {
   },
   getJulesSessionLive(id: string) {
     return request<JulesSessionLiveDto>(`/api/jules-sessions/${encodeURIComponent(id)}/live`);
+  },
+  getWatcherAgents() {
+    return request<WatcherAgentsResponse>('/api/planning-packages/orchestration/agents');
   },
   getStandardizationRules() {
     return request<StandardizationRulesResponse>('/api/standardization');

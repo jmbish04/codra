@@ -3,6 +3,7 @@ import { api } from '@client/lib/api';
 import { Badge, type BadgeProps } from '@client/components/ui/badge';
 import { Alert } from '@client/components/ui/alert';
 import { PageHeader } from '@client/components/layout/page-header';
+import { WatcherStatusCard } from '@client/components/features/planning/watcher-status-card';
 import { EmptyState } from '@client/components/shared/empty-state';
 import { CopyButton } from '@client/components/ui/copy-button';
 import { formatDateTime } from '@client/lib/format';
@@ -103,6 +104,8 @@ export function JulesOperationsPage() {
         title="Jules operations"
         description="Every Jules session codra has staged or launched, including the full prompt sent — the complete record of what was sent to Jules."
       />
+
+      <WatcherStatusCard />
 
       {error && <Alert variant="destructive">{error}</Alert>}
 
