@@ -96,6 +96,53 @@ export function parsePlanFromText(text: string): { ok: true; input: Omit<Revisio
   return { ok: true, input: result.data };
 }
 
+/** Latest agent message text from a session's activities (or null). */
+export function extractLatestAgentMessage(activities: Array<{ type?: string; message?: string }> | undefined | null): string | null {
+  if (!activities) return null;
+  for (let i = activities.length - 1; i >= 0; i--) {
+    const a = activities[i];
+    if (a?.type === 'agentMessaged' && typeof a.message === 'string') return a.message;
+  }
+  return null;
+}
+
+export type PollAction =
+  | { kind: 'accept' }
+  | { kind: 'improve'; feedback: string }
+  | { kind: 'answer' }
+  | { kind: 'wait' }
+  | { kind: 'stuck'; reason: string };
+
+/**
+ * Decide the single bounded action for one poll tick. Pure — no I/O. The caller
+ * increments the iteration counter before any Jules `send`, so the circuit
+ * breaker here is a hard ceiling that always terminates the loop.
+ */
+export function decideNextAction(input: {
+  state: string;
+  parsed: { ok: boolean } | null;
+  verdict?: { satisfied: boolean; feedback: string } | null;
+  iterations: number;
+  maxIterations: number;
+}): PollAction {
+  if (input.iterations >= input.maxIterations) return { kind: 'stuck', reason: 'max review iterations reached' };
+  if (input.state === 'failed') return { kind: 'stuck', reason: 'jules session failed' };
+  if (input.state === 'awaitingUserFeedback') return { kind: 'answer' };
+
+  if (input.parsed?.ok) {
+    if (input.verdict?.satisfied) return { kind: 'accept' };
+    return { kind: 'improve', feedback: input.verdict?.feedback || 'Revise and produce the full plan again.' };
+  }
+
+  // A native plan-approval gate or completion with no usable JSON: nudge for the
+  // contract block rather than approving execution (this is a plan-only session).
+  if (input.state === 'awaitingPlanApproval' || input.state === 'completed') {
+    return { kind: 'improve', feedback: 'No valid planningPackage JSON block found. Emit it now; do not start coding.' };
+  }
+  // planning | queued | inProgress | paused | unspecified — still working.
+  return { kind: 'wait' };
+}
+
 const reviewSchema = z.object({ satisfied: z.boolean(), feedback: z.string().default('') });
 
 export function buildReviewPrompt(input: { title: string; revisionJson: string }): string {

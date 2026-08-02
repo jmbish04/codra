@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildPlanningPrompt, buildMergePrompt, buildReviewPrompt,
   parsePlanFromText, parseReviewVerdict,
+  extractLatestAgentMessage, decideNextAction,
 } from '@server/services/plan-orchestrator';
 
 describe('plan-orchestrator pure logic', () => {
@@ -58,5 +59,35 @@ describe('plan-orchestrator pure logic', () => {
     expect(merge).toContain('NOTHING is lost');
 
     expect(buildReviewPrompt({ title: 'Feature X', revisionJson: '{}' })).toContain('elisions');
+  });
+
+  it('extracts the latest agent message', () => {
+    expect(extractLatestAgentMessage([
+      { type: 'agentMessaged', message: 'first' },
+      { type: 'progressUpdated' },
+      { type: 'agentMessaged', message: 'latest' },
+    ])).toBe('latest');
+    expect(extractLatestAgentMessage([])).toBeNull();
+    expect(extractLatestAgentMessage(null)).toBeNull();
+  });
+
+  it('decides bounded poll actions with a hard circuit breaker', () => {
+    const base = { iterations: 0, maxIterations: 3 };
+    // circuit breaker trumps everything
+    expect(decideNextAction({ ...base, iterations: 3, state: 'inProgress', parsed: { ok: true }, verdict: { satisfied: true, feedback: '' } }))
+      .toEqual({ kind: 'stuck', reason: 'max review iterations reached' });
+    // failed session
+    expect(decideNextAction({ ...base, state: 'failed', parsed: null })).toEqual({ kind: 'stuck', reason: 'jules session failed' });
+    // jules asked a question
+    expect(decideNextAction({ ...base, state: 'awaitingUserFeedback', parsed: null })).toEqual({ kind: 'answer' });
+    // good plan → accept
+    expect(decideNextAction({ ...base, state: 'inProgress', parsed: { ok: true }, verdict: { satisfied: true, feedback: '' } })).toEqual({ kind: 'accept' });
+    // bad plan → improve with feedback
+    expect(decideNextAction({ ...base, state: 'inProgress', parsed: { ok: true }, verdict: { satisfied: false, feedback: 'add code' } }))
+      .toEqual({ kind: 'improve', feedback: 'add code' });
+    // completed with no plan → nudge for JSON
+    expect(decideNextAction({ ...base, state: 'completed', parsed: { ok: false } }).kind).toBe('improve');
+    // still working → wait
+    expect(decideNextAction({ ...base, state: 'planning', parsed: null })).toEqual({ kind: 'wait' });
   });
 });
