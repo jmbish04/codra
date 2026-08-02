@@ -155,6 +155,13 @@
       "when": 1785680560674,
       "tag": "0021_tiny_abomination",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1785691739986,
+      "tag": "0022_tidy_starjammers",
+      "breakpoints": true
     }
   ]
 }
