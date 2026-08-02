@@ -115,16 +115,12 @@ export function createPlanningPackagesRouter() {
     return c.json({ ok: true });
   });
 
-  // Kick the per-package PlanAgent DO: Jules planning → review loop → merge → accept.
+  // Orchestration is being re-wired to a stateless D1 + webhook design (no DO).
+  // Placeholder until that lands.
   app.post('/:id/orchestrate', async (c) => {
     const pkg = await getPackage(c.env, c.req.param('id'));
     if (!pkg) return jsonError('Planning package not found.', 404);
-    await updatePackage(c.env, pkg.id, { status: 'planning' });
-    const stub = c.env.PlanAgent.get(c.env.PlanAgent.idFromName(pkg.id));
-    const res = await stub.fetch('https://plan-agent/start', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ packageId: pkg.id }),
-    });
-    return c.json({ started: res.ok });
+    return jsonError('Orchestration is being re-wired (stateless D1). Not yet available.', 501);
   });
 
   return app;

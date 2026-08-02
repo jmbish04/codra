@@ -55,10 +55,6 @@
 				"name": "JobsFeed",
 				"class_name": "JobsFeed"
 			},
-			{
-				"name": "PlanAgent",
-				"class_name": "PlanAgent"
-			},
 		],
 	},
 	"migrations": [
@@ -81,12 +77,6 @@
 			"tag": "v3",
 			"new_sqlite_classes": [
 				"JobsFeed"
-			],
-		},
-		{
-			"tag": "v4",
-			"new_sqlite_classes": [
-				"PlanAgent"
 			],
 		},
 	],
