@@ -14,6 +14,7 @@ import {
   listMonitorTasks, getMonitorTask, listMonitorEvents, deriveHealth, buildSummary,
 } from '@server/services/jules-monitor';
 import { listCachedActivities } from '@server/db/jules-activities';
+import { createFleetJob, listFleetJobs, type FleetJobKind } from '@server/db/fleet-jobs';
 
 export function createPlanningPackagesRouter() {
   const app = new Hono<AppEnv>();
@@ -50,6 +51,29 @@ export function createPlanningPackagesRouter() {
 
   app.get('/orchestration/tasks/:taskId/events', async (c) => {
     return c.json({ events: await listMonitorEvents(c.env, c.req.param('taskId')) });
+  });
+
+  // Fleet-job queue (executed off-Worker by the daemon/Action — see fleet_jobs).
+  const FLEET_KINDS = new Set(['init', 'analyze', 'dispatch', 'merge']);
+  app.post('/orchestration/fleet/jobs', async (c) => {
+    const body = await c.req.json().catch(() => null) as { repositoryId?: number; kind?: string; params?: unknown } | null;
+    if (!body || typeof body.repositoryId !== 'number' || !body.kind || !FLEET_KINDS.has(body.kind)) {
+      return jsonError('repositoryId (number) and kind (init|analyze|dispatch|merge) are required.', 400);
+    }
+    const job = await createFleetJob(c.env, {
+      repositoryId: body.repositoryId, kind: body.kind as FleetJobKind, params: body.params,
+      createdBy: c.get('sessionUser')?.login ?? null,
+    });
+    return c.json({ job }, 201);
+  });
+
+  app.get('/orchestration/fleet/jobs', async (c) => {
+    const q = c.req.query();
+    const jobs = await listFleetJobs(c.env, {
+      repositoryId: q.repositoryId ? Number(q.repositoryId) : undefined,
+      status: q.status || undefined,
+    });
+    return c.json({ jobs });
   });
 
   app.get('/orchestration/tasks/:taskId/activities', async (c) => {

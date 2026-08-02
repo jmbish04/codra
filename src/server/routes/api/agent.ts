@@ -5,6 +5,7 @@ import { getSecretStoreBinding } from '@server/utils/secrets';
 import { listActiveTasks } from '@server/db/jules-orchestration';
 import { recordHeartbeat } from '@server/db/agent-heartbeats';
 import { advanceTaskById } from '@server/services/jules-poller';
+import { listQueuedFleetJobs, claimFleetJob, completeFleetJob } from '@server/db/fleet-jobs';
 
 /**
  * Machine-to-machine endpoints for the external OpenTUI watcher daemon. Guarded
@@ -53,6 +54,24 @@ export function createAgentRouter() {
     if (!taskId) return jsonError('taskId query param required.', 400);
     const result = await advanceTaskById(c.env, taskId);
     return c.json(result, result.advanced ? 200 : 202);
+  });
+
+  // Off-Worker runner (daemon/Action) picks up jules-fleet / jules-merge CLI jobs.
+  app.get('/fleet-jobs', async (c) => {
+    return c.json({ jobs: await listQueuedFleetJobs(c.env) });
+  });
+
+  app.post('/fleet-jobs/:jobId/claim', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { runner?: string };
+    const claimed = await claimFleetJob(c.env, c.req.param('jobId'), body.runner ?? 'runner');
+    return c.json({ claimed }, claimed ? 200 : 409);
+  });
+
+  app.post('/fleet-jobs/:jobId/result', async (c) => {
+    const body = await c.req.json().catch(() => null) as { status?: 'completed' | 'failed'; result?: unknown; error?: string } | null;
+    if (body?.status !== 'completed' && body?.status !== 'failed') return jsonError('status must be completed|failed.', 400);
+    await completeFleetJob(c.env, c.req.param('jobId'), { status: body.status, result: body.result, error: body.error ?? null });
+    return c.json({ ok: true });
   });
 
   return app;

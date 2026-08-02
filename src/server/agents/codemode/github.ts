@@ -43,6 +43,7 @@ export class GithubConnector extends McpConnector<Env> {
       "create_planning_package",
       "submit_planning_revision",
       "update_plan_task",
+      "request_fleet_run",
     ]);
     if (writes.has(name)) {
       return { ...t, requiresApproval: true };

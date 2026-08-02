@@ -27,7 +27,7 @@ import { RepoApiConnector } from "./codemode";
 import {
   mcpListPlanningPackages, mcpGetPlanningPackage, mcpGetPlanningRevision,
   mcpCreatePlanningPackage, mcpSubmitPlanningRevision, mcpExportPlanningPackages,
-  mcpUpdatePlanTask,
+  mcpUpdatePlanTask, mcpRequestFleetRun,
 } from "@server/mcp/planning-tools";
 
 const asText = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
@@ -326,6 +326,12 @@ export class GitHubLikeMCP extends McpAgent<any> {
       "Update a package task's live status/assignee/pr — keep this current so codra can orchestrate multi-agent work (write — requires approval).",
       { packageId: z.string(), taskKey: z.string(), status: z.string().optional(), assignee: z.string().optional(), prNumber: z.number().optional(), notes: z.string().optional() } as any,
       async (a: { packageId: string; taskKey: string; status?: string; assignee?: string; prNumber?: number; notes?: string }) => asText(await mcpUpdatePlanTask(this.env, a)),
+    );
+    this.server.tool(
+      "request_fleet_run",
+      "Queue a jules-fleet/jules-merge run (init|analyze|dispatch|merge) for a repo. Executed off-Worker by the Mac daemon or a GitHub Action (write — requires approval).",
+      { repositoryId: z.number(), kind: z.enum(["init", "analyze", "dispatch", "merge"]), params: z.record(z.string(), z.any()).optional() } as any,
+      async (a: { repositoryId: number; kind: 'init' | 'analyze' | 'dispatch' | 'merge'; params?: unknown }) => asText(await mcpRequestFleetRun(this.env, a)),
     );
   }
 }

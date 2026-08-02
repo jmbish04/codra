@@ -16,6 +16,7 @@ import {
 } from '@server/db/planning-packages';
 import { upsertRevision, type UpsertRevisionInput } from '@server/services/planning-packages';
 import { slugifyPackage } from '@server/utils/slug';
+import { createFleetJob, type FleetJobKind } from '@server/db/fleet-jobs';
 
 type Env2 = Pick<Env, 'DB' | 'PLANNING_ARTIFACTS'>;
 
@@ -86,6 +87,13 @@ export async function mcpExportPlanningPackages(
   env: Env2, args: { planIds: string[] },
 ): Promise<{ packages: PackageExport[] }> {
   return { packages: await exportPackages(env, args.planIds) };
+}
+
+export async function mcpRequestFleetRun(
+  env: Env2, args: { repositoryId: number; kind: FleetJobKind; params?: unknown },
+): Promise<{ job: { jobId: string; kind: string; status: string } }> {
+  const job = await createFleetJob(env, { repositoryId: args.repositoryId, kind: args.kind, params: args.params });
+  return { job: { jobId: job.job_id, kind: job.kind, status: job.status } };
 }
 
 export async function mcpUpdatePlanTask(

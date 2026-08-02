@@ -19,3 +19,4 @@ export * from './planning-packages';
 export * from './jules-orchestration';
 export * from './agent-heartbeats';
 export * from './jules-activities';
+export * from './fleet-jobs';
