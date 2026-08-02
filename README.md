@@ -98,9 +98,34 @@ Two extra steps run during review, alongside the usual findings:
   body instead. Opt out per repo with `review.deployWorkflow.enabled: false`
   (default `true`).
 
+## Development & Testing
+
+Codra uses `pnpm` for dependency management.
+
+1. **Install dependencies:**
+   ```bash
+   pnpm install
+   ```
+2. **Database setup:**
+   Generate and apply the local SQLite schema using D1:
+   ```bash
+   npm run db:generate
+   npm run migrate:local
+   ```
+3. **Run locally:**
+   Start the local development server (client and worker):
+   ```bash
+   npm run dev
+   ```
+4. **Run tests:**
+   Execute the test suite (Vitest and Playwright):
+   ```bash
+   npm test
+   ```
+
 ## Documentation
 
-The full setup and operations guides live at [codra.run/docs](https://codra.run/docs).
+The full setup and operations guides live at [codra.run/docs](https://codra.run/docs). The internal documentation suite for the repository (such as the rebuild plan and roadmap) lives in the `docs/` directory at the repository root.
 
 - [Installation guide](https://codra.run/docs/installation)
 - [Configuration guide](https://codra.run/docs/configuration)
