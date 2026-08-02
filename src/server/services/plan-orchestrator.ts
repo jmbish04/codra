@@ -154,6 +154,15 @@ export function buildReviewPrompt(input: { title: string; revisionJson: string }
   ].join('\n');
 }
 
+export function buildMergeReviewPrompt(input: { repository: string; summary: string }): string {
+  return [
+    `You are the codra orchestrator reviewing a jules-merge reconciliation for ${input.repository} before it is merged.`,
+    `Approve ONLY if the reconciliation is lossless and correct: no code, task, or migration from any source PR was dropped; conflicts resolved by keeping the most complete content; no placeholder/elided ("...", "unchanged") content introduced.`,
+    `\nReconciliation summary / staged diff:\n${input.summary}`,
+    `\nReply with exactly one fenced \`json\` block: {"satisfied": boolean, "feedback": string}. feedback must be actionable when satisfied is false.`,
+  ].join('\n');
+}
+
 export function parseReviewVerdict(text: string): { satisfied: boolean; feedback: string } {
   const matches = [...text.matchAll(/```json\s*([\s\S]*?)```/g)];
   const raw = matches.length ? matches[matches.length - 1][1].trim() : text.trim();

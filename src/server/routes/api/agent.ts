@@ -6,6 +6,7 @@ import { listActiveTasks } from '@server/db/jules-orchestration';
 import { recordHeartbeat } from '@server/db/agent-heartbeats';
 import { advanceTaskById } from '@server/services/jules-poller';
 import { listQueuedFleetJobs, claimFleetJob, completeFleetJob } from '@server/db/fleet-jobs';
+import { reviewReconciliation } from '@server/services/merge-review';
 
 /**
  * Machine-to-machine endpoints for the external OpenTUI watcher daemon. Guarded
@@ -72,6 +73,22 @@ export function createAgentRouter() {
     if (body?.status !== 'completed' && body?.status !== 'failed') return jsonError('status must be completed|failed.', 400);
     await completeFleetJob(c.env, c.req.param('jobId'), { status: body.status, result: body.result, error: body.error ?? null });
     return c.json({ ok: true });
+  });
+
+  // Merge gate: the runner calls this BEFORE `jules-merge merge`. codra (Kimi)
+  // reviews the staged reconciliation; the runner merges only if approved.
+  // Circuit-broken per reconciliationKey so a rejected reconciliation never loops.
+  app.post('/merge-review', async (c) => {
+    const body = await c.req.json().catch(() => null) as
+      | { repositoryId?: number; repository?: string; reconciliationKey?: string; summary?: string; prNumber?: number } | null;
+    if (!body || typeof body.repositoryId !== 'number' || !body.repository || !body.reconciliationKey || !body.summary) {
+      return jsonError('repositoryId, repository, reconciliationKey, summary are required.', 400);
+    }
+    const result = await reviewReconciliation(c.env, {
+      repositoryId: body.repositoryId, repository: body.repository,
+      reconciliationKey: body.reconciliationKey, summary: body.summary, prNumber: body.prNumber ?? null,
+    });
+    return c.json(result);
   });
 
   return app;

@@ -20,3 +20,4 @@ export * from './jules-orchestration';
 export * from './agent-heartbeats';
 export * from './jules-activities';
 export * from './fleet-jobs';
+export * from './reconciliation-reviews';
