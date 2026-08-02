@@ -23,7 +23,12 @@ the future codra consume it.
     "signal": "human description of the pattern that triggers it"
   },
   "directive": "The decisive instruction codra gives — do X now, do NOT waste time on Y.",
+  "criteria": ["plain substrings", "..."], // optional — overrides the default infra-derived criteria that matchesCriteria() checks. Set infra[0]="other" to match every file regardless of stack.
   "fix_example": "minimal code showing the fix",
+  "fix_examples": [                        // optional — multiple labeled samples
+    { "label": "worker path", "lang": "ts", "code": "..." }
+  ],
+  "references": ["url or note codra can cite in a comment"], // optional
   "evidence": "where/when it bit us",
   "source": "incident id / date"
 }
