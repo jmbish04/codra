@@ -20,11 +20,15 @@ export default defineConfig({
     // as a follow-up task. Re-enable a file here as its root cause is fixed.
     exclude: [
       ...configDefaults.exclude,
-      'test/model-service.spec.ts',   // makes live Cloudflare AI calls → real 502s
-      'test/api.spec.ts',             // SyntaxError importing @server/app (asset/?raw transform)
-      'test/resumable-queue.spec.ts', // same @server/app import SyntaxError
-      'test/webhook-handling.spec.ts',// same @server/app import SyntaxError
-      'test/e2e/dashboard.spec.tsx',  // 1 failing assertion (dashboard e2e)
+      // These import @server/app, which pulls in Workers-runtime-only modules
+      // (cloudflare:workers, @cloudflare/codemode, agents/*) that don't resolve
+      // under environment:'node'. Needs @cloudflare/vitest-pool-workers.
+      'test/api.spec.ts',
+      'test/resumable-queue.spec.ts',
+      'test/webhook-handling.spec.ts',
+      // Needs model_configs/llm_providers seeded per test (resolveModel now
+      // requires a configured model) plus refreshed AI-response mock shapes.
+      'test/model-service.spec.ts',
     ],
     setupFiles: ['./test/setup.ts'],
     fileParallelism: false,
