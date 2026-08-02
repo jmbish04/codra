@@ -24,6 +24,7 @@ import { createActionsRouter } from '@server/routes/api/actions';
 import { createJulesSessionsRouter } from '@server/routes/api/jules-sessions';
 import { createPlanningPackagesRouter } from '@server/routes/api/planning-packages';
 import { createPublicPlanningRouter } from '@server/routes/public-planning';
+import { createAgentRouter } from '@server/routes/api/agent';
 import { createSecretBindingsRouter } from '@server/routes/api/secret-bindings';
 import { createTestConfigRouter } from '@server/routes/api/test-config';
 import { createMcpOAuthRouter } from '@server/routes/api/mcp-oauth';
@@ -78,6 +79,8 @@ export function createApp() {
   // Public, capability-gated (unguessable uuid) read-only planning-package export.
   // Mounted before the /api/* session guard so Jules can pull revisions via curl.
   app.route('/api/public/planning-packages', createPublicPlanningRouter());
+  // Machine-to-machine watcher-daemon endpoints (WORKER_API_KEY guarded, headless).
+  app.route('/api/agent', createAgentRouter());
 
   // RFC 9728: Protected Resource Metadata — Claude probes this first
   app.get('/.well-known/oauth-protected-resource', (c) => {

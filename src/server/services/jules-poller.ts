@@ -7,7 +7,7 @@ import { getPackage, acceptRevision, listRevisions } from '@server/db/planning-p
 import { upsertRevision } from '@server/services/planning-packages';
 import {
   createOrchestrationTask, getTaskByToken, listActiveTasks, updateTaskStatus,
-  incrementTaskIteration, logTaskEvent, type OrchestrationTaskRow,
+  incrementTaskIteration, logTaskEvent, ACTIVE_STATUSES, type OrchestrationTaskRow,
 } from '@server/db/jules-orchestration';
 import { startJulesPlanSession, getJulesSnapshot, sendJulesMessage } from '@server/services/jules';
 import { searchCloudflareDocs } from '@server/services/cloudflare-docs';
@@ -68,6 +68,21 @@ export async function advanceJulesOrchestration(env: PollerEnv): Promise<{ advan
     catch (err) { logger.error(`advanceTask failed for ${task.task_id}`, err instanceof Error ? err : new Error(String(err))); }
   }
   return { advanced };
+}
+
+/**
+ * Advance one task by its uuid token — the entry point for an external real-time
+ * trigger (the Mac OpenTUI daemon POSTs here when Jules emits an activity). Same
+ * bounded single-step logic the cron uses; safe to call concurrently with cron.
+ */
+export async function advanceTaskById(env: PollerEnv, taskId: string): Promise<{ advanced: boolean; reason?: string }> {
+  const task = await getTaskByToken(env, taskId);
+  if (!task) return { advanced: false, reason: 'task not found' };
+  if (!ACTIVE_STATUSES.includes(task.status as (typeof ACTIVE_STATUSES)[number])) return { advanced: false, reason: 'task not active' };
+  const apiKey = await getSecretStoreBinding(env, 'JULES_API_KEY').catch(() => '');
+  if (!apiKey) return { advanced: false, reason: 'no api key' };
+  await advanceTask(env, apiKey, task);
+  return { advanced: true };
 }
 
 async function reviewWithKimi(env: Pick<Env, 'AI'>, title: string, revisionJson: string): Promise<{ satisfied: boolean; feedback: string }> {

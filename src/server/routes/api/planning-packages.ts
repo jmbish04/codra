@@ -9,6 +9,7 @@ import { upsertRevision, type UpsertRevisionInput } from '@server/services/plann
 import { slugifyPackage } from '@server/utils/slug';
 import { startPlanningSession } from '@server/services/jules-poller';
 import { globalOrchestrationReport, getTaskByToken } from '@server/db/jules-orchestration';
+import { listAgents, isAnyAgentAlive } from '@server/db/agent-heartbeats';
 
 export function createPlanningPackagesRouter() {
   const app = new Hono<AppEnv>();
@@ -23,6 +24,11 @@ export function createPlanningPackagesRouter() {
     const task = await getTaskByToken(c.env, c.req.param('taskId'));
     if (!task) return jsonError('Orchestration task not found.', 404);
     return c.json({ task });
+  });
+
+  // Watcher-daemon liveness for the dashboard (is the Mac OpenTUI alive?).
+  app.get('/orchestration/agents', async (c) => {
+    return c.json({ agents: await listAgents(c.env), alive: await isAnyAgentAlive(c.env) });
   });
 
   // List, filterable by repo + status, newest first.
