@@ -107,3 +107,44 @@ export async function askJulesSession(
   const reply = await client.session(sessionId).ask(prompt);
   return reply.message;
 }
+
+/**
+ * Create a plan-only Jules session (no PR) and return its id. Non-blocking: this
+ * just registers the session + prompt; the plan arrives asynchronously and is
+ * read later by the cron poller via {@link getJulesSnapshot}.
+ */
+export async function startJulesPlanSession(
+  apiKey: string,
+  opts: { owner: string; repo: string; branch: string; prompt: string; title?: string },
+  client: JulesClient = createJulesClient(apiKey),
+): Promise<string> {
+  const session = await client.session({
+    prompt: opts.prompt,
+    title: opts.title,
+    source: { github: `${opts.owner}/${opts.repo}`, baseBranch: opts.branch },
+    requireApproval: false,
+    autoPr: false,
+  });
+  return (await session.info()).id;
+}
+
+export type JulesSnapshot = { state: string; activities: Array<{ type?: string; message?: string }>; prUrl: string | null };
+
+/** One bounded read of a session's current state, activities, and PR (if any). */
+export async function getJulesSnapshot(
+  apiKey: string, sessionId: string, client: JulesClient = createJulesClient(apiKey),
+): Promise<JulesSnapshot> {
+  const snap = await client.session(sessionId).snapshot({ activities: true });
+  return {
+    state: snap.state,
+    activities: (snap.activities ?? []) as unknown as Array<{ type?: string; message?: string }>,
+    prUrl: snap.pr?.url ?? null,
+  };
+}
+
+/** Fire-and-forget message to a session (non-blocking — never awaits a reply). */
+export async function sendJulesMessage(
+  apiKey: string, sessionId: string, text: string, client: JulesClient = createJulesClient(apiKey),
+): Promise<void> {
+  await client.session(sessionId).send(text);
+}

@@ -7,9 +7,23 @@ import {
 } from '@server/db/planning-packages';
 import { upsertRevision, type UpsertRevisionInput } from '@server/services/planning-packages';
 import { slugifyPackage } from '@server/utils/slug';
+import { startPlanningSession } from '@server/services/jules-poller';
+import { globalOrchestrationReport, getTaskByToken } from '@server/db/jules-orchestration';
 
 export function createPlanningPackagesRouter() {
   const app = new Hono<AppEnv>();
+
+  // Global cross-repo orchestration report (registered before /:id).
+  app.get('/orchestration/report', async (c) => {
+    return c.json({ report: await globalOrchestrationReport(c.env) });
+  });
+
+  // Single orchestration-task status by its uuid token.
+  app.get('/orchestration/tasks/:taskId', async (c) => {
+    const task = await getTaskByToken(c.env, c.req.param('taskId'));
+    if (!task) return jsonError('Orchestration task not found.', 404);
+    return c.json({ task });
+  });
 
   // List, filterable by repo + status, newest first.
   app.get('/', async (c) => {
@@ -115,12 +129,16 @@ export function createPlanningPackagesRouter() {
     return c.json({ ok: true });
   });
 
-  // Orchestration is being re-wired to a stateless D1 + webhook design (no DO).
-  // Placeholder until that lands.
+  // Start Jules planning: creates a D1 orchestration task + a plan-only Jules
+  // session, then returns. Advancement is handled statelessly by the cron poller
+  // — no long-running compute, no Durable Object.
   app.post('/:id/orchestrate', async (c) => {
-    const pkg = await getPackage(c.env, c.req.param('id'));
-    if (!pkg) return jsonError('Planning package not found.', 404);
-    return jsonError('Orchestration is being re-wired (stateless D1). Not yet available.', 501);
+    const result = await startPlanningSession(c.env, c.req.param('id'));
+    if ('error' in result) {
+      const code = result.error === 'package not found' ? 404 : 400;
+      return jsonError(result.error, code);
+    }
+    return c.json(result, 202);
   });
 
   return app;

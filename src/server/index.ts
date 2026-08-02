@@ -79,6 +79,14 @@ export default {
         logger.error('Scheduled full sync failed', error instanceof Error ? error : new Error(String(error)));
       })
     );
+    // Advance any active Jules planning sessions one bounded step. No-ops instantly
+    // when none are active — this is the stateless, cost-flat replacement for the
+    // (removed) always-awake orchestration Durable Object.
+    ctx.waitUntil(
+      import('@server/services/jules-poller').then(({ advanceJulesOrchestration }) => advanceJulesOrchestration(env)).catch((error) => {
+        logger.error('Jules orchestration poll failed', error instanceof Error ? error : new Error(String(error)));
+      })
+    );
   },
 } satisfies ExportedHandler<Env>;
 
