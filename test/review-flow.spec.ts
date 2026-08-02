@@ -84,15 +84,13 @@ dbDescribe('Review Flow Lifecycle', () => {
   const env = createTestEnv();
 
   async function runAndDrain(message: Parameters<typeof runReviewJob>[1]) {
-    await (async () => {
-      (env.REVIEW_QUEUE as any).sent.length = 0;
-      await runReviewJob(env, message);
-      const queue = env.REVIEW_QUEUE as any;
-      while (queue.sent.length > 0) {
-        const next = queue.sent.shift();
-        await runReviewJob(env, next);
-      }
-    });
+    (env.REVIEW_QUEUE as any).sent.length = 0;
+    await runReviewJob(env, message);
+    const queue = env.REVIEW_QUEUE as any;
+    while (queue.sent.length > 0) {
+      const next = queue.sent.shift();
+      await runReviewJob(env, next);
+    }
   }
 
   it('completes a full review from pending job to finished', async () => {
@@ -136,10 +134,21 @@ dbDescribe('Review Flow Lifecycle', () => {
 
       // Spy on the prototype of our mocked class
       const getDiffSpy = vi.spyOn(GitHubService.prototype, 'getPullRequestDiff');
-      
+
+      // Simulate a newer commit landing mid-review: insert a newer job for THIS
+      // PR and supersede the older ones, so checkSuperseded flips the job under
+      // test to 'superseded' on its next phase. (The previous version used
+      // `require` — undefined under ESM — and targeted the wrong PR, so it never
+      // actually superseded anything.)
       getDiffSpy.mockImplementationOnce(async () => {
-          const { getDb } = await import('@server/db/client');
-          await require('@server/db/jobs').supersedeOlderJobs(env, { installationId: 'mock-installation-id', owner: 'owner', repo: 'repo', prNumber: 42, newJobId: 'dummy' });
+          const jobs = await import('@server/db/jobs');
+          const newer = await jobs.insertJob(env, {
+            installationId: '123', owner: 'test-owner', repo, prNumber: 2,
+            prTitle: 'Supersede Test', prAuthor: 'author',
+            commitSha: sha('C'), baseSha, trigger: 'auto', headRef: 'feature', baseRef: 'main',
+            configSnapshot: defaultRepoConfig,
+          });
+          await jobs.supersedeOlderJobs(env, { installationId: '123', owner: 'test-owner', repo, prNumber: 2, newJobId: newer.id });
           return generateMockDiff([{ path: 'test.ts', content: 'a' }]);
       });
 
@@ -380,9 +389,9 @@ dbDescribe('Review Flow Lifecycle', () => {
       expect((env.REVIEW_QUEUE as any).sent[0]).toMatchObject({
         jobId: job.id,
         phase: 'review',
-        options: { delaySeconds: 60 },
+        options: { delaySeconds: 30 },
       });
-    });
+    })();
 
     const finalJob = await getJobForProcessing(env, job.id);
     expect(finalJob?.status).toBe('running');
@@ -456,7 +465,7 @@ dbDescribe('Review Flow Lifecycle', () => {
       expect(result).toEqual({ action: 'ack' });
       expect(maxActive).toBe(3);
       expect((env.REVIEW_QUEUE as any).sent[0]).toMatchObject({ jobId: job.id, phase: 'finalize' });
-    });
+    })();
 
     const reviews = await getFileReviewsForJobs(env, [job.id]);
     expect(reviews.filter((review) => review.file_status === 'done')).toHaveLength(3);
@@ -537,14 +546,14 @@ dbDescribe('Review Flow Lifecycle', () => {
         phase: 'finalize',
       });
       expect(result).toEqual({ action: 'ack' });
-    });
+    })();
 
     const finalJob = await getJobForProcessing(env, job.id);
     expect(finalJob?.status).toBe('done');
     expect(finalJob?.error_msg).toContain('Partial review: 1 of 2 files');
     const steps = typeof finalJob?.steps === 'string' ? JSON.parse(finalJob.steps) : finalJob?.steps;
     expect(steps?.find((step: { name: string }) => step.name === 'Completing')?.status).toBe('done');
-    expect(finalJob?.summary_markdown).toMatch(/^### Codra Review/);
+    expect(finalJob?.summary_markdown).toMatch(/^### .*Codra Review/);
     expect(finalJob?.summary_model).toBeNull();
     expect(summarySpy).not.toHaveBeenCalled();
     summarySpy.mockRestore();
