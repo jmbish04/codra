@@ -10,6 +10,7 @@ import {
   incrementTaskIteration, logTaskEvent, ACTIVE_STATUSES, type OrchestrationTaskRow,
 } from '@server/db/jules-orchestration';
 import { startJulesPlanSession, getJulesSnapshot, sendJulesMessage } from '@server/services/jules';
+import { upsertActivities } from '@server/db/jules-activities';
 import { searchCloudflareDocs } from '@server/services/cloudflare-docs';
 import { getSecretStoreBinding } from '@server/utils/secrets';
 import { logger } from '@server/core/logger';
@@ -110,6 +111,11 @@ async function advanceTask(
   if (!pkg) { await updateTaskStatus(env, task.task_id, { status: 'failed', error: 'package missing' }); return; }
 
   const snap = await getJulesSnapshot(apiKey, task.session_id);
+
+  // Cache the activity snapshot for the monitoring dashboard (dedup by activity id),
+  // so browser refreshes are cheap D1 reads and never hit the Jules API.
+  await upsertActivities(env, { sessionId: task.session_id, taskId: task.task_id, activities: snap.activities })
+    .catch((err) => logger.warn(`activity cache failed for ${task.task_id}`, { error: err instanceof Error ? err.message : String(err) }));
 
   // A PR means the plan session went to code (rare for plan-only) — record and stop polling.
   if (snap.prUrl) {

@@ -128,7 +128,9 @@ export async function startJulesPlanSession(
   return (await session.info()).id;
 }
 
-export type JulesSnapshot = { state: string; activities: Array<{ type?: string; message?: string }>; prUrl: string | null };
+// Activities are kept raw (the SDK flattens each union's `type` to top-level);
+// consumers read `type`/`message` for decisions and the full shape for caching.
+export type JulesSnapshot = { state: string; activities: Array<Record<string, any>>; prUrl: string | null };
 
 /** One bounded read of a session's current state, activities, and PR (if any). */
 export async function getJulesSnapshot(
@@ -137,7 +139,7 @@ export async function getJulesSnapshot(
   const snap = await client.session(sessionId).snapshot({ activities: true });
   return {
     state: snap.state,
-    activities: (snap.activities ?? []) as unknown as Array<{ type?: string; message?: string }>,
+    activities: (snap.activities ?? []) as unknown as Array<Record<string, any>>,
     prUrl: snap.pr?.url ?? null,
   };
 }

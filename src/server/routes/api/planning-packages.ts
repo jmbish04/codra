@@ -8,27 +8,56 @@ import {
 import { upsertRevision, type UpsertRevisionInput } from '@server/services/planning-packages';
 import { slugifyPackage } from '@server/utils/slug';
 import { startPlanningSession } from '@server/services/jules-poller';
-import { globalOrchestrationReport, getTaskByToken } from '@server/db/jules-orchestration';
+import { globalOrchestrationReport } from '@server/db/jules-orchestration';
 import { listAgents, isAnyAgentAlive } from '@server/db/agent-heartbeats';
+import {
+  listMonitorTasks, getMonitorTask, listMonitorEvents, deriveHealth, buildSummary,
+} from '@server/services/jules-monitor';
+import { listCachedActivities } from '@server/db/jules-activities';
 
 export function createPlanningPackagesRouter() {
   const app = new Hono<AppEnv>();
 
-  // Global cross-repo orchestration report (registered before /:id).
+  // ---- Jules monitoring dashboard (contract: features/jules-monitoring/client.ts) ----
+  // All cheap D1 reads; a browser refresh never triggers a live Jules API call.
+
+  app.get('/orchestration/summary', async (c) => {
+    return c.json({ summary: await buildSummary(c.env) });
+  });
+
   app.get('/orchestration/report', async (c) => {
     return c.json({ report: await globalOrchestrationReport(c.env) });
   });
 
-  // Single orchestration-task status by its uuid token.
-  app.get('/orchestration/tasks/:taskId', async (c) => {
-    const task = await getTaskByToken(c.env, c.req.param('taskId'));
-    if (!task) return jsonError('Orchestration task not found.', 404);
-    return c.json({ task });
-  });
-
-  // Watcher-daemon liveness for the dashboard (is the Mac OpenTUI alive?).
   app.get('/orchestration/agents', async (c) => {
     return c.json({ agents: await listAgents(c.env), alive: await isAnyAgentAlive(c.env) });
+  });
+
+  app.get('/orchestration/tasks', async (c) => {
+    const q = c.req.query();
+    const { tasks, total } = await listMonitorTasks(c.env, {
+      status: q.status, repository: q.repository, query: q.query,
+      limit: Number(q.limit) || 100, offset: Number(q.offset) || 0,
+    });
+    return c.json({ tasks, total, summary: await buildSummary(c.env) });
+  });
+
+  app.get('/orchestration/tasks/:taskId', async (c) => {
+    const task = await getMonitorTask(c.env, c.req.param('taskId'));
+    if (!task) return jsonError('Orchestration task not found.', 404);
+    return c.json({ task, health: await deriveHealth(c.env) });
+  });
+
+  app.get('/orchestration/tasks/:taskId/events', async (c) => {
+    return c.json({ events: await listMonitorEvents(c.env, c.req.param('taskId')) });
+  });
+
+  app.get('/orchestration/tasks/:taskId/activities', async (c) => {
+    const q = c.req.query();
+    const { activities, nextCursor, syncedAt } = await listCachedActivities(c.env, c.req.param('taskId'), {
+      after: q.after, limit: Number(q.limit) || 200,
+    });
+    return c.json({ activities, nextCursor, syncedAt });
   });
 
   // List, filterable by repo + status, newest first.
