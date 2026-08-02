@@ -21,6 +21,10 @@ const DB_NAME = 'codra';
 const sqlStr = (v) => `'${String(v).replace(/'/g, "''")}'`;
 
 /** PlateJS instruction blocks so it renders in the /best-practices editor. */
+function codeBlock(code) {
+  return { type: 'code_block', children: [{ type: 'code_line', children: [{ text: code }] }] };
+}
+
 function instructions(g) {
   const nodes = [
     { type: 'h3', children: [{ text: g.title }] },
@@ -28,7 +32,16 @@ function instructions(g) {
   ];
   if (g.fix_example) {
     nodes.push({ type: 'p', children: [{ text: 'Fix:' }] });
-    nodes.push({ type: 'code_block', children: [{ type: 'code_line', children: [{ text: g.fix_example }] }] });
+    nodes.push(codeBlock(g.fix_example));
+  }
+  // Multiple labeled samples (e.g. worker path, native SDK + core-guardian,
+  // local tokens module). Each renders as a heading line + its own code block.
+  for (const ex of g.fix_examples || []) {
+    nodes.push({ type: 'p', children: [{ text: ex.label ? `Fix — ${ex.label}:` : 'Fix:' }] });
+    nodes.push(codeBlock(ex.code));
+  }
+  for (const ref of g.references || []) {
+    nodes.push({ type: 'p', children: [{ text: `Reference: ${ref}` }] });
   }
   if (g.evidence) nodes.push({ type: 'p', children: [{ text: `Evidence: ${g.evidence}` }] });
   return JSON.stringify(nodes);
@@ -46,9 +59,13 @@ for (const file of files) {
   const g = JSON.parse(fs.readFileSync(path.join(catalogDir, file), 'utf8'));
   const infra = (g.infra && g.infra[0]) || 'cloudflare-workers';
   infraIds.add(infra);
-  // criteria terms: the human signal words + infra so matchesCriteria fires.
-  const criteria = [...(g.infra || []), 'insert', 'values', 'batch']
-    .join(', ');
+  // criteria terms drive matchesCriteria (plain substring match). Prefer the
+  // gotcha's explicit `criteria` list; fall back to the infra + SQL-shaped
+  // defaults the original D1 gotchas relied on.
+  const criteria = (g.criteria && g.criteria.length
+    ? g.criteria
+    : [...(g.infra || []), 'insert', 'values', 'batch']
+  ).join(', ');
   rows.push(
     `INSERT INTO best_practices (id, name, infra_id, criteria, instructions, is_active) VALUES (` +
       `${sqlStr('gotcha-' + g.id)}, ${sqlStr(g.title)}, ${sqlStr(infra)}, ${sqlStr(criteria)}, ${sqlStr(instructions(g))}, 1) ` +

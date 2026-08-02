@@ -1,0 +1,74 @@
+{
+  "id": "ai-usage-tracking",
+  "title": "All AI usage must be tracked (AI Gateway metadata or core-guardian)",
+  "infra": ["other", "cloudflare-workers", "python"],
+  "severity": "P1",
+  "detect": {
+    "content_any": [
+      "env\\.AI\\.run\\(",
+      "env\\.AI\\.gateway\\(",
+      "gateway\\.ai\\.cloudflare\\.com",
+      "@cf/",
+      "workers-ai",
+      "new OpenAI\\(",
+      "chat\\.completions",
+      "@ai-sdk/",
+      "createOpenAI|createAnthropic|createGoogleGenerativeAI",
+      "new Anthropic\\(",
+      "generativeai|google-genai|generateContent|interactions",
+      "api\\.openai\\.com|api\\.anthropic\\.com|generativelanguage\\.googleapis\\.com"
+    ],
+    "signal": "code calls an LLM / AI model (Workers AI, AI Gateway, or a provider SDK / REST endpoint) — its token usage and spend must be tracked"
+  },
+  "criteria": [
+    "env.ai",
+    ".gateway(",
+    "ai.run(",
+    "gateway.ai.cloudflare",
+    "openai",
+    "anthropic",
+    "@ai-sdk",
+    "generativeai",
+    "google-genai",
+    ".generatecontent",
+    "chat.completions",
+    "workers-ai",
+    "@cf/",
+    "core-guardian",
+    "interactions"
+  ],
+  "directive": "Any code that calls an LLM / AI model MUST have its usage tracked — one of the two conditions below (sometimes both) MUST be met. (1) Route the call through Cloudflare AI Gateway with metadata so core-guardian meters it automatically. On a Worker: use env.AI.run(model, input, { gateway: { id: env.GATEWAY_ID, metadata: {...} } }), OR get the gateway base URL with env.AI.gateway(env.GATEWAY_ID).getUrl(provider) — that returns the full URL with the Cloudflare account id already embedded and needs no auth — and point the provider SDK's baseURL at it. Direct Workers AI via the Cloudflare REST API MUST be ported to AI Gateway with metadata fields; rare exceptions only. (2) When a call genuinely can't go through the gateway — e.g. Gemini's latest interactions API, or OpenAI-compat which now only works via the Workers AI REST API directly (no AI Gateway support) — use the native provider SDK AND register the usage with core-guardian via POST https://core-guardian.hacolby.workers.dev/api/guardian/usage/register (Bearer WORKER_API_KEY). Non-Worker code has no AI binding: read CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_AI_GATEWAY_TOKEN from a local tokens.ts / tokens.py module (backed by `tokens show <name> --value-only`, the local equivalent of Workers secret-store bindings) and either call the gateway URL directly or register usage with core-guardian. Never let AI spend go untracked. When you reference core-guardian in a review comment, paste the register helper from the fix examples so the fix is copy-paste ready.",
+  "fix_examples": [
+    {
+      "label": "Worker + AI Gateway (preferred): env.AI.run meters automatically via metadata",
+      "lang": "ts",
+      "code": "// Third-party model through the gateway — usage + metadata land in core-guardian.\nconst res = await env.AI.run(\n  \"openai/gpt-4.1-mini\",\n  { messages: [{ role: \"user\", content: prompt }] },\n  { gateway: { id: env.GATEWAY_ID, metadata: { worker: \"my-worker\", operationId: \"summarize\" } } },\n);\n\n// Or point a provider SDK at the gateway base URL (account id embedded, no auth):\nimport OpenAI from \"openai\";\nconst openai = new OpenAI({\n  apiKey: env.OPENAI_API_KEY,\n  baseURL: await env.AI.gateway(env.GATEWAY_ID).getUrl(\"openai\"),\n});"
+    },
+    {
+      "label": "core-guardian register helper (reuse when a call can't go through the gateway)",
+      "lang": "ts",
+      "code": "// Register direct-to-provider AI usage with core-guardian so it shows up in spend.\n// See https://core-guardian.hacolby.workers.dev/openapi.json\nexport async function registerGuardianUsage(env, usage) {\n  await fetch(\"https://core-guardian.hacolby.workers.dev/api/guardian/usage/register\", {\n    method: \"POST\",\n    headers: {\n      \"Content-Type\": \"application/json\",\n      Authorization: `Bearer ${await env.WORKER_API_KEY.get()}`, // secrets-store binding\n    },\n    // { worker, provider, model, tokensIn?, tokensOut?, tokensThinking?, requests?,\n    //   costUsd?, gateway?, operationId?, taskDescription? }  (worker/provider/model required)\n    body: JSON.stringify(usage),\n  });\n}"
+    },
+    {
+      "label": "Gateway can't proxy (Gemini interactions API / Workers AI OpenAI-compat): native SDK + register",
+      "lang": "ts",
+      "code": "const out = await callNativeProvider(prompt); // native SDK, returns token usage\nawait registerGuardianUsage(env, {\n  worker: \"my-worker\",\n  provider: \"google\",\n  model: \"gemini-3-pro\",\n  tokensIn: out.usage.inputTokens,\n  tokensOut: out.usage.outputTokens,\n  operationId: \"extract\",\n});"
+    },
+    {
+      "label": "Non-Worker (TypeScript): tokens.ts — local equivalent of secret-store bindings",
+      "lang": "ts",
+      "code": "// tokens.ts — import wherever a local script needs Cloudflare creds.\nimport { execFileSync } from \"node:child_process\";\n\nexport function getSecret(name: string): string {\n  return execFileSync(\"tokens\", [\"show\", name, \"--value-only\"], { encoding: \"utf8\" }).trim();\n}\nexport const getCloudflareAccountId = () => getSecret(\"CLOUDFLARE_ACCOUNT_ID\");\nexport const getCloudflareAiGatewayToken = () => getSecret(\"CLOUDFLARE_AI_GATEWAY_TOKEN\");\n\n// Hit the gateway from outside a Worker (build the URL, auth with the token):\n// const base = `https://gateway.ai.cloudflare.com/v1/${getCloudflareAccountId()}/${GATEWAY_ID}/openai`;\n// fetch(`${base}/chat/completions`, { headers: { \"cf-aig-authorization\": `Bearer ${getCloudflareAiGatewayToken()}` } })"
+    },
+    {
+      "label": "Non-Worker (Python): tokens.py — local equivalent of secret-store bindings",
+      "lang": "py",
+      "code": "# tokens.py — import wherever a local script needs Cloudflare creds.\nimport subprocess\n\ndef get_secret(name: str) -> str:\n    return subprocess.run(\n        [\"tokens\", \"show\", name, \"--value-only\"],\n        capture_output=True, text=True, check=True,\n    ).stdout.strip()\n\ndef get_cloudflare_account_id() -> str:\n    return get_secret(\"CLOUDFLARE_ACCOUNT_ID\")\n\ndef get_cloudflare_ai_gateway_token() -> str:\n    return get_secret(\"CLOUDFLARE_AI_GATEWAY_TOKEN\")"
+    }
+  ],
+  "references": [
+    "core-guardian OpenAPI: https://core-guardian.hacolby.workers.dev/openapi.json",
+    "Register direct-to-provider usage: POST /api/guardian/usage/register (Bearer WORKER_API_KEY)"
+  ],
+  "evidence": "Untracked AI spend can't be attributed per-worker/model in core-guardian. AI Gateway metadata or an explicit usage/register call is the only way spend shows up.",
+  "source": "codra-policy-2026-08-02"
+}
