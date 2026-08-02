@@ -62,6 +62,37 @@ export class MockQueue {
   }
 }
 
+/** Minimal in-memory R2 bucket — enough for planning-package transcript put/get. */
+export class MemoryR2 {
+  public readonly store = new Map<string, Uint8Array>();
+
+  async put(key: string, value: ArrayBuffer | Uint8Array | string) {
+    const bytes = typeof value === 'string' ? new TextEncoder().encode(value)
+      : value instanceof Uint8Array ? value : new Uint8Array(value);
+    this.store.set(key, bytes);
+    return { key, size: bytes.byteLength } as any;
+  }
+
+  async get(key: string) {
+    const bytes = this.store.get(key);
+    if (!bytes) return null;
+    return {
+      key,
+      size: bytes.byteLength,
+      body: new Response(bytes as unknown as BodyInit).body,
+      async text() { return new TextDecoder().decode(bytes); },
+      async arrayBuffer() { return bytes.buffer; },
+    } as any;
+  }
+
+  async head(key: string) {
+    const bytes = this.store.get(key);
+    return bytes ? ({ key, size: bytes.byteLength } as any) : null;
+  }
+
+  async delete(key: string) { this.store.delete(key); }
+}
+
 function usableEnvValue(value: string | undefined) {
   return value && value !== 'undefined' && value !== 'null' ? value : null;
 }
@@ -87,6 +118,7 @@ export function createTestEnv(overrides: Partial<Record<keyof Env, unknown>> = {
     },
     APP_KV: new MemoryKV() as unknown as KVNamespace,
     PROMPTS_KV: new MemoryKV() as unknown as KVNamespace,
+    PLANNING_ARTIFACTS: new MemoryR2() as unknown as R2Bucket,
     REVIEW_QUEUE: new MockQueue() as any,
     ASSETS: new MockAssets() as any,
     DB: createD1(path.resolve(process.cwd(), 'db/migrations/d1')) as any,

@@ -250,6 +250,12 @@
 			"migrations_dir": "./db/migrations/d1",
 		},
 	],
+	"r2_buckets": [
+		{
+			"binding": "PLANNING_ARTIFACTS",
+			"bucket_name": "codra-planning-artifacts",
+		},
+	],
 	"kv_namespaces": [
 		{
 			"binding": "APP_KV",
