@@ -90,6 +90,27 @@ export async function markJulesOutcome(
   }).where(eq(julesSessions.id, id));
 }
 
+/** Fetch a single session row by its Codra id. */
+export async function getJulesSessionById(
+  env: Pick<Env, 'DB'>, id: string,
+): Promise<JulesSessionRow | null> {
+  const db = getDb(env);
+  const row = await db.select().from(julesSessions).where(eq(julesSessions.id, id)).get();
+  return row ?? null;
+}
+
+/** Refresh the live session state (and url) pulled from Jules. Best-effort. */
+export async function updateJulesLiveState(
+  env: Pick<Env, 'DB'>, id: string, v: { sessionState: string; sessionUrl?: string | null },
+): Promise<void> {
+  const db = getDb(env);
+  await db.update(julesSessions).set({
+    session_state: v.sessionState,
+    ...(v.sessionUrl ? { session_url: v.sessionUrl } : {}),
+    updated_at: new Date().toISOString(),
+  }).where(eq(julesSessions.id, id));
+}
+
 export async function listJulesSessions(
   env: Pick<Env, 'DB'>, q: { owner?: string; repo?: string; limit: number; offset: number },
 ): Promise<JulesSessionRow[]> {

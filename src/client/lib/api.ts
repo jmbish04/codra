@@ -25,6 +25,7 @@ import type {
   StandardSecretBinding,
   MissingSecretReportsResponse,
   JulesSessionsResponse,
+  JulesSessionLiveDto,
 } from '@shared/api';
 import type { LlmApiFormat, LlmProvider, ModelConfig, RepoConfig, JobDetail, ChangelogEntry } from '@shared/schema';
 
@@ -246,6 +247,9 @@ export const api = {
     }
     const query = searchParams.toString();
     return request<JulesSessionsResponse>(`/api/jules-sessions${query ? `?${query}` : ''}`);
+  },
+  getJulesSessionLive(id: string) {
+    return request<JulesSessionLiveDto>(`/api/jules-sessions/${encodeURIComponent(id)}/live`);
   },
   getStandardizationRules() {
     return request<StandardizationRulesResponse>('/api/standardization');

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { isRepoConnected, startJulesSession } from '@server/services/jules';
+import { getJulesSession, isRepoConnected, startJulesSession } from '@server/services/jules';
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -26,7 +26,7 @@ describe('jules service', () => {
       return jsonResponse({ id: 'sid', name: 'sessions/sid', state: 'QUEUED', url: 'https://jules.google.com/session/sid' });
     }) as unknown as typeof fetch;
     const r = await startJulesSession('K', { owner: 'o', repo: 'r', branch: 'main', prompt: 'do docs', title: 'Docs' }, f);
-    expect(r).toEqual({ id: 'sid', url: 'https://jules.google.com/session/sid', state: 'QUEUED' });
+    expect(r).toEqual({ id: 'sid', url: 'https://jules.google.com/session/sid', state: 'QUEUED', pullRequestUrl: null });
   });
 
   it('falls back to a constructed url when the response omits it', async () => {
@@ -50,5 +50,31 @@ describe('jules service', () => {
   it('throws on non-2xx', async () => {
     const f = (async () => jsonResponse({ error: 'nope' }, 403)) as unknown as typeof fetch;
     await expect(startJulesSession('K', { owner: 'o', repo: 'r', branch: 'main', prompt: 'p' }, f)).rejects.toThrow(/403/);
+  });
+
+  it('fetches live session status and extracts the PR url from outputs', async () => {
+    const f = vi.fn(async (url: any, init: any) => {
+      expect(String(url)).toBe('https://jules.googleapis.com/v1alpha/sessions/sid');
+      expect(init.headers['X-Goog-Api-Key']).toBe('K');
+      return jsonResponse({
+        id: 'sid',
+        state: 'IN_PROGRESS',
+        url: 'https://jules.google.com/session/sid',
+        outputs: [{ pullRequest: { url: 'https://github.com/o/r/pull/7' } }],
+      });
+    }) as unknown as typeof fetch;
+    const r = await getJulesSession('K', 'sid', f);
+    expect(r).toEqual({
+      id: 'sid',
+      url: 'https://jules.google.com/session/sid',
+      state: 'IN_PROGRESS',
+      pullRequestUrl: 'https://github.com/o/r/pull/7',
+    });
+  });
+
+  it('returns a null PR url when no output carries one', async () => {
+    const f = (async () => jsonResponse({ id: 'sid', state: 'QUEUED' })) as unknown as typeof fetch;
+    const r = await getJulesSession('K', 'sid', f);
+    expect(r.pullRequestUrl).toBeNull();
   });
 });

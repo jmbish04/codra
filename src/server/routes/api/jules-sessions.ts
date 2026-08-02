@@ -1,6 +1,9 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '@server/env';
-import { listJulesSessions } from '@server/db/jules-sessions';
+import { getJulesSessionById, listJulesSessions, updateJulesLiveState } from '@server/db/jules-sessions';
+import { getSecretStoreBinding } from '@server/utils/secrets';
+import { getJulesSession } from '@server/services/jules';
+import { jsonError } from '@server/core/http';
 
 export function createJulesSessionsRouter() {
   const app = new Hono<AppEnv>();
@@ -16,6 +19,37 @@ export function createJulesSessionsRouter() {
       offset,
     });
     return c.json({ sessions });
+  });
+
+  // Realtime status: query Jules live for a single launched session, persist the
+  // refreshed state, and return it. The frontend polls this so the operations
+  // page reflects the agent's current progress without waiting for a webhook.
+  app.get('/:id/live', async (c) => {
+    const row = await getJulesSessionById(c.env, c.req.param('id'));
+    if (!row) return jsonError('Jules session not found.', 404);
+    if (!row.session_id) {
+      // Nothing launched yet (staged/skipped/error) — no live status to fetch.
+      return c.json({ id: row.id, state: row.state, sessionState: row.session_state, sessionUrl: row.session_url, pullRequestUrl: null, live: false });
+    }
+
+    let apiKey = '';
+    try { apiKey = await getSecretStoreBinding(c.env, 'JULES_API_KEY'); } catch { apiKey = ''; }
+    if (!apiKey) return jsonError('JULES_API_KEY not configured.', 503);
+
+    try {
+      const live = await getJulesSession(apiKey, row.session_id);
+      await updateJulesLiveState(c.env, row.id, { sessionState: live.state, sessionUrl: live.url }).catch(() => {});
+      return c.json({
+        id: row.id,
+        state: row.state,
+        sessionState: live.state,
+        sessionUrl: live.url,
+        pullRequestUrl: live.pullRequestUrl,
+        live: true,
+      });
+    } catch (err) {
+      return jsonError(err instanceof Error ? err.message : 'Failed to fetch live Jules status.', 502);
+    }
   });
 
   return app;
