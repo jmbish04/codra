@@ -1,0 +1,15 @@
+{
+  "name": "codra-jules-watcher",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local always-on watcher: holds Jules session streams open on your Mac and triggers the codra worker on activity. Free, event-driven — no billed always-awake Durable Object.",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "selfcheck": "bun run src/index.ts --selfcheck"
+  },
+  "dependencies": {
+    "@google/jules-sdk": "^0.2.0",
+    "@opentui/core": "^0.1.0"
+  }
+}
