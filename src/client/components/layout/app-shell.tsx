@@ -27,6 +27,7 @@ import {
   FileSearch,
   Bot,
   ListChecks,
+  RadioTower,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
 import { useTheme } from '@client/lib/theme';
@@ -55,6 +56,7 @@ const links = [
   { to: '/actions', label: 'Codra Actions', icon: History, end: false },
   { to: '/jules', label: 'Jules', icon: Bot, end: true },
   { to: '/jules/operations', label: 'Jules Ops', icon: ListChecks, end: false },
+  { to: '/jules/monitor', label: 'Jules Monitor', icon: RadioTower, end: false },
   { to: '/setup', label: 'Setup Guide', icon: BookOpen, end: false },
   { to: '/commands', label: 'Commands', icon: Terminal, end: false },
   { to: '/settings', label: 'Settings', icon: Settings, end: false },

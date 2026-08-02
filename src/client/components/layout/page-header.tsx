@@ -3,7 +3,7 @@ import { cn } from '@client/lib/utils';
 import { UpdatesEmailPrompt } from '@client/components/features/dashboard/updates-email-prompt';
 
 interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
-  category: string;
+  category?: string;
   title: string;
   description?: React.ReactNode;
   actions?: React.ReactNode;
@@ -25,9 +25,11 @@ export function PageHeader({
         {...props}
       >
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-primary/70 mb-1">
-            {category}
-          </p>
+          {category && (
+            <p className="text-xs font-semibold uppercase tracking-widest text-primary/70 mb-1">
+              {category}
+            </p>
+          )}
           <h1
             className="flex items-center gap-3 text-xl md:text-2xl font-bold text-foreground"
             style={{ letterSpacing: '-0.025em' }}

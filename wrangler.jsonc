@@ -118,6 +118,7 @@
 			"/reviews/*",
 			"/settings*",
 			"/best-practices*",
+			"/jules*",
 			"/.well-known/*",
 			"/oauth/*",
 			"/mcp*"

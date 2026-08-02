@@ -167,6 +167,8 @@ export function createApp() {
   app.get('/stats', requireSession, serveIndex);
   app.get('/health', requireSession, serveIndex);
   app.get('/best-practices', requireSession, serveIndex);
+  app.get('/jules', requireSession, serveIndex);
+  app.get('/jules/*', requireSession, serveIndex);
   app.get('/settings', requireSession, serveIndex);
   app.get('/settings/*', requireSession, serveIndex);
 
