@@ -86,8 +86,10 @@ describe('Frontend UI Flows (JSDOM)', () => {
     expect(screen.getByText('10')).toBeDefined();
     expect(screen.getByText('500')).toBeDefined();
 
-    // Check for activity stream item
-    expect(screen.getByText('test-owner/test-repo')).toBeDefined();
-    expect(screen.getByRole('link', { name: 'Fixing bug' })).toBeDefined();
+    // Check for activity stream item. The repo/title can render in more than one
+    // node (e.g. responsive desktop + mobile variants), so assert presence with
+    // the all-variants query rather than requiring a single match.
+    expect(screen.getAllByText('test-owner/test-repo').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('link', { name: 'Fixing bug' }).length).toBeGreaterThan(0);
   });
 });
