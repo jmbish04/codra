@@ -35,10 +35,16 @@ export class GithubConnector extends McpConnector<Env> {
     return this.conn;
   }
 
-  // Mark the write as approval-gated. The runtime pauses the run when the model
-  // calls github.create_issue(...), and resumes once the user approves.
+  // Mark writes as approval-gated. The runtime pauses the run when the model
+  // calls one of these, and resumes once the user approves.
   protected override tool(name: string, t: ConnectorTool): ConnectorTool {
-    if (name === "create_issue") {
+    const writes = new Set([
+      "create_issue",
+      "create_planning_package",
+      "submit_planning_revision",
+      "update_plan_task",
+    ]);
+    if (writes.has(name)) {
       return { ...t, requiresApproval: true };
     }
     return t;

@@ -24,6 +24,31 @@ import {
 import { BrowserConnector, DurableBrowserSessionStore } from "agents/browser";
 import { GithubConnector } from "./codemode";
 import { RepoApiConnector } from "./codemode";
+import {
+  mcpListPlanningPackages, mcpGetPlanningPackage, mcpGetPlanningRevision,
+  mcpCreatePlanningPackage, mcpSubmitPlanningRevision, mcpExportPlanningPackages,
+  mcpUpdatePlanTask,
+} from "@server/mcp/planning-tools";
+
+const asText = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
+
+// Zod shape for a revision submission — mirrors UpsertRevisionInput.
+const revisionFields = {
+  source: z.enum(["jules", "merge", "orchestrator", "human", "coding_agent"]).describe("Who produced this revision"),
+  status: z.string().optional().describe("proposed | superseded | accepted | rejected (default proposed)"),
+  julesSessionId: z.string().optional(),
+  summary: z.string().optional(), problem: z.string().optional(), approach: z.string().optional(), verification: z.string().optional(),
+  prdMarkdown: z.string().optional(), designBriefMarkdown: z.string().optional(), promptMarkdown: z.string().optional(),
+  contextText: z.string().optional().describe("Raw transcript/context — streamed verbatim to R2, never summarized"),
+  coverageNote: z.string().optional(),
+  changeItems: z.array(z.object({ kind: z.string(), text: z.string() })).optional(),
+  tasks: z.array(z.object({ taskKey: z.string(), workstream: z.string().optional(), phase: z.number().optional(), title: z.string(), description: z.string().optional(), targetPath: z.string().optional(), changeType: z.string().optional(), dependsOn: z.array(z.string()).optional() })).optional(),
+  fileChanges: z.array(z.object({ path: z.string(), changeType: z.string(), note: z.string().optional() })).optional(),
+  codeCards: z.array(z.object({ filePath: z.string().optional(), language: z.string().optional(), intent: z.string().optional(), content: z.string() })).optional(),
+  apiChanges: z.array(z.object({ method: z.string(), path: z.string(), description: z.string().optional() })).optional(),
+  migrations: z.array(z.object({ tag: z.string().optional(), sql: z.string() })).optional(),
+  diagrams: z.array(z.object({ caption: z.string().optional(), mermaid: z.string() })).optional(),
+};
 
 // ---------------------------------------------------------------------------
 // Demo MCP server — a couple of reads and one approval-gated write.
@@ -253,6 +278,54 @@ export class GitHubLikeMCP extends McpAgent<any> {
           ],
         };
       }
+    );
+
+    // -----------------------------------------------------------------------
+    // Planning packages — per-repo, revision-safe plans. Reads are open; writes
+    // (create/submit/update) are approval-gated in GithubConnector. A coding
+    // agent mid-session uses submit_planning_revision to capture a plan idea.
+    // -----------------------------------------------------------------------
+    this.server.tool(
+      "list_planning_packages",
+      "List planning packages for a repo, filterable by status (draft|planning|in_progress|pr_submitted|merged|rejected).",
+      { repo: z.number().optional().describe("repository_id"), status: z.string().optional(), limit: z.number().optional() } as any,
+      async (a: { repo?: number; status?: string; limit?: number }) => asText(await mcpListPlanningPackages(this.env, a)),
+    );
+    this.server.tool(
+      "get_planning_package",
+      "Get a planning package: header, revision summaries, and live task state. includeRevisions inlines full fielded revisions; includeContext inlines each revision's transcript.",
+      { packageId: z.string(), includeRevisions: z.boolean().optional(), includeContext: z.boolean().optional() } as any,
+      async (a: { packageId: string; includeRevisions?: boolean; includeContext?: boolean }) => asText(await mcpGetPlanningPackage(this.env, a)),
+    );
+    this.server.tool(
+      "get_planning_revision",
+      "Get one immutable revision fully fielded (change items, tasks, file changes, code cards, api changes, migrations, diagrams).",
+      { packageId: z.string(), revisionNumber: z.number() } as any,
+      async (a: { packageId: string; revisionNumber: number }) => asText(await mcpGetPlanningRevision(this.env, a)),
+    );
+    this.server.tool(
+      "create_planning_package",
+      "Create a new draft planning package for a repo (write — requires approval).",
+      { repositoryId: z.number(), title: z.string(), slug: z.string().optional(), promptMarkdown: z.string().optional() } as any,
+      async (a: { repositoryId: number; title: string; slug?: string; promptMarkdown?: string }) => asText(await mcpCreatePlanningPackage(this.env, a)),
+    );
+    this.server.tool(
+      "submit_planning_revision",
+      "Append a NEW immutable revision to a planning package. Never overwrites prior revisions — capture full content, do not use '...unchanged...' shortcuts (write — requires approval).",
+      { packageId: z.string(), ...revisionFields } as any,
+      async (a: any) => { const { packageId, ...input } = a; return asText(await mcpSubmitPlanningRevision(this.env, packageId, input)); },
+    );
+    this.server.tool(
+      "export_planning_packages",
+      "Export every revision of the given planning packages, fully fielded (the payload for merging a super-plan across revisions).",
+      { planIds: z.array(z.string()) } as any,
+      async (a: { planIds: string[] }) => asText(await mcpExportPlanningPackages(this.env, a)),
+    );
+    this.server.tool(
+      "update_plan_task",
+      "Update a package task's live status/assignee/pr — keep this current so codra can orchestrate multi-agent work (write — requires approval).",
+      { packageId: z.string(), taskKey: z.string(), status: z.string().optional(), assignee: z.string().optional(), prNumber: z.number().optional(), notes: z.string().optional() } as any,
+      async (a: { packageId: string; taskKey: string; status?: string; assignee?: string; prNumber?: number; notes?: string }) => asText(await mcpUpdatePlanTask(this.env, a)),
     );
   }
 }
