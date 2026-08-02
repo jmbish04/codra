@@ -109,18 +109,18 @@ Codra uses `pnpm` for dependency management.
 2. **Database setup:**
    Generate and apply the local SQLite schema using D1:
    ```bash
-   npm run db:generate
-   npm run migrate:local
+   pnpm run db:generate
+   pnpm run migrate:local
    ```
 3. **Run locally:**
    Start the local development server (client and worker):
    ```bash
-   npm run dev
+   pnpm run dev
    ```
 4. **Run tests:**
    Execute the test suite (Vitest and Playwright):
    ```bash
-   npm test
+   pnpm test
    ```
 
 ## Documentation
