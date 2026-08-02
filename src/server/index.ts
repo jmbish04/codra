@@ -60,8 +60,8 @@ export default {
     // Backstop recovery on cron: the same expired-lease requeue that runs pre/post
     // every queue batch and on dashboard reads. Those cover active periods; this
     // catches a job stalled during a dead-quiet stretch (no webhooks, no dashboard
-    // views) that would otherwise never self-heal. ponytail: piggybacks the 6h
-    // sync cron — worst-case 6h heal; add a tighter cron only if that's too slow.
+    // views) that would otherwise never self-heal. Note: piggybacks the 6h sync
+    // cron — worst-case 6h heal; add a tighter cron only if that proves too slow.
     ctx.waitUntil(
       runBestEffortJobMaintenance(env).catch((error) => {
         logger.error('Scheduled job maintenance failed', error instanceof Error ? error : new Error(String(error)));
