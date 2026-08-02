@@ -1,42 +1,88 @@
-import { describe, it, expect, vi } from 'vitest';
-import { isRepoConnected, startJulesSession } from '@server/services/jules';
+import { describe, it, expect } from 'vitest';
+import type { JulesClient } from '@google/jules-sdk';
+import { getJulesSession, isRepoConnected, startJulesSession } from '@server/services/jules';
 
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+/** A minimal fake JulesClient covering only the methods the service calls. */
+function fakeClient(overrides: {
+  source?: unknown;
+  info?: unknown;
+  onSession?: (config: unknown) => void;
+}): JulesClient {
+  const sessionClient = { id: 'sid', info: async () => overrides.info } as any;
+  return {
+    sources: { get: async (_filter: unknown) => overrides.source },
+    session: (arg: unknown) => {
+      overrides.onSession?.(arg);
+      // session(config) → Promise<SessionClient>; session(id) → SessionClient.
+      return typeof arg === 'string' ? sessionClient : Promise.resolve(sessionClient);
+    },
+  } as unknown as JulesClient;
 }
 
 describe('jules service', () => {
-  it('detects a connected source and sends the api-key header', async () => {
-    const f = vi.fn(async (url: any, init: any) => {
-      expect(String(url)).toBe('https://jules.googleapis.com/v1alpha/sources');
-      expect(init.headers['X-Goog-Api-Key']).toBe('K');
-      return jsonResponse({ sources: [{ name: 'sources/github/o/r' }] });
-    }) as unknown as typeof fetch;
-    expect(await isRepoConnected('K', 'o', 'r', f)).toBe(true);
-    expect(await isRepoConnected('K', 'o', 'other', f)).toBe(false);
+  it('reports a connected source as true and a missing one as false', async () => {
+    expect(await isRepoConnected('K', 'o', 'r', fakeClient({ source: { id: 'sources/github/o/r' } }))).toBe(true);
+    expect(await isRepoConnected('K', 'o', 'r', fakeClient({ source: undefined }))).toBe(false);
   });
 
-  it('starts a session and returns id + url', async () => {
-    const f = vi.fn(async (url: any, init: any) => {
-      expect(String(url)).toBe('https://jules.googleapis.com/v1alpha/sessions');
-      const body = JSON.parse(init.body);
-      expect(body.sourceContext.source).toBe('sources/github/o/r');
-      expect(body.sourceContext.githubRepoContext.startingBranch).toBe('main');
-      expect(body.prompt).toBe('do docs');
-      return jsonResponse({ id: 'sid', name: 'sessions/sid', state: 'QUEUED', url: 'https://jules.google.com/session/sid' });
-    }) as unknown as typeof fetch;
-    const r = await startJulesSession('K', { owner: 'o', repo: 'r', branch: 'main', prompt: 'do docs', title: 'Docs' }, f);
-    expect(r).toEqual({ id: 'sid', url: 'https://jules.google.com/session/sid', state: 'QUEUED' });
+  it('starts a session (autonomous, auto-PR) and returns its status', async () => {
+    let sentConfig: any;
+    const client = fakeClient({
+      info: { id: 'sid', state: 'QUEUED', url: 'https://jules.google.com/session/sid', outputs: [] },
+      onSession: (c) => { sentConfig = c; },
+    });
+    const r = await startJulesSession('K', { owner: 'o', repo: 'r', branch: 'main', prompt: 'do docs', title: 'Docs' }, client);
+    expect(sentConfig).toMatchObject({
+      prompt: 'do docs',
+      title: 'Docs',
+      source: { github: 'o/r', baseBranch: 'main' },
+      requireApproval: false,
+      autoPr: true,
+    });
+    expect(r).toEqual({ id: 'sid', url: 'https://jules.google.com/session/sid', state: 'QUEUED', pullRequestUrl: null });
   });
 
-  it('falls back to a constructed url when the response omits it', async () => {
-    const f = (async () => jsonResponse({ id: 'sid', name: 'sessions/sid', state: 'QUEUED' })) as unknown as typeof fetch;
-    const r = await startJulesSession('K', { owner: 'o', repo: 'r', branch: 'main', prompt: 'p' }, f);
+  it('falls back to a constructed url when the resource omits it', async () => {
+    const client = fakeClient({ info: { id: 'sid', state: 'QUEUED', url: '', outputs: [] } });
+    const r = await getJulesSession('K', 'sid', client);
     expect(r.url).toBe('https://jules.google.com/session/sid');
   });
 
-  it('throws on non-2xx', async () => {
-    const f = (async () => jsonResponse({ error: 'nope' }, 403)) as unknown as typeof fetch;
-    await expect(startJulesSession('K', { owner: 'o', repo: 'r', branch: 'main', prompt: 'p' }, f)).rejects.toThrow(/403/);
+  it('fetches live status and extracts the PR url from a pullRequest output', async () => {
+    const client = fakeClient({
+      info: {
+        id: 'sid',
+        state: 'IN_PROGRESS',
+        url: 'https://jules.google.com/session/sid',
+        outputs: [{ type: 'pullRequest', pullRequest: { url: 'https://github.com/o/r/pull/7' } }],
+      },
+    });
+    const r = await getJulesSession('K', 'sid', client);
+    expect(r).toEqual({
+      id: 'sid',
+      url: 'https://jules.google.com/session/sid',
+      state: 'IN_PROGRESS',
+      pullRequestUrl: 'https://github.com/o/r/pull/7',
+    });
+  });
+
+  it('prefers the outcome PR url over the outputs list', async () => {
+    const client = fakeClient({
+      info: {
+        id: 'sid',
+        state: 'COMPLETED',
+        url: 'https://jules.google.com/session/sid',
+        outcome: { pullRequest: { url: 'https://github.com/o/r/pull/9' } },
+        outputs: [{ type: 'pullRequest', pullRequest: { url: 'https://github.com/o/r/pull/7' } }],
+      },
+    });
+    const r = await getJulesSession('K', 'sid', client);
+    expect(r.pullRequestUrl).toBe('https://github.com/o/r/pull/9');
+  });
+
+  it('returns a null PR url when no output carries one', async () => {
+    const client = fakeClient({ info: { id: 'sid', state: 'QUEUED', url: 'u', outputs: [] } });
+    const r = await getJulesSession('K', 'sid', client);
+    expect(r.pullRequestUrl).toBeNull();
   });
 });

@@ -1,41 +1,79 @@
-const JULES_BASE = 'https://jules.googleapis.com/v1alpha';
+import { connect, MemoryStorage, MemorySessionStorage } from '@google/jules-sdk';
+import type { JulesClient, SessionResource, SessionOutput, StorageFactory } from '@google/jules-sdk';
 
-export type JulesSource = { name: string };
+/**
+ * Storage pinned to memory. A Cloudflare Worker has no persistent filesystem,
+ * so the SDK's default NodeFile storage (which calls node:fs) must not be used.
+ * Only the SDK's REST control plane runs inside the isolate — the coding agents
+ * themselves execute in Google's cloud — so an ephemeral in-memory cache per
+ * request is exactly right.
+ */
+const MEMORY_STORAGE_FACTORY: StorageFactory = {
+  activity: () => new MemoryStorage(),
+  session: () => new MemorySessionStorage(),
+};
 
-function headers(apiKey: string) {
-  return { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey };
+/**
+ * Build a Jules client bound to `apiKey`. The default arg on each exported
+ * function makes the client injectable, which keeps the functions unit-testable
+ * with a fake client (no network, no SDK internals).
+ */
+export function createJulesClient(apiKey: string): JulesClient {
+  return connect({ apiKey, storageFactory: MEMORY_STORAGE_FACTORY });
+}
+
+/** Normalized status shape the rest of Codra persists and renders. */
+export type JulesSessionStatus = { id: string; url: string; state: string; pullRequestUrl: string | null };
+
+/** Best-effort PR url: prefer the outcome's PR, else any pullRequest output. */
+function pullRequestUrlOf(resource: SessionResource): string | null {
+  const fromOutcome = resource.outcome?.pullRequest?.url;
+  if (fromOutcome) return fromOutcome;
+  const prOutput = (resource.outputs ?? []).find(
+    (o): o is Extract<SessionOutput, { type: 'pullRequest' }> => o.type === 'pullRequest',
+  );
+  return prOutput?.pullRequest.url ?? null;
+}
+
+function toStatus(resource: SessionResource): JulesSessionStatus {
+  return {
+    id: resource.id,
+    url: resource.url || `https://jules.google.com/session/${resource.id}`,
+    state: resource.state,
+    pullRequestUrl: pullRequestUrlOf(resource),
+  };
 }
 
 /** True if the owner/repo is a Jules-connected GitHub source. */
 export async function isRepoConnected(
-  apiKey: string, owner: string, repo: string, fetchImpl: typeof fetch = fetch,
+  apiKey: string, owner: string, repo: string, client: JulesClient = createJulesClient(apiKey),
 ): Promise<boolean> {
-  const res = await fetchImpl(`${JULES_BASE}/sources`, { headers: headers(apiKey) });
-  if (!res.ok) throw new Error(`Jules GET /sources ${res.status}: ${await res.text()}`);
-  const data = (await res.json()) as { sources?: JulesSource[] };
-  const target = `sources/github/${owner}/${repo}`;
-  return (data.sources ?? []).some((s) => s.name === target);
+  const source = await client.sources.get({ github: `${owner}/${repo}` });
+  return Boolean(source);
 }
 
-/** Start a Jules session against a connected GitHub repo. */
+/**
+ * Start a Jules session against a connected GitHub repo and return its current
+ * status. Runs autonomously (no plan approval) and opens a PR when finished.
+ */
 export async function startJulesSession(
   apiKey: string,
   opts: { owner: string; repo: string; branch: string; prompt: string; title?: string },
-  fetchImpl: typeof fetch = fetch,
-): Promise<{ id: string; url: string; state: string }> {
-  const res = await fetchImpl(`${JULES_BASE}/sessions`, {
-    method: 'POST',
-    headers: headers(apiKey),
-    body: JSON.stringify({
-      prompt: opts.prompt,
-      title: opts.title,
-      sourceContext: {
-        source: `sources/github/${opts.owner}/${opts.repo}`,
-        githubRepoContext: { startingBranch: opts.branch },
-      },
-    }),
+  client: JulesClient = createJulesClient(apiKey),
+): Promise<JulesSessionStatus> {
+  const session = await client.session({
+    prompt: opts.prompt,
+    title: opts.title,
+    source: { github: `${opts.owner}/${opts.repo}`, baseBranch: opts.branch },
+    requireApproval: false,
+    autoPr: true,
   });
-  if (!res.ok) throw new Error(`Jules POST /sessions ${res.status}: ${await res.text()}`);
-  const s = (await res.json()) as { id: string; state?: string; url?: string };
-  return { id: s.id, url: s.url ?? `https://jules.google.com/session/${s.id}`, state: s.state ?? 'QUEUED' };
+  return toStatus(await session.info());
+}
+
+/** Fetch the current state of an existing session (realtime status). */
+export async function getJulesSession(
+  apiKey: string, sessionId: string, client: JulesClient = createJulesClient(apiKey),
+): Promise<JulesSessionStatus> {
+  return toStatus(await client.session(sessionId).info());
 }

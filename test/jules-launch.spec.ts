@@ -19,7 +19,7 @@ describe('launchStagedJulesSessions', () => {
     const marked = vi.spyOn(db, 'markJulesLaunched').mockResolvedValue();
     const deps = {
       isRepoConnected: async () => true,
-      startJulesSession: async () => ({ id: 'sid', url: 'https://jules.google.com/session/sid', state: 'QUEUED' }),
+      startJulesSession: async () => ({ id: 'sid', url: 'https://jules.google.com/session/sid', state: 'QUEUED', pullRequestUrl: null }),
     };
     const count = await launchStagedJulesSessions(fakeEnv(), fakeGithub(), { owner: 'o', repo: 'r', prNumber: 5 }, deps);
     expect(count).toBe(1);

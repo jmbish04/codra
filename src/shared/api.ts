@@ -204,3 +204,13 @@ export type JulesSessionDto = {
 };
 
 export type JulesSessionsResponse = { sessions: JulesSessionDto[] };
+
+/** Realtime status for one launched session, pulled live from Jules. */
+export type JulesSessionLiveDto = {
+  id: string;
+  state: JulesSessionDto['state'];
+  sessionState: string | null;
+  sessionUrl: string | null;
+  pullRequestUrl: string | null;
+  live: boolean;
+};
