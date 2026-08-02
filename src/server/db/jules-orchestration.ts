@@ -1,6 +1,6 @@
 import { getDb } from './client';
 import { julesOrchestrationTasks, julesOrchestrationEvents } from './schemas';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 
 export type OrchestrationTaskRow = typeof julesOrchestrationTasks.$inferSelect;
 
@@ -62,6 +62,21 @@ export async function logTaskEvent(
   const db = getDb(env);
   await db.insert(julesOrchestrationEvents)
     .values({ task_id: taskId, event, payload: payload != null ? JSON.stringify(payload) : null });
+}
+
+/**
+ * GitHub pull_request webhook fast-path: if an orchestration task is already
+ * linked to this PR url (set by the poller when it saw the PR), mark it pr_ready.
+ * Matches only on an exact recorded url, so there are no false positives; the
+ * poller remains the primary PR detector.
+ */
+export async function markPrReadyByUrl(env: Pick<Env, 'DB'>, prUrl: string): Promise<boolean> {
+  const db = getDb(env);
+  const rows = await db.update(julesOrchestrationTasks)
+    .set({ status: 'pr_ready', updated_at: new Date().toISOString() })
+    .where(and(eq(julesOrchestrationTasks.last_pr_url, prUrl), ne(julesOrchestrationTasks.status, 'accepted')))
+    .returning({ id: julesOrchestrationTasks.task_id });
+  return rows.length > 0;
 }
 
 export type GlobalReportRow = { repository_id: number; status: string; total: number; latest: string };

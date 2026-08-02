@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   createOrchestrationTask, getTaskByToken, getTaskBySession, listActiveTasks,
   updateTaskStatus, incrementTaskIteration, logTaskEvent, globalOrchestrationReport,
+  markPrReadyByUrl,
 } from '@server/db/jules-orchestration';
 import { createTestEnv } from './helpers';
 
@@ -37,6 +38,15 @@ describe('jules-orchestration db', () => {
     expect(await incrementTaskIteration(env, t.task_id)).toBe(1);
     expect(await incrementTaskIteration(env, t.task_id)).toBe(2);
     expect(await incrementTaskIteration(env, t.task_id)).toBe(3);
+  });
+
+  it('marks pr_ready from a PR webhook only when the url matches a task', async () => {
+    const t = await createOrchestrationTask(env, { packageId: 'p', repositoryId: 1 });
+    await updateTaskStatus(env, t.task_id, { status: 'executing', lastPrUrl: 'https://github.com/o/r/pull/7' });
+
+    expect(await markPrReadyByUrl(env, 'https://github.com/o/r/pull/999')).toBe(false); // no match
+    expect(await markPrReadyByUrl(env, 'https://github.com/o/r/pull/7')).toBe(true);
+    expect(await getTaskByToken(env, t.task_id)).toMatchObject({ status: 'pr_ready' });
   });
 
   it('logs events and produces a cross-repo global report', async () => {

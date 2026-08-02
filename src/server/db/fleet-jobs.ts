@@ -20,17 +20,17 @@ export async function createFleetJob(
 /** Queued jobs the off-Worker runner should pick up, joined to owner/repo for the CLI. */
 export async function listQueuedFleetJobs(
   env: Pick<Env, 'DB'>, limit = 10,
-): Promise<Array<{ jobId: string; kind: string; repository: string; params: unknown }>> {
+): Promise<Array<{ jobId: string; kind: string; repositoryId: number; repository: string; params: unknown }>> {
   const db = getDb(env);
   const rows = await db.select({
     job_id: fleetJobs.job_id, kind: fleetJobs.kind, params_json: fleetJobs.params_json,
-    owner: repositories.owner, repo: repositories.repo,
+    repository_id: fleetJobs.repository_id, owner: repositories.owner, repo: repositories.repo,
   }).from(fleetJobs)
     .leftJoin(repositories, eq(repositories.id, fleetJobs.repository_id))
     .where(eq(fleetJobs.status, 'queued'))
     .orderBy(asc(fleetJobs.created_at)).limit(limit).all();
   return rows.map((r) => ({
-    jobId: r.job_id, kind: r.kind,
+    jobId: r.job_id, kind: r.kind, repositoryId: r.repository_id,
     repository: r.owner && r.repo ? `${r.owner}/${r.repo}` : '',
     params: r.params_json ? JSON.parse(r.params_json) : null,
   }));

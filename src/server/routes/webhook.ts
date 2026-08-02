@@ -136,6 +136,13 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
       // queued or running for it, with a comment linking the cancelled job.
       if (eventName === 'pull_request') {
         const prPayload = payload as import('@shared/github').PullRequestWebhookPayload;
+        // Fast-path: link a PR event to a Jules orchestration task by its recorded url
+        // (canonical GitHub html_url, matching what the poller stores from the snapshot).
+        const prUrl = `https://github.com/${payload.repository.owner.login}/${payload.repository.name}/pull/${prPayload.pull_request.number}`;
+        {
+          const { markPrReadyByUrl } = await import('@server/db/jules-orchestration');
+          c.executionCtx.waitUntil(markPrReadyByUrl(c.env, prUrl).catch(() => false));
+        }
         if (prPayload.action === 'closed') {
           const prNumber = prPayload.pull_request.number;
           const merged = prPayload.pull_request.merged === true;

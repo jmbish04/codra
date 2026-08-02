@@ -52,6 +52,20 @@ launchctl unload ~/Library/LaunchAgents/com.codra.jules-watcher.plist
 launchctl load   ~/Library/LaunchAgents/com.codra.jules-watcher.plist
 ```
 
+## Fleet / merge runner
+
+The daemon also runs `jules-fleet` / `jules-merge` CLIs, which **cannot** run on the
+Worker (both import `node:child_process` + `fs`). It polls codra for queued jobs
+(`GET /api/agent/fleet-jobs`), claims one, runs the real CLI, and reports back:
+
+- `init` / `analyze` / `dispatch` → `npx @google/jules-fleet <kind> --repo <owner/repo>`
+- `merge` → `jules-merge scan` → **codra reviews & approves** (`POST /api/agent/merge-review`,
+  Kimi 2.7, circuit-broken) → `jules-merge merge` only if approved.
+
+Queue a job from the dashboard/API (`POST /api/planning-packages/orchestration/fleet/jobs`)
+or the `request_fleet_run` MCP tool. Conflict reconciliation authoring
+(`get-contents`/`stage-resolution`) is a later iteration; clean batches merge today.
+
 ## Notes
 
 - Secrets are pulled at runtime via `tokens show <NAME> --value-only` (see
