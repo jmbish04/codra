@@ -6,10 +6,7 @@ import {
   getRevision, listRevisions, listPackageTasks, updateTask,
 } from '@server/db/planning-packages';
 import { upsertRevision, type UpsertRevisionInput } from '@server/services/planning-packages';
-
-function slugify(input: string): string {
-  return input.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'package';
-}
+import { slugifyPackage } from '@server/utils/slug';
 
 export function createPlanningPackagesRouter() {
   const app = new Hono<AppEnv>();
@@ -37,7 +34,7 @@ export function createPlanningPackagesRouter() {
       const pkg = await createPackage(c.env, {
         repositoryId: body.repositoryId,
         title: body.title,
-        slug: body.slug ? slugify(body.slug) : slugify(body.title),
+        slug: body.slug ? slugifyPackage(body.slug) : slugifyPackage(body.title),
         requestPromptJson: body.requestPromptJson ?? null,
         createdBy: c.get('sessionUser')?.login ?? null,
       });
