@@ -26,9 +26,6 @@ export default defineConfig({
       'test/api.spec.ts',
       'test/resumable-queue.spec.ts',
       'test/webhook-handling.spec.ts',
-      // Needs model_configs/llm_providers seeded per test (resolveModel now
-      // requires a configured model) plus refreshed AI-response mock shapes.
-      'test/model-service.spec.ts',
     ],
     setupFiles: ['./test/setup.ts'],
     fileParallelism: false,
