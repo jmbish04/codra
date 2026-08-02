@@ -23,6 +23,7 @@ import { createDocsReviewRouter } from '@server/routes/api/docs-review';
 import { createActionsRouter } from '@server/routes/api/actions';
 import { createJulesSessionsRouter } from '@server/routes/api/jules-sessions';
 import { createPlanningPackagesRouter } from '@server/routes/api/planning-packages';
+import { createPublicPlanningRouter } from '@server/routes/public-planning';
 import { createSecretBindingsRouter } from '@server/routes/api/secret-bindings';
 import { createTestConfigRouter } from '@server/routes/api/test-config';
 import { createMcpOAuthRouter } from '@server/routes/api/mcp-oauth';
@@ -74,6 +75,9 @@ export function createApp() {
   app.route('/webhook', createWebhookRouter());
   // Public read-only review-suggestions feed (before the /api/* session guard).
   app.route('/reviews', createReviewsRouter());
+  // Public, capability-gated (unguessable uuid) read-only planning-package export.
+  // Mounted before the /api/* session guard so Jules can pull revisions via curl.
+  app.route('/api/public/planning-packages', createPublicPlanningRouter());
 
   // RFC 9728: Protected Resource Metadata — Claude probes this first
   app.get('/.well-known/oauth-protected-resource', (c) => {
