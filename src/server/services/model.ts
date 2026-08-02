@@ -12,6 +12,7 @@ import { reviewWithAnthropic } from '../models/anthropic';
 import { buildFileReviewPrompts } from '../prompts/file-review';
 import { buildSummaryPrompt, SUMMARY_SYSTEM_PROMPT } from '../prompts/summary';
 import { parseFileReviewResponse } from '../core/model-output';
+import { withTimeout } from '../core/timeout';
 import { truncateFileDiff } from '../core/diff';
 import type { RepoConfig } from '@shared/schema';
 import type { TokenTracker } from '../core/token-tracker';
@@ -605,13 +606,25 @@ Lesson #${idx + 1}:
   }
 }
 
-async function fetchLessonsLearned(env: any, filePath: string): Promise<any[]> {
+interface EdgraphLesson {
+  commentText: string;
+  feedbackText: string;
+}
+
+async function fetchLessonsLearned(env: Pick<Env, 'EDGRAPH'>, filePath: string): Promise<EdgraphLesson[]> {
   if (!env.EDGRAPH) return [];
   try {
-    const res = await env.EDGRAPH.fetch(`https://github.com/jmbish04/core-github-api-edgraph/api/lessons?file=${encodeURIComponent(filePath)}`);
+    // EDGRAPH is a service binding, so the runtime ignores the URL host and
+    // routes on path/query to the bound worker — use a neutral host rather than
+    // a hardcoded external URL. Supplementary context: time-bounded so a hung
+    // binding never stalls a file review, and the catch turns any failure
+    // (including a timeout) into an empty list.
+    const res = await withTimeout<Response>('EDGRAPH lessons', 10000, (signal) =>
+      env.EDGRAPH.fetch(`https://edgraph/api/lessons?file=${encodeURIComponent(filePath)}`, { signal }),
+    );
     if (!res.ok) return [];
-    const data = await res.json() as any;
-    return data.lessons || [];
+    const data = await res.json() as { lessons?: EdgraphLesson[] };
+    return data.lessons ?? [];
   } catch (err) {
     console.error('Failed to fetch lessons learned from EDGRAPH service binding', err);
     return [];
