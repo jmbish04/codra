@@ -22,6 +22,7 @@ import { createStandardizationRouter } from '@server/routes/api/standardization'
 import { createDocsReviewRouter } from '@server/routes/api/docs-review';
 import { createActionsRouter } from '@server/routes/api/actions';
 import { createJulesSessionsRouter } from '@server/routes/api/jules-sessions';
+import { createPlanningPackagesRouter } from '@server/routes/api/planning-packages';
 import { createSecretBindingsRouter } from '@server/routes/api/secret-bindings';
 import { createTestConfigRouter } from '@server/routes/api/test-config';
 import { createMcpOAuthRouter } from '@server/routes/api/mcp-oauth';
@@ -130,6 +131,7 @@ export function createApp() {
   app.route('/api/standardization', createStandardizationRouter());
   app.route('/api/actions', createActionsRouter());
   app.route('/api/jules-sessions', createJulesSessionsRouter());
+  app.route('/api/planning-packages', createPlanningPackagesRouter());
   app.route('/api/secret-bindings', createSecretBindingsRouter());
   app.route('/api/test-config', createTestConfigRouter());
   app.route('/api/docs-review-rules', createDocsReviewRouter());
