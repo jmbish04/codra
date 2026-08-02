@@ -35,6 +35,18 @@ describe('jules service', () => {
     expect(r.url).toBe('https://jules.google.com/session/sid');
   });
 
+  it('derives the session id from the resource name when id is absent', async () => {
+    const f = (async () => jsonResponse({ name: 'sessions/sid', state: 'QUEUED' })) as unknown as typeof fetch;
+    const r = await startJulesSession('K', { owner: 'o', repo: 'r', branch: 'main', prompt: 'p' }, f);
+    expect(r.id).toBe('sid');
+    expect(r.url).toBe('https://jules.google.com/session/sid');
+  });
+
+  it('throws when the response carries no session id or name', async () => {
+    const f = (async () => jsonResponse({ state: 'QUEUED' })) as unknown as typeof fetch;
+    await expect(startJulesSession('K', { owner: 'o', repo: 'r', branch: 'main', prompt: 'p' }, f)).rejects.toThrow(/no session id/);
+  });
+
   it('throws on non-2xx', async () => {
     const f = (async () => jsonResponse({ error: 'nope' }, 403)) as unknown as typeof fetch;
     await expect(startJulesSession('K', { owner: 'o', repo: 'r', branch: 'main', prompt: 'p' }, f)).rejects.toThrow(/403/);

@@ -36,6 +36,11 @@ export async function startJulesSession(
     }),
   });
   if (!res.ok) throw new Error(`Jules POST /sessions ${res.status}: ${await res.text()}`);
-  const s = (await res.json()) as { id: string; state?: string; url?: string };
-  return { id: s.id, url: s.url ?? `https://jules.google.com/session/${s.id}`, state: s.state ?? 'QUEUED' };
+  const s = (await res.json()) as { id?: string; name?: string; state?: string; url?: string };
+  // The API returns both `id` and a resource `name` ("sessions/{id}"). Prefer
+  // `id`, fall back to the name's trailing segment so the session id is never
+  // lost, and fail loudly rather than persist an empty id.
+  const id = s.id || s.name?.split('/').pop() || '';
+  if (!id) throw new Error(`Jules POST /sessions returned no session id: ${JSON.stringify(s)}`);
+  return { id, url: s.url ?? `https://jules.google.com/session/${id}`, state: s.state ?? 'QUEUED' };
 }
