@@ -5,6 +5,7 @@ import {
   createPackage, getPackage, listPackages, updatePackage,
   createRevision, getRevision, listRevisions,
   reconcilePackageTasks, updateTask, listPackageTasks, exportPackages,
+  acceptRevision,
 } from '@server/db/planning-packages';
 import { createTestEnv } from './helpers';
 
@@ -83,6 +84,25 @@ describe('planning-packages task state + export', () => {
     expect(byKey.T1).toMatchObject({ status: 'done', assignee: 'agent-x', pr_number: 42 });
     expect(byKey.T3).toMatchObject({ status: 'pending' });
     expect(tasks).toHaveLength(3); // T1, T2, T3
+  });
+
+  it('accepts a revision: supersedes others, points package, reconciles tasks', async () => {
+    const p = await createPackage(env, { repositoryId: 1, slug: 'abc', title: 'ABC' });
+    const r1 = await createRevision(env, p.id, { source: 'jules', tasks: [{ taskKey: 'T1', title: 'a' }] });
+    const r2 = await createRevision(env, p.id, { source: 'merge', tasks: [{ taskKey: 'T1', title: 'a2' }, { taskKey: 'T2', title: 'b' }] });
+
+    await acceptRevision(env, p.id, r2.id);
+
+    const revs = await listRevisions(env, p.id);
+    const byId = Object.fromEntries(revs.map((r) => [r.id, r.status]));
+    expect(byId[r1.id]).toBe('superseded');
+    expect(byId[r2.id]).toBe('accepted');
+
+    const pkg = await getPackage(env, p.id);
+    expect(pkg).toMatchObject({ current_revision_id: r2.id, status: 'in_progress' });
+
+    const tasks = await listPackageTasks(env, p.id);
+    expect(tasks.map((t) => t.task_key).sort()).toEqual(['T1', 'T2']);
   });
 
   it('exports fielded packages by id and skips unknown ids', async () => {

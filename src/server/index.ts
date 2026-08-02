@@ -87,3 +87,4 @@ export { ReviewAgent } from './agents/review';
 export { Chat, GitHubLikeMCP } from './agents/orchestrator';
 export { PrReviewStream } from './agents/pr-stream';
 export { JobsFeed } from './agents/jobs-feed';
+export { PlanAgent } from './agents/plan-agent';

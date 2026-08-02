@@ -4,7 +4,7 @@ import {
   revisionFileChanges, revisionCodeCards, revisionApiChanges, revisionMigrations,
   revisionDiagrams, packageTasks,
 } from './schemas';
-import { and, asc, desc, eq, max } from 'drizzle-orm';
+import { and, asc, desc, eq, max, ne } from 'drizzle-orm';
 
 export type PackageRow = typeof planningPackages.$inferSelect;
 export type RevisionRow = typeof packageRevisions.$inferSelect;
@@ -156,6 +156,28 @@ export async function listRevisions(env: Pick<Env, 'DB'>, packageId: string): Pr
   const db = getDb(env);
   return db.select().from(packageRevisions).where(eq(packageRevisions.package_id, packageId))
     .orderBy(asc(packageRevisions.revision_number)).all();
+}
+
+/** Transition a revision's status (metadata only — content stays immutable). */
+export async function setRevisionStatus(env: Pick<Env, 'DB'>, revisionId: string, status: string): Promise<void> {
+  const db = getDb(env);
+  await db.update(packageRevisions).set({ status }).where(eq(packageRevisions.id, revisionId));
+}
+
+/**
+ * Accept one revision as the package's canonical plan: supersede every other
+ * non-rejected revision, mark this one accepted, point the package at it, move
+ * it to `in_progress`, and reconcile live task state. Content is never mutated.
+ */
+export async function acceptRevision(env: Pick<Env, 'DB'>, packageId: string, revisionId: string): Promise<void> {
+  const db = getDb(env);
+  const rev = await db.select().from(packageRevisions).where(eq(packageRevisions.id, revisionId)).get();
+  if (!rev || rev.package_id !== packageId) throw new Error('revision not found for package');
+  await db.update(packageRevisions).set({ status: 'superseded' })
+    .where(and(eq(packageRevisions.package_id, packageId), ne(packageRevisions.status, 'rejected')));
+  await db.update(packageRevisions).set({ status: 'accepted' }).where(eq(packageRevisions.id, revisionId));
+  await updatePackage(env, packageId, { currentRevisionId: revisionId, status: 'in_progress' });
+  await reconcilePackageTasks(env, packageId, rev.revision_number);
 }
 
 export type PackageTaskRow = typeof packageTasks.$inferSelect;
