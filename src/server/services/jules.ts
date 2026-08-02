@@ -77,3 +77,33 @@ export async function getJulesSession(
 ): Promise<JulesSessionStatus> {
   return toStatus(await client.session(sessionId).info());
 }
+
+/**
+ * Start a Jules PLANNING session (no PR): create the session, then ask it to
+ * produce the plan and return the agent's reply text plus the session id. Used
+ * by PlanAgent to generate a proposed revision.
+ */
+export async function askJulesForPlan(
+  apiKey: string,
+  opts: { owner: string; repo: string; branch: string; kickoff: string; planPrompt: string; title?: string },
+  client: JulesClient = createJulesClient(apiKey),
+): Promise<{ sessionId: string; message: string }> {
+  const session = await client.session({
+    prompt: opts.kickoff,
+    title: opts.title,
+    source: { github: `${opts.owner}/${opts.repo}`, baseBranch: opts.branch },
+    requireApproval: false,
+    autoPr: false,
+  });
+  const reply = await session.ask(opts.planPrompt);
+  const info = await session.info();
+  return { sessionId: info.id, message: reply.message };
+}
+
+/** Send a follow-up message to an existing session and return the agent's reply. */
+export async function askJulesSession(
+  apiKey: string, sessionId: string, prompt: string, client: JulesClient = createJulesClient(apiKey),
+): Promise<string> {
+  const reply = await client.session(sessionId).ask(prompt);
+  return reply.message;
+}
