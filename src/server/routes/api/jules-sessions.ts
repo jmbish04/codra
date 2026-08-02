@@ -4,6 +4,7 @@ import { getJulesSessionById, listJulesSessions, updateJulesLiveState } from '@s
 import { getSecretStoreBinding } from '@server/utils/secrets';
 import { getJulesSession } from '@server/services/jules';
 import { jsonError } from '@server/core/http';
+import { logger } from '@server/core/logger';
 
 export function createJulesSessionsRouter() {
   const app = new Hono<AppEnv>();
@@ -38,7 +39,8 @@ export function createJulesSessionsRouter() {
 
     try {
       const live = await getJulesSession(apiKey, row.session_id);
-      await updateJulesLiveState(c.env, row.id, { sessionState: live.state, sessionUrl: live.url }).catch(() => {});
+      await updateJulesLiveState(c.env, row.id, { sessionState: live.state, sessionUrl: live.url })
+        .catch((err) => logger.warn(`Failed to persist live Jules state for ${row.id}`, err));
       return c.json({
         id: row.id,
         state: row.state,
@@ -48,7 +50,10 @@ export function createJulesSessionsRouter() {
         live: true,
       });
     } catch (err) {
-      return jsonError(err instanceof Error ? err.message : 'Failed to fetch live Jules status.', 502);
+      // Log the detail server-side; return a generic message so a downstream
+      // error (which may embed URLs/response bodies) is never leaked to clients.
+      logger.error(`Failed to fetch live Jules status for ${row.id}`, err instanceof Error ? err : new Error(String(err)));
+      return jsonError('Failed to fetch live Jules status.', 502);
     }
   });
 

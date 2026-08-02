@@ -47,12 +47,15 @@ export function JulesOperationsPage() {
   const [error, setError] = useState<string | null>(null);
   const liveRef = useRef(live);
   liveRef.current = live;
+  // Guard against setState after the page unmounts (fetches are fire-and-forget).
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   useEffect(() => {
     api.getJulesSessions({ limit: 200 })
-      .then((res) => { setSessions(res.sessions); setError(null); })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load Jules sessions.'))
-      .finally(() => setLoading(false));
+      .then((res) => { if (mountedRef.current) { setSessions(res.sessions); setError(null); } })
+      .catch((e) => { if (mountedRef.current) setError(e instanceof Error ? e.message : 'Failed to load Jules sessions.'); })
+      .finally(() => { if (mountedRef.current) setLoading(false); });
   }, []);
 
   // Realtime: query Jules (server-side) for each launched session's current
@@ -61,8 +64,12 @@ export function JulesOperationsPage() {
     if (ids.length === 0) return;
     setRefreshing(true);
     const results = await Promise.allSettled(ids.map((id) => api.getJulesSessionLive(id)));
+    if (!mountedRef.current) return;
     setLive((prev) => {
-      const next = { ...prev };
+      // Rebuild from the ids currently being polled so entries for sessions that
+      // are no longer launched are dropped (the map can't grow unbounded).
+      const next: Record<string, JulesSessionLiveDto> = {};
+      for (const id of ids) if (prev[id]) next[id] = prev[id];
       results.forEach((r, i) => { if (r.status === 'fulfilled') next[ids[i]] = r.value; });
       return next;
     });
@@ -70,7 +77,8 @@ export function JulesOperationsPage() {
   }, []);
 
   const launchedIds = sessions.filter((s) => s.state === 'launched' && s.session_id).map((s) => s.id);
-  const launchedKey = launchedIds.join(',');
+  // Sorted so a mere reorder of `sessions` doesn't tear down and rebuild the poll.
+  const launchedKey = [...launchedIds].sort().join(',');
 
   useEffect(() => {
     if (launchedIds.length === 0) return;
@@ -154,7 +162,7 @@ export function JulesOperationsPage() {
                         </a>
                       ) : null;
                     })()}
-                    {l?.pullRequestUrl && (
+                    {l?.pullRequestUrl && l.pullRequestUrl.startsWith('https://') && (
                       <a href={l.pullRequestUrl} target="_blank" rel="noopener noreferrer"
                          className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
                         <GitPullRequest className="h-3.5 w-3.5" /> View PR
