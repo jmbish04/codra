@@ -37,7 +37,7 @@ export function PlanningListPage() {
   useEffect(() => {
     let live = true;
     setLoading(true);
-    api.listPlanningPackages(filter === 'all' ? {} : { status: filter })
+    api.listPlanningPackages(filter === 'all' ? {} : { status: filter as PlanningStatus })
       .then((r) => { if (live) { setPackages(r.packages); setError(null); } })
       .catch((e) => { if (live) setError(e instanceof Error ? e.message : 'Failed to load plans.'); })
       .finally(() => { if (live) setLoading(false); });

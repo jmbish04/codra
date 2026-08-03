@@ -17,13 +17,21 @@ import { reviewReconciliation } from '@server/services/merge-review';
  * always-on) and calls `jules-event` here the moment Jules emits, so the worker
  * only ever runs a short, event-triggered step — no billed always-awake watcher.
  */
+/** Constant-time string compare — avoids leaking the key via response timing. */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i++) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return mismatch === 0;
+}
+
 export function createAgentRouter() {
   const app = new Hono<AppEnv>();
 
   app.use('*', async (c, next) => {
     const expected = await getSecretStoreBinding(c.env, 'WORKER_API_KEY').catch(() => '');
     const provided = c.req.header('X-API-Key') || c.req.header('Authorization')?.replace(/^Bearer\s+/i, '') || '';
-    if (!expected || provided !== expected) return jsonError('Unauthorized', 401);
+    if (!expected || !timingSafeEqual(provided, expected)) return jsonError('Unauthorized', 401);
     await next();
   });
 

@@ -69,6 +69,11 @@ export async function upsertActivities(
   return { inserted };
 }
 
+function safeParse<T>(raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
+  try { return JSON.parse(raw) as T; } catch { return fallback; }
+}
+
 function rowToDto(r: typeof julesActivityCache.$inferSelect): JulesActivityDto {
   return {
     id: r.activity_id,
@@ -80,9 +85,9 @@ function rowToDto(r: typeof julesActivityCache.$inferSelect): JulesActivityDto {
     message: r.message,
     title: r.title,
     reason: r.reason,
-    plan: r.plan_json ? JSON.parse(r.plan_json) : null,
+    plan: safeParse(r.plan_json, null),
     planId: r.plan_id,
-    artifacts: r.artifacts_json ? JSON.parse(r.artifacts_json) : [],
+    artifacts: safeParse(r.artifacts_json, [] as Array<Record<string, unknown>>),
   };
 }
 

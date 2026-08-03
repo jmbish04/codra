@@ -313,7 +313,7 @@ export const api = {
   getOrchestrationSummary() {
     return request<OrchestrationSummaryResponse>('/api/planning-packages/orchestration/summary');
   },
-  listPlanningPackages(params: { repo?: number; status?: string } = {}) {
+  listPlanningPackages(params: { repo?: number; status?: PlanningStatus } = {}) {
     const sp = new URLSearchParams();
     if (params.repo != null) sp.set('repo', String(params.repo));
     if (params.status) sp.set('status', params.status);
@@ -326,7 +326,7 @@ export const api = {
   getPlanningPackage(id: string) {
     return request<PlanningPackageDetailResponse>(`/api/planning-packages/${pathSegment(id)}`);
   },
-  patchPlanningPackage(id: string, body: { title?: string; status?: string; requestPromptJson?: string | null }) {
+  patchPlanningPackage(id: string, body: { title?: string; status?: PlanningStatus; requestPromptJson?: string | null }) {
     return request<{ ok: boolean }>(`/api/planning-packages/${pathSegment(id)}`, { method: 'PATCH', body: JSON.stringify(body) });
   },
   getPlanningRevision(id: string, num: number) {

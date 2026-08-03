@@ -108,9 +108,13 @@ export async function listMonitorEvents(env: Pick<Env, 'DB'>, taskId: string): P
   const db = getDb(env);
   const rows = await db.select().from(julesOrchestrationEvents)
     .where(eq(julesOrchestrationEvents.task_id, taskId)).orderBy(desc(julesOrchestrationEvents.created_at)).all();
+  const parsePayload = (raw: string | null): Record<string, unknown> | null => {
+    if (!raw) return null;
+    try { return JSON.parse(raw) as Record<string, unknown>; } catch { return null; }
+  };
   return rows.map((e) => ({
     id: e.id, taskId: e.task_id, event: e.event, summary: null,
-    payload: e.payload ? (JSON.parse(e.payload) as Record<string, unknown>) : null, createdAt: e.created_at,
+    payload: parsePayload(e.payload), createdAt: e.created_at,
   }));
 }
 

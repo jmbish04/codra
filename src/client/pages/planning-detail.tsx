@@ -17,6 +17,7 @@ export function PlanningDetailPage() {
   const [rev, setRev] = useState<FullRevision | null>(null);
   const [tasks, setTasks] = useState<PackageTask[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
 
   const load = () => api.getPlanningPackage(id)
     .then((d) => {
@@ -35,9 +36,12 @@ export function PlanningDetailPage() {
   }, [id, revNum]);
 
   const orchestrate = async () => {
+    if (running) return; // guard against duplicate orchestrations
+    setRunning(true);
     setError(null);
     try { await api.orchestratePlanningPackage(id); await load(); }
     catch (e) { setError(e instanceof Error ? e.message : 'Failed to start Jules.'); }
+    finally { setRunning(false); }
   };
 
   const setTask = async (taskKey: string, patch: { status?: string; assignee?: string | null }) => {
@@ -55,7 +59,7 @@ export function PlanningDetailPage() {
         category={pkg.repository ?? 'Planning'}
         title={pkg.title}
         description={`Created ${formatDateTime(pkg.created_at)}`}
-        actions={<Button onClick={orchestrate} className="gap-1.5"><Play className="h-4 w-4" />Run Jules</Button>}
+        actions={<Button onClick={orchestrate} disabled={running} className="gap-1.5"><Play className="h-4 w-4" />{running ? 'Starting…' : 'Run Jules'}</Button>}
       />
       {error && <Alert variant="destructive">{error}</Alert>}
       <div className="flex items-center gap-2 text-sm">
@@ -89,6 +93,7 @@ export function PlanningDetailPage() {
                 <div className="min-w-0 text-sm"><span className="font-mono text-xs text-muted-foreground">{t.task_key}</span></div>
                 <div className="flex items-center gap-2">
                   <input
+                    key={`${t.task_key}:${t.assignee ?? ''}`}
                     defaultValue={t.assignee ?? ''}
                     onBlur={(e) => e.target.value !== (t.assignee ?? '') && setTask(t.task_key, { assignee: e.target.value || null })}
                     placeholder="assignee"
