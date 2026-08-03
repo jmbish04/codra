@@ -87,6 +87,9 @@ export interface PlanningPackageDetailResponse { package: PlanningPackage; revis
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+/**
+ * pathSegment
+ */
 function pathSegment(value: string) {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -107,6 +110,9 @@ export type ProviderPayload = {
 };
 type RepoConfigPatch = Partial<Pick<RepoConfig, 'review' | 'model'> & { enabled: boolean }>;
 
+/**
+ * request
+ */
 async function request<T>(input: string, init?: RequestInit) {
   const method = init?.method?.toUpperCase() ?? 'GET';
   const headers = new Headers(init?.headers);
@@ -144,6 +150,9 @@ async function request<T>(input: string, init?: RequestInit) {
   return (await response.json()) as T;
 }
 
+/**
+ * requestWithMeta
+ */
 async function requestWithMeta<T>(input: string, init?: RequestInit) {
   const method = init?.method?.toUpperCase() ?? 'GET';
   const headers = new Headers(init?.headers);

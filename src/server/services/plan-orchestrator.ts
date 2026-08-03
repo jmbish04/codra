@@ -55,6 +55,9 @@ export function buildKickoffPrompt(owner: string, repo: string): string {
   return `You are planning a feature for ${owner}/${repo}. Study the codebase. When asked, produce a detailed implementation plan.`;
 }
 
+/**
+ * buildPlanningPrompt
+ */
 export function buildPlanningPrompt(input: { title: string; requestPrompt?: string | null }): string {
   return [
     `Produce a complete implementation plan for this feature: "${input.title}".`,
@@ -64,6 +67,9 @@ export function buildPlanningPrompt(input: { title: string; requestPrompt?: stri
   ].join('');
 }
 
+/**
+ * buildImprovePrompt
+ */
 export function buildImprovePrompt(feedback: string): string {
   return [
     `The plan needs improvement before it can be accepted:`,
@@ -72,6 +78,9 @@ export function buildImprovePrompt(feedback: string): string {
   ].join('\n');
 }
 
+/**
+ * buildMergePrompt
+ */
 export function buildMergePrompt(input: { exportUrl: string; planIds: string[] }): string {
   const curl = `curl -sX POST '${input.exportUrl}' -H 'content-type: application/json' -d '${JSON.stringify({ planIds: input.planIds })}'`;
   return [
@@ -145,6 +154,9 @@ export function decideNextAction(input: {
 
 const reviewSchema = z.object({ satisfied: z.boolean(), feedback: z.string().default('') });
 
+/**
+ * buildReviewPrompt
+ */
 export function buildReviewPrompt(input: { title: string; revisionJson: string }): string {
   return [
     `You are the codra orchestrator reviewing a proposed implementation plan for "${input.title}".`,
@@ -154,6 +166,9 @@ export function buildReviewPrompt(input: { title: string; revisionJson: string }
   ].join('\n');
 }
 
+/**
+ * buildMergeReviewPrompt
+ */
 export function buildMergeReviewPrompt(input: { repository: string; summary: string }): string {
   return [
     `You are the codra orchestrator reviewing a jules-merge reconciliation for ${input.repository} before it is merged.`,
@@ -163,6 +178,9 @@ export function buildMergeReviewPrompt(input: { repository: string; summary: str
   ].join('\n');
 }
 
+/**
+ * parseReviewVerdict
+ */
 export function parseReviewVerdict(text: string): { satisfied: boolean; feedback: string } {
   const matches = [...text.matchAll(/```json\s*([\s\S]*?)```/g)];
   const raw = matches.length ? matches[matches.length - 1][1].trim() : text.trim();

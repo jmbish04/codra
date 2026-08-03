@@ -67,6 +67,9 @@ export class Watcher {
 
   /** Stream future activities for one session; trigger the worker on each. */
   private watchSession(task: PendingTask) {
+    /**
+     * run
+     */
     const run = async () => {
       try {
         for await (const _activity of this.jules.session(task.sessionId).activities.updates()) {

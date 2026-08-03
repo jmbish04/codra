@@ -10,6 +10,9 @@ import { Send, Loader2 } from 'lucide-react';
 
 const AUTOSAVE_MS = 1000;
 
+/**
+ * PlanningNewPage
+ */
 export function PlanningNewPage() {
   const navigate = useNavigate();
   const [repos, setRepos] = useState<RepoConfigRecord[]>([]);
@@ -52,6 +55,9 @@ export function PlanningNewPage() {
     return () => { if (timer.current) clearTimeout(timer.current); };
   }, [repoKey, title, prompt, packageId]);
 
+  /**
+   * submit
+   */
   const submit = async () => {
     if (!packageId) return;
     setError(null);

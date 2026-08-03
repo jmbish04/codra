@@ -18,6 +18,9 @@ const FILTERS: Array<{ key: string; label: string }> = [
   { key: 'merged', label: 'Merged' },
 ];
 
+/**
+ * statusTone
+ */
 function statusTone(s: PlanningStatus): NonNullable<BadgeProps['variant']> {
   switch (s) {
     case 'merged': case 'in_progress': return 'success';
@@ -28,6 +31,9 @@ function statusTone(s: PlanningStatus): NonNullable<BadgeProps['variant']> {
   }
 }
 
+/**
+ * PlanningListPage
+ */
 export function PlanningListPage() {
   const [packages, setPackages] = useState<PlanningPackage[]>([]);
   const [filter, setFilter] = useState('all');

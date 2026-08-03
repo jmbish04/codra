@@ -12,6 +12,9 @@ import { sql } from 'drizzle-orm';
  */
 
 const uuid = () => text('id').primaryKey().$defaultFn(() => crypto.randomUUID());
+/**
+ * createdAt
+ */
 const createdAt = () => text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`);
 
 export const planningPackages = sqliteTable('planning_packages', {
@@ -59,6 +62,9 @@ export const packageRevisions = sqliteTable('package_revisions', {
 ]);
 
 // Fielded children — one factory keeps id/revision_id/ordinal uniform.
+/**
+ * childBase
+ */
 const childBase = () => ({
   id: uuid(),
   revision_id: text('revision_id').notNull(),

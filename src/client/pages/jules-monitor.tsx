@@ -22,6 +22,9 @@ const statusOptions = [
   { value: 'failed', label: 'Failed' },
 ];
 
+/**
+ * SummaryCard
+ */
 function SummaryCard({ label, value, icon: Icon, tone = 'default' }: { label: string; value: number | string; icon: React.ElementType; tone?: 'default' | 'danger' | 'success' }) {
   return (
     <Card>
@@ -31,6 +34,9 @@ function SummaryCard({ label, value, icon: Icon, tone = 'default' }: { label: st
   );
 }
 
+/**
+ * JulesMonitorPage
+ */
 export function JulesMonitorPage() {
   const [tasks, setTasks] = useState<JulesMonitorTask[]>([]);
   const [summary, setSummary] = useState<JulesMonitorSummary | null>(null);

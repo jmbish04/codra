@@ -77,6 +77,9 @@ const collapsedTooltipClass = [
   'lg:group-focus-visible:opacity-100 lg:group-focus-visible:translate-x-0',
 ];
 
+/**
+ * getStoredSidebarCollapsed
+ */
 function getStoredSidebarCollapsed(): boolean {
   if (typeof window === 'undefined') return false;
   try {
@@ -86,11 +89,17 @@ function getStoredSidebarCollapsed(): boolean {
   }
 }
 
+/**
+ * getIsDesktop
+ */
 function getIsDesktop(): boolean {
   if (typeof window === 'undefined') return false;
   return window.matchMedia('(min-width: 1024px)').matches;
 }
 
+/**
+ * AppShell
+ */
 export function AppShell() {
   const { theme, toggleTheme } = useTheme();
   const [sessionUser, setSessionUser] = useState<AuthSessionUser | null>(null);
@@ -134,6 +143,9 @@ export function AppShell() {
         .then((d: any) => { if (!cancelled) setPendingBpCount(Number(d?.count ?? 0)); })
         .catch(() => {});
     };
+    /**
+     * load
+     */
     load();
     const id = setInterval(load, 30000);
     window.addEventListener('bp-pending-changed', load);
@@ -143,6 +155,9 @@ export function AppShell() {
   useEffect(() => {
     const query = window.matchMedia('(min-width: 1024px)');
     const updateIsDesktop = () => setIsDesktop(query.matches);
+    /**
+     * updateIsDesktop
+     */
     updateIsDesktop();
     query.addEventListener('change', updateIsDesktop);
     return () => query.removeEventListener('change', updateIsDesktop);

@@ -29,6 +29,9 @@ const nodeTypes = {
 
 const edgeTypes = { animated: Edge.Animated, temporary: Edge.Temporary };
 
+/**
+ * JulesWorkflowPage
+ */
 export function JulesWorkflowPage() {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [fleet, setFleet] = useState<FleetJobDto[]>([]);
@@ -40,6 +43,9 @@ export function JulesWorkflowPage() {
     const load = () => Promise.all([api.getOrchestrationSummary(), api.getFleetJobs()])
       .then(([s, f]) => { if (mounted.current) { setCounts(s.summary.counts ?? {}); setFleet(f.jobs ?? []); setError(null); } })
       .catch((e) => { if (mounted.current) setError(e instanceof Error ? e.message : 'Failed to load workflow.'); });
+    /**
+     * load
+     */
     load();
     const id = setInterval(load, POLL_MS);
     return () => { mounted.current = false; clearInterval(id); };
