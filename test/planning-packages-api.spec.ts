@@ -78,6 +78,26 @@ describe('planning-packages API router', () => {
     expect(body.tasks.find((t: any) => t.task_key === 'T1')).toMatchObject({ status: 'done', assignee: 'agent-x', pr_number: 42 });
   });
 
+  it('creates by {owner, repo} and enriches list with the repo label', async () => {
+    const { getDb } = await import('@server/db/client');
+    const { repositories } = await import('@server/db/schemas');
+    await getDb(env).insert(repositories).values({ installation_id: 1, owner: 'acme', repo: 'widgets' }).returning();
+
+    const created = await app.request('/api/planning-packages', {
+      method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ owner: 'acme', repo: 'widgets', title: 'By Owner Repo' }),
+    }, env);
+    expect(created.status).toBe(201);
+
+    const listed = await app.request('/api/planning-packages', {}, env);
+    const body = await listed.json() as any;
+    expect(body.packages[0].repository).toBe('acme/widgets');
+
+    const unknown = await app.request('/api/planning-packages', {
+      method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ owner: 'no', repo: 'pe', title: 'x' }),
+    }, env);
+    expect(unknown.status).toBe(400);
+  });
+
   it('409s on duplicate slug within a repo', async () => {
     await app.request('/api/planning-packages', {
       method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ repositoryId: 1, title: 'Dup', slug: 'dup' }),

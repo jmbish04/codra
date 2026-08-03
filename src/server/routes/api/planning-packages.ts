@@ -15,6 +15,17 @@ import {
 } from '@server/services/jules-monitor';
 import { listCachedActivities } from '@server/db/jules-activities';
 import { createFleetJob, listFleetJobs, type FleetJobKind } from '@server/db/fleet-jobs';
+import { getDb } from '@server/db/client';
+import { repositories } from '@server/db/schemas';
+import { and, eq, inArray } from 'drizzle-orm';
+
+/** id → "owner/repo" for the given repository ids. */
+async function repoLabels(env: Pick<Env, 'DB'>, ids: number[]): Promise<Map<number, string>> {
+  if (!ids.length) return new Map();
+  const rows = await getDb(env).select({ id: repositories.id, owner: repositories.owner, repo: repositories.repo })
+    .from(repositories).where(inArray(repositories.id, ids)).all();
+  return new Map(rows.map((r) => [r.id, `${r.owner}/${r.repo}`]));
+}
 
 export function createPlanningPackagesRouter() {
   const app = new Hono<AppEnv>();
@@ -84,7 +95,7 @@ export function createPlanningPackagesRouter() {
     return c.json({ activities, nextCursor, syncedAt });
   });
 
-  // List, filterable by repo + status, newest first.
+  // List, filterable by repo + status, newest first. Enriched with "owner/repo".
   app.get('/', async (c) => {
     const q = c.req.query();
     const packages = await listPackages(c.env, {
@@ -93,19 +104,26 @@ export function createPlanningPackagesRouter() {
       limit: Math.min(Number(q.limit) || 100, 200),
       offset: Number(q.offset) || 0,
     });
-    return c.json({ packages });
+    const labels = await repoLabels(c.env, [...new Set(packages.map((p) => p.repository_id))]);
+    return c.json({ packages: packages.map((p) => ({ ...p, repository: labels.get(p.repository_id) ?? null })) });
   });
 
-  // Create a draft package.
+  // Create a draft package. Accepts repositoryId, or {owner, repo} to resolve it.
   app.post('/', async (c) => {
     const body = await c.req.json().catch(() => null) as
-      | { repositoryId?: number; title?: string; slug?: string; requestPromptJson?: string } | null;
-    if (!body || typeof body.repositoryId !== 'number' || !body.title) {
-      return jsonError('repositoryId (number) and title are required.', 400);
+      | { repositoryId?: number; owner?: string; repo?: string; title?: string; slug?: string; requestPromptJson?: string } | null;
+    if (!body || !body.title) return jsonError('title is required.', 400);
+    let repositoryId = body.repositoryId;
+    if (repositoryId == null && body.owner && body.repo) {
+      const row = await getDb(c.env).select({ id: repositories.id }).from(repositories)
+        .where(and(eq(repositories.owner, body.owner), eq(repositories.repo, body.repo))).get();
+      if (!row) return jsonError('Unknown repository.', 400);
+      repositoryId = row.id;
     }
+    if (typeof repositoryId !== 'number') return jsonError('repositoryId or {owner, repo} is required.', 400);
     try {
       const pkg = await createPackage(c.env, {
-        repositoryId: body.repositoryId,
+        repositoryId,
         title: body.title,
         slug: body.slug ? slugifyPackage(body.slug) : slugifyPackage(body.title),
         requestPromptJson: body.requestPromptJson ?? null,
@@ -124,10 +142,10 @@ export function createPlanningPackagesRouter() {
   app.get('/:id', async (c) => {
     const pkg = await getPackage(c.env, c.req.param('id'));
     if (!pkg) return jsonError('Planning package not found.', 404);
-    const [revisions, tasks] = await Promise.all([
-      listRevisions(c.env, pkg.id), listPackageTasks(c.env, pkg.id),
+    const [revisions, tasks, labels] = await Promise.all([
+      listRevisions(c.env, pkg.id), listPackageTasks(c.env, pkg.id), repoLabels(c.env, [pkg.repository_id]),
     ]);
-    return c.json({ package: pkg, revisions, tasks });
+    return c.json({ package: { ...pkg, repository: labels.get(pkg.repository_id) ?? null }, revisions, tasks });
   });
 
   // Autosave / status transitions.
