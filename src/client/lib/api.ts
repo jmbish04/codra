@@ -41,6 +41,19 @@ export interface WatcherAgentsResponse {
   alive: boolean;
 }
 
+export interface OrchestrationSummaryResponse {
+  summary: {
+    total: number; active: number; needsAttention: number; accepted: number;
+    counts: Record<string, number>;
+    health: { mode: string; watcher: { state: string; lastSeenAt: string | null; activeSessions: number; hostname: string | null } };
+  };
+}
+
+export interface FleetJobDto {
+  job_id: string; repository_id: number; kind: string; status: string; error: string | null; created_at: string;
+}
+export interface FleetJobsResponse { jobs: FleetJobDto[] }
+
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 function pathSegment(value: string) {
@@ -265,6 +278,16 @@ export const api = {
   },
   getWatcherAgents() {
     return request<WatcherAgentsResponse>('/api/planning-packages/orchestration/agents');
+  },
+  getOrchestrationSummary() {
+    return request<OrchestrationSummaryResponse>('/api/planning-packages/orchestration/summary');
+  },
+  getFleetJobs(params: { repositoryId?: number; status?: string } = {}) {
+    const sp = new URLSearchParams();
+    if (params.repositoryId != null) sp.set('repositoryId', String(params.repositoryId));
+    if (params.status) sp.set('status', params.status);
+    const q = sp.toString();
+    return request<FleetJobsResponse>(`/api/planning-packages/orchestration/fleet/jobs${q ? `?${q}` : ''}`);
   },
   getStandardizationRules() {
     return request<StandardizationRulesResponse>('/api/standardization');

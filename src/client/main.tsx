@@ -45,6 +45,7 @@ const CommandsPage = safeLazy(() => import('./pages/commands').then(m => ({ defa
 const JulesIntegrationPage = safeLazy(() => import('./pages/jules-integration').then(m => ({ default: m.JulesIntegrationPage })));
 const JulesOperationsPage = safeLazy(() => import('./pages/jules-operations').then(m => ({ default: m.JulesOperationsPage })));
 const JulesMonitorPage = safeLazy(() => import('./pages/jules-monitor').then(m => ({ default: m.JulesMonitorPage })));
+const JulesWorkflowPage = safeLazy(() => import('./pages/jules-workflow').then(m => ({ default: m.JulesWorkflowPage })));
 const JulesSessionDetailPage = safeLazy(() => import('./pages/jules-session-detail').then(m => ({ default: m.JulesSessionDetailPage })));
 const NotFoundPage = safeLazy(() => import('./pages/not-found').then(m => ({ default: m.NotFoundPage })));
 
@@ -153,6 +154,7 @@ const router = createBrowserRouter([
       { path: 'jules', element: withSuspense(JulesIntegrationPage) },
       { path: 'jules/operations', element: withSuspense(JulesOperationsPage) },
       { path: 'jules/monitor', element: withSuspense(JulesMonitorPage) },
+      { path: 'jules/workflow', element: withSuspense(JulesWorkflowPage) },
       { path: 'jules/monitor/:taskId', element: withSuspense(JulesSessionDetailPage) },
     ],
   },
