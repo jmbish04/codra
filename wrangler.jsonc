@@ -119,6 +119,7 @@
 			"/settings*",
 			"/best-practices*",
 			"/jules*",
+			"/planning*",
 			"/.well-known/*",
 			"/oauth/*",
 			"/mcp*"

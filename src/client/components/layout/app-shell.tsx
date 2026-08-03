@@ -29,6 +29,7 @@ import {
   ListChecks,
   RadioTower,
   Workflow,
+  FileText,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
 import { useTheme } from '@client/lib/theme';
@@ -59,6 +60,7 @@ const links = [
   { to: '/jules/operations', label: 'Jules Ops', icon: ListChecks, end: false },
   { to: '/jules/monitor', label: 'Jules Monitor', icon: RadioTower, end: false },
   { to: '/jules/workflow', label: 'Jules Workflow', icon: Workflow, end: false },
+  { to: '/planning', label: 'Planning', icon: FileText, end: false },
   { to: '/setup', label: 'Setup Guide', icon: BookOpen, end: false },
   { to: '/commands', label: 'Commands', icon: Terminal, end: false },
   { to: '/settings', label: 'Settings', icon: Settings, end: false },
