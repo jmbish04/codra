@@ -118,6 +118,8 @@
 			"/reviews/*",
 			"/settings*",
 			"/best-practices*",
+			"/jules*",
+			"/planning*",
 			"/.well-known/*",
 			"/oauth/*",
 			"/mcp*"
@@ -248,6 +250,12 @@
 			"database_name": "codra",
 			"database_id": "f8ff86ca-a45e-428f-b5b2-80c8e427e924",
 			"migrations_dir": "./db/migrations/d1",
+		},
+	],
+	"r2_buckets": [
+		{
+			"binding": "PLANNING_ARTIFACTS",
+			"bucket_name": "codra-planning-artifacts",
 		},
 	],
 	"kv_namespaces": [

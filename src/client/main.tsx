@@ -44,6 +44,12 @@ const SetupGuidePage = safeLazy(() => import('./pages/setup-guide').then(m => ({
 const CommandsPage = safeLazy(() => import('./pages/commands').then(m => ({ default: m.CommandsPage })));
 const JulesIntegrationPage = safeLazy(() => import('./pages/jules-integration').then(m => ({ default: m.JulesIntegrationPage })));
 const JulesOperationsPage = safeLazy(() => import('./pages/jules-operations').then(m => ({ default: m.JulesOperationsPage })));
+const JulesMonitorPage = safeLazy(() => import('./pages/jules-monitor').then(m => ({ default: m.JulesMonitorPage })));
+const JulesWorkflowPage = safeLazy(() => import('./pages/jules-workflow').then(m => ({ default: m.JulesWorkflowPage })));
+const PlanningListPage = safeLazy(() => import('./pages/planning-list').then(m => ({ default: m.PlanningListPage })));
+const PlanningNewPage = safeLazy(() => import('./pages/planning-new').then(m => ({ default: m.PlanningNewPage })));
+const PlanningDetailPage = safeLazy(() => import('./pages/planning-detail').then(m => ({ default: m.PlanningDetailPage })));
+const JulesSessionDetailPage = safeLazy(() => import('./pages/jules-session-detail').then(m => ({ default: m.JulesSessionDetailPage })));
 const NotFoundPage = safeLazy(() => import('./pages/not-found').then(m => ({ default: m.NotFoundPage })));
 
 import './app.css';
@@ -150,6 +156,12 @@ const router = createBrowserRouter([
       { path: 'commands', element: withSuspense(CommandsPage) },
       { path: 'jules', element: withSuspense(JulesIntegrationPage) },
       { path: 'jules/operations', element: withSuspense(JulesOperationsPage) },
+      { path: 'jules/monitor', element: withSuspense(JulesMonitorPage) },
+      { path: 'jules/workflow', element: withSuspense(JulesWorkflowPage) },
+      { path: 'planning', element: withSuspense(PlanningListPage) },
+      { path: 'planning/new', element: withSuspense(PlanningNewPage) },
+      { path: 'planning/:id', element: withSuspense(PlanningDetailPage) },
+      { path: 'jules/monitor/:taskId', element: withSuspense(JulesSessionDetailPage) },
     ],
   },
   {
