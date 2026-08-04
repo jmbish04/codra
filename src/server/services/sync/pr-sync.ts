@@ -7,12 +7,14 @@ import { insertJob, supersedeOlderJobs, findAnyJobForHead, getMaxSeenPrNumber } 
 import { logger } from '@server/core/logger';
 
 /**
- * PRs opened before this date are never pulled by a sync — a floor that stops
- * years-old open PRs from being reviewed on a repo codra hasn't seen before.
- * For repos codra HAS reviewed, the per-repo PR-number watermark is the tighter
- * gate. ponytail: a constant is enough; make it a config row if it needs tuning.
+ * A sync never pulls a PR opened more than this many days ago. A rolling
+ * window (relative to now), NOT an absolute date — an absolute floor silently
+ * widens its own lookback as time passes, which once let a manual sync review
+ * every open PR back ~2 weeks across freshly-enabled repos. Hard cap: codra
+ * reviews recent PRs, never does a retroactive all-history sweep.
+ * ponytail: a constant is enough; make it a config row if it needs tuning.
  */
-const SYNC_MIN_PR_CREATED_AT = '2026-07-23T00:00:00Z';
+const SYNC_MAX_PR_AGE_DAYS = 2;
 
 export type RepoSyncStat = {
   owner: string;
@@ -65,6 +67,9 @@ export async function syncOpenPullRequests(
     )
     .all();
 
+  // Rolling age floor, computed once per sync. PRs created before this are skipped.
+  const minCreatedAt = new Date(Date.now() - SYNC_MAX_PR_AGE_DAYS * 86_400_000).toISOString();
+
   const summary: PrSyncSummary = { repos: [], totalEnqueued: 0 };
   await emit({ type: 'start', repoCount: rows.length, message: `Scanning ${rows.length} enabled repo(s) for open pull requests…` });
 
@@ -92,8 +97,8 @@ export async function syncOpenPullRequests(
 
       for (const pr of prs) {
         try {
-          // Too old (repos codra hasn't seen) — before the floor.
-          if (pr.createdAt < SYNC_MIN_PR_CREATED_AT) {
+          // Older than the rolling age cap — never reviewed by a sync.
+          if (pr.createdAt < minCreatedAt) {
             stat.skipped++;
             continue;
           }
