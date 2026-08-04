@@ -2,6 +2,7 @@ import { logger } from '@server/core/logger';
 import { getSecretStoreBinding } from '@server/utils/secrets';
 import { listStagedJulesSessions, markJulesLaunched, markJulesOutcome } from '@server/db/jules-sessions';
 import { isRepoConnected as realIsRepoConnected, startJulesSession as realStartJulesSession } from '@server/services/jules';
+import { logLaunch } from '@server/services/jules-interactions';
 
 type Deps = { isRepoConnected: typeof realIsRepoConnected; startJulesSession: typeof realStartJulesSession };
 const DEFAULT_DEPS: Deps = { isRepoConnected: realIsRepoConnected, startJulesSession: realStartJulesSession };
@@ -55,6 +56,7 @@ export async function launchStagedJulesSessions(
       try {
         const s = await deps.startJulesSession(apiKey, { owner: ctx.owner, repo: ctx.repo, branch, prompt: row.prompt, title: 'Codra: documentation improvements' });
         await markJulesLaunched(env, row.id, { sessionId: s.id, sessionUrl: s.url, sessionState: s.state });
+        await logLaunch(env, { sessionId: s.id, repository: `${ctx.owner}/${ctx.repo}`, prNumber: ctx.prNumber, text: row.prompt }).catch(() => {});
         launched++;
         const body = `✅ **Jules session opened** to address the documentation gaps.\n\n- Session: ${s.url}\n- ID: \`${s.id}\``;
         if (row.pr_comment_id != null) await github.updateIssueComment(ctx.owner, ctx.repo, row.pr_comment_id, body).catch(() => {});

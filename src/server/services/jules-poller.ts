@@ -9,8 +9,9 @@ import {
   createOrchestrationTask, getTaskByToken, listActiveTasks, updateTaskStatus,
   incrementTaskIteration, logTaskEvent, ACTIVE_STATUSES, type OrchestrationTaskRow,
 } from '@server/db/jules-orchestration';
-import { startJulesPlanSession, getJulesSnapshot, sendJulesMessage } from '@server/services/jules';
+import { startJulesPlanSession, getJulesSnapshot } from '@server/services/jules';
 import { upsertActivities } from '@server/db/jules-activities';
+import { sendJulesLogged } from '@server/services/jules-interactions';
 import { searchCloudflareDocs } from '@server/services/cloudflare-docs';
 import { getSecretStoreBinding } from '@server/utils/secrets';
 import { logger } from '@server/core/logger';
@@ -151,7 +152,7 @@ async function advanceTask(
     case 'improve': {
       await incrementTaskIteration(env, task.task_id);
       const docs = await docsForJules(`${pkg.title} ${action.feedback}`.slice(0, 300));
-      await sendJulesMessage(apiKey, task.session_id, buildImprovePrompt(action.feedback) + docs);
+      await sendJulesLogged(env, apiKey, { sessionId: task.session_id, kind: 'improve', text: buildImprovePrompt(action.feedback) + docs });
       await updateTaskStatus(env, task.task_id, { status: 'plan_review' });
       await logTaskEvent(env, task.task_id, 'IMPROVE_REQUESTED', { feedback: action.feedback });
       return;
@@ -160,8 +161,8 @@ async function advanceTask(
       await incrementTaskIteration(env, task.task_id);
       const question = message ?? pkg.title;
       const docs = await docsForJules(question.slice(0, 300));
-      await sendJulesMessage(apiKey, task.session_id,
-        `Here is documentation to unblock you.${docs}\n\nContinue with the plan and emit the planningPackage JSON block.`);
+      await sendJulesLogged(env, apiKey, { sessionId: task.session_id, kind: 'answer',
+        text: `Here is documentation to unblock you.${docs}\n\nContinue with the plan and emit the planningPackage JSON block.` });
       await updateTaskStatus(env, task.task_id, { status: 'executing' });
       await logTaskEvent(env, task.task_id, 'CLARIFIED', { question: question.slice(0, 200) });
       return;
