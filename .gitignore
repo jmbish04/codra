@@ -152,3 +152,6 @@ scripts/ops/gotchas.sql
 
 # Stray embedded scratch checkout — not a submodule
 scratch_repo/
+
+# impeccable design-hook cache (generated)
+.impeccable/

@@ -747,13 +747,36 @@ export async function findActiveJobsForPr(
 /** Cancel a job (terminal 'superseded' status) with a reason — used when a PR closes. */
 export async function cancelJob(env: Pick<Env, 'DB'>, jobId: string, reason: string) {
   const db = getDb(env);
-  await db.update(jobs).set({
+  // Only queued/running jobs are cancellable; a terminal job stays as-is. The
+  // returned rows tell the caller whether anything actually changed.
+  const rows = await db.update(jobs).set({
     status: 'superseded',
     finished_at: sql`CURRENT_TIMESTAMP`,
     lease_owner: null,
     lease_expires_at: null,
     error_msg: reason,
-  }).where(eq(jobs.id, jobId));
+  }).where(and(eq(jobs.id, jobId), inArray(jobs.status, ['queued', 'running'])))
+    .returning({ id: jobs.id });
+  return rows.length > 0;
+}
+
+/**
+ * Cancel every waiting job in one shot — the dashboard "clear queue" button.
+ * Targets only 'queued' (not the at-most-one 'running' job): superseding a
+ * queued job makes its pending REVIEW_QUEUE message a no-op on dequeue, since
+ * claimJobLease admits only queued/running and acks anything terminal. Returns
+ * the cancelled ids so the caller can broadcast a feed refresh.
+ */
+export async function cancelQueuedJobs(env: Pick<Env, 'DB'>, reason: string): Promise<string[]> {
+  const db = getDb(env);
+  const rows = await db.update(jobs).set({
+    status: 'superseded',
+    finished_at: sql`CURRENT_TIMESTAMP`,
+    lease_owner: null,
+    lease_expires_at: null,
+    error_msg: reason,
+  }).where(eq(jobs.status, 'queued')).returning({ id: jobs.id });
+  return rows.map((r) => r.id);
 }
 
 /**

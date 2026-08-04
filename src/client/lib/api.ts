@@ -395,6 +395,12 @@ export const api = {
       method: 'POST',
     });
   },
+  cancelJob(id: string) {
+    return request<{ ok: true }>(`/api/jobs/${id}/cancel`, { method: 'POST' });
+  },
+  cancelQueuedJobs() {
+    return request<{ cancelledCount: number }>('/api/jobs/cancel-queued', { method: 'POST' });
+  },
   getRepos() {
     return request<RepoConfigsResponse>('/api/repos');
   },
