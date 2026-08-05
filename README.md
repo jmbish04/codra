@@ -91,7 +91,6 @@ The internal documentation suite lives in the `docs/` directory. It includes arc
 For full setup and operations guides, visit [codra.run/docs](https://codra.run/docs).
 - [Installation guide](https://codra.run/docs/installation)
 - [Configuration guide](https://codra.run/docs/configuration)
-- [Deploy with Neon](https://codra.run/docs/neon)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 
