@@ -27,6 +27,9 @@ import {
   FileSearch,
   Bot,
   ListChecks,
+  RadioTower,
+  Workflow,
+  FileText,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
 import { useTheme } from '@client/lib/theme';
@@ -55,6 +58,9 @@ const links = [
   { to: '/actions', label: 'Codra Actions', icon: History, end: false },
   { to: '/jules', label: 'Jules', icon: Bot, end: true },
   { to: '/jules/operations', label: 'Jules Ops', icon: ListChecks, end: false },
+  { to: '/jules/monitor', label: 'Jules Monitor', icon: RadioTower, end: false },
+  { to: '/jules/workflow', label: 'Jules Workflow', icon: Workflow, end: false },
+  { to: '/planning', label: 'Planning', icon: FileText, end: false },
   { to: '/setup', label: 'Setup Guide', icon: BookOpen, end: false },
   { to: '/commands', label: 'Commands', icon: Terminal, end: false },
   { to: '/settings', label: 'Settings', icon: Settings, end: false },
@@ -71,6 +77,9 @@ const collapsedTooltipClass = [
   'lg:group-focus-visible:opacity-100 lg:group-focus-visible:translate-x-0',
 ];
 
+/**
+ * getStoredSidebarCollapsed
+ */
 function getStoredSidebarCollapsed(): boolean {
   if (typeof window === 'undefined') return false;
   try {
@@ -80,11 +89,17 @@ function getStoredSidebarCollapsed(): boolean {
   }
 }
 
+/**
+ * getIsDesktop
+ */
 function getIsDesktop(): boolean {
   if (typeof window === 'undefined') return false;
   return window.matchMedia('(min-width: 1024px)').matches;
 }
 
+/**
+ * AppShell
+ */
 export function AppShell() {
   const { theme, toggleTheme } = useTheme();
   const [sessionUser, setSessionUser] = useState<AuthSessionUser | null>(null);
@@ -128,6 +143,9 @@ export function AppShell() {
         .then((d: any) => { if (!cancelled) setPendingBpCount(Number(d?.count ?? 0)); })
         .catch(() => {});
     };
+    /**
+     * load
+     */
     load();
     const id = setInterval(load, 30000);
     window.addEventListener('bp-pending-changed', load);
@@ -137,6 +155,9 @@ export function AppShell() {
   useEffect(() => {
     const query = window.matchMedia('(min-width: 1024px)');
     const updateIsDesktop = () => setIsDesktop(query.matches);
+    /**
+     * updateIsDesktop
+     */
     updateIsDesktop();
     query.addEventListener('change', updateIsDesktop);
     return () => query.removeEventListener('change', updateIsDesktop);

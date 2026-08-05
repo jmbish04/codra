@@ -22,16 +22,25 @@ import { createStandardizationRouter } from '@server/routes/api/standardization'
 import { createDocsReviewRouter } from '@server/routes/api/docs-review';
 import { createActionsRouter } from '@server/routes/api/actions';
 import { createJulesSessionsRouter } from '@server/routes/api/jules-sessions';
+import { createPlanningPackagesRouter } from '@server/routes/api/planning-packages';
+import { createPublicPlanningRouter } from '@server/routes/public-planning';
+import { createAgentRouter } from '@server/routes/api/agent';
 import { createSecretBindingsRouter } from '@server/routes/api/secret-bindings';
 import { createTestConfigRouter } from '@server/routes/api/test-config';
 import { createMcpOAuthRouter } from '@server/routes/api/mcp-oauth';
 import { GitHubLikeMCP } from '@server/agents/orchestrator';
 import { getSecretStoreBinding } from '@server/utils/secrets';
 
+/**
+ * serveIndex
+ */
 async function serveIndex(c: Context<AppEnv>) {
   return c.env.ASSETS.fetch(new URL('/index.html', c.req.url));
 }
 
+/**
+ * verifyMcpAuth
+ */
 async function verifyMcpAuth(c: Context<AppEnv>, next: any) {
   const authHeader = c.req.header('Authorization');
   
@@ -62,6 +71,9 @@ async function verifyMcpAuth(c: Context<AppEnv>, next: any) {
   });
 }
 
+/**
+ * createApp
+ */
 export function createApp() {
   const app = new Hono<AppEnv>();
 
@@ -73,6 +85,11 @@ export function createApp() {
   app.route('/webhook', createWebhookRouter());
   // Public read-only review-suggestions feed (before the /api/* session guard).
   app.route('/reviews', createReviewsRouter());
+  // Public, capability-gated (unguessable uuid) read-only planning-package export.
+  // Mounted before the /api/* session guard so Jules can pull revisions via curl.
+  app.route('/api/public/planning-packages', createPublicPlanningRouter());
+  // Machine-to-machine watcher-daemon endpoints (WORKER_API_KEY guarded, headless).
+  app.route('/api/agent', createAgentRouter());
 
   // RFC 9728: Protected Resource Metadata — Claude probes this first
   app.get('/.well-known/oauth-protected-resource', (c) => {
@@ -130,6 +147,7 @@ export function createApp() {
   app.route('/api/standardization', createStandardizationRouter());
   app.route('/api/actions', createActionsRouter());
   app.route('/api/jules-sessions', createJulesSessionsRouter());
+  app.route('/api/planning-packages', createPlanningPackagesRouter());
   app.route('/api/secret-bindings', createSecretBindingsRouter());
   app.route('/api/test-config', createTestConfigRouter());
   app.route('/api/docs-review-rules', createDocsReviewRouter());
@@ -158,6 +176,10 @@ export function createApp() {
   app.get('/stats', requireSession, serveIndex);
   app.get('/health', requireSession, serveIndex);
   app.get('/best-practices', requireSession, serveIndex);
+  app.get('/jules', requireSession, serveIndex);
+  app.get('/jules/*', requireSession, serveIndex);
+  app.get('/planning', requireSession, serveIndex);
+  app.get('/planning/*', requireSession, serveIndex);
   app.get('/settings', requireSession, serveIndex);
   app.get('/settings/*', requireSession, serveIndex);
 

@@ -3,6 +3,7 @@ import { api } from '@client/lib/api';
 import { Badge, type BadgeProps } from '@client/components/ui/badge';
 import { Alert } from '@client/components/ui/alert';
 import { PageHeader } from '@client/components/layout/page-header';
+import { WatcherStatusCard } from '@client/components/features/planning/watcher-status-card';
 import { EmptyState } from '@client/components/shared/empty-state';
 import { CopyButton } from '@client/components/ui/copy-button';
 import { formatDateTime } from '@client/lib/format';
@@ -12,6 +13,9 @@ import type { JulesSessionDto, JulesSessionLiveDto } from '@shared/api';
 const LIVE_POLL_MS = 15000;
 const TERMINAL_LIVE_STATES = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
+/**
+ * stateTone
+ */
 function stateTone(state: JulesSessionDto['state']): NonNullable<BadgeProps['variant']> {
   switch (state) {
     case 'launched': return 'success';
@@ -22,6 +26,9 @@ function stateTone(state: JulesSessionDto['state']): NonNullable<BadgeProps['var
   }
 }
 
+/**
+ * liveTone
+ */
 function liveTone(sessionState: string | null): NonNullable<BadgeProps['variant']> {
   const s = (sessionState ?? '').toUpperCase();
   if (s === 'COMPLETED') return 'success';
@@ -30,15 +37,24 @@ function liveTone(sessionState: string | null): NonNullable<BadgeProps['variant'
   return 'info'; // QUEUED / PLANNING / IN_PROGRESS / AWAITING_*
 }
 
+/**
+ * prettyLiveState
+ */
 function prettyLiveState(sessionState: string | null): string {
   if (!sessionState) return 'unknown';
   return sessionState.replace(/_/g, ' ').toLowerCase();
 }
 
+/**
+ * isNonTerminal
+ */
 function isNonTerminal(live: JulesSessionLiveDto): boolean {
   return live.live && !TERMINAL_LIVE_STATES.has((live.sessionState ?? '').toUpperCase());
 }
 
+/**
+ * JulesOperationsPage
+ */
 export function JulesOperationsPage() {
   const [sessions, setSessions] = useState<JulesSessionDto[]>([]);
   const [live, setLive] = useState<Record<string, JulesSessionLiveDto>>({});
@@ -103,6 +119,8 @@ export function JulesOperationsPage() {
         title="Jules operations"
         description="Every Jules session codra has staged or launched, including the full prompt sent — the complete record of what was sent to Jules."
       />
+
+      <WatcherStatusCard />
 
       {error && <Alert variant="destructive">{error}</Alert>}
 

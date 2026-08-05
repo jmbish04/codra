@@ -12,6 +12,9 @@ import { getWorkerApiKey } from '@server/utils/secrets';
 import { notifyJobsChanged } from '@server/core/jobs-feed';
 import { GitHubClient } from '@server/core/github';
 
+/**
+ * handleGitHubWebhook
+ */
 export async function handleGitHubWebhook(c: Context<AppEnv>) {
     const eventName = c.req.header('x-github-event');
     const deliveryId = c.req.header('x-github-delivery');
@@ -41,6 +44,9 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
     // Finalize the delivery's outcome and return the response. Only the first
     // sighting of a delivery id (inserted === true) writes an outcome, so a
     // duplicate retry never clobbers the original delivery's recorded result.
+    /**
+     * finish
+     */
     const finish = async (
       status: 200 | 202 | 401 | 500,
       body: Record<string, unknown>,
@@ -136,6 +142,13 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
       // queued or running for it, with a comment linking the cancelled job.
       if (eventName === 'pull_request') {
         const prPayload = payload as import('@shared/github').PullRequestWebhookPayload;
+        // Fast-path: link a PR event to a Jules orchestration task by its recorded url
+        // (canonical GitHub html_url, matching what the poller stores from the snapshot).
+        const prUrl = `https://github.com/${payload.repository.owner.login}/${payload.repository.name}/pull/${prPayload.pull_request.number}`;
+        {
+          const { markPrReadyByUrl } = await import('@server/db/jules-orchestration');
+          c.executionCtx.waitUntil(markPrReadyByUrl(c.env, prUrl).catch(() => false));
+        }
         if (prPayload.action === 'closed') {
           const prNumber = prPayload.pull_request.number;
           const merged = prPayload.pull_request.merged === true;
@@ -286,6 +299,9 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
     }
 }
 
+/**
+ * createWebhookRouter
+ */
 export function createWebhookRouter() {
   const app = new Hono<AppEnv>();
 

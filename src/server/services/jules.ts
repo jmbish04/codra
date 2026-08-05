@@ -77,3 +77,76 @@ export async function getJulesSession(
 ): Promise<JulesSessionStatus> {
   return toStatus(await client.session(sessionId).info());
 }
+
+/**
+ * Start a Jules PLANNING session (no PR): create the session, then ask it to
+ * produce the plan and return the agent's reply text plus the session id. Used
+ * by PlanAgent to generate a proposed revision.
+ */
+export async function askJulesForPlan(
+  apiKey: string,
+  opts: { owner: string; repo: string; branch: string; kickoff: string; planPrompt: string; title?: string },
+  client: JulesClient = createJulesClient(apiKey),
+): Promise<{ sessionId: string; message: string }> {
+  const session = await client.session({
+    prompt: opts.kickoff,
+    title: opts.title,
+    source: { github: `${opts.owner}/${opts.repo}`, baseBranch: opts.branch },
+    requireApproval: false,
+    autoPr: false,
+  });
+  const reply = await session.ask(opts.planPrompt);
+  const info = await session.info();
+  return { sessionId: info.id, message: reply.message };
+}
+
+/** Send a follow-up message to an existing session and return the agent's reply. */
+export async function askJulesSession(
+  apiKey: string, sessionId: string, prompt: string, client: JulesClient = createJulesClient(apiKey),
+): Promise<string> {
+  const reply = await client.session(sessionId).ask(prompt);
+  return reply.message;
+}
+
+/**
+ * Create a plan-only Jules session (no PR) and return its id. Non-blocking: this
+ * just registers the session + prompt; the plan arrives asynchronously and is
+ * read later by the cron poller via {@link getJulesSnapshot}.
+ */
+export async function startJulesPlanSession(
+  apiKey: string,
+  opts: { owner: string; repo: string; branch: string; prompt: string; title?: string },
+  client: JulesClient = createJulesClient(apiKey),
+): Promise<string> {
+  const session = await client.session({
+    prompt: opts.prompt,
+    title: opts.title,
+    source: { github: `${opts.owner}/${opts.repo}`, baseBranch: opts.branch },
+    requireApproval: false,
+    autoPr: false,
+  });
+  return (await session.info()).id;
+}
+
+// Activities are kept raw (the SDK flattens each union's `type` to top-level);
+// consumers read `type`/`message` for decisions and the full shape for caching.
+export type JulesSnapshot = { state: string; activities: Array<Record<string, any>>; prUrl: string | null };
+
+/** One bounded read of a session's current state, activities, and PR (if any). */
+export async function getJulesSnapshot(
+  apiKey: string, sessionId: string, client: JulesClient = createJulesClient(apiKey),
+): Promise<JulesSnapshot> {
+  const snap = await client.session(sessionId).snapshot({ activities: true });
+  return {
+    state: snap.state,
+    activities: (snap.activities ?? []) as unknown as Array<Record<string, any>>,
+    prUrl: snap.pr?.url ?? null,
+  };
+}
+
+/** Fire-and-forget message to a session (non-blocking — never awaits a reply). */
+export async function sendJulesMessage(
+  apiKey: string, sessionId: string, text: string, client: JulesClient = createJulesClient(apiKey),
+): Promise<void> {
+  await client.session(sessionId).send(text);
+}

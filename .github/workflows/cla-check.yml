@@ -28,6 +28,7 @@ jobs:
             if (!author) throw new Error('Missing PR author.');
             if (!secret) {
               console.log('Skipping CLA check: secret missing.');
+              console.log('Skipping CLA check: Missing CLA_CHECK_SECRET.');
               process.exit(0);
             }
 

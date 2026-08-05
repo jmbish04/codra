@@ -1,6 +1,6 @@
 import { getDb } from './client';
 import { julesSessions } from './schemas';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull, isNotNull } from 'drizzle-orm';
 
 export type JulesSessionState = 'staged' | 'launched' | 'skipped' | 'error';
 export type JulesSessionRow = typeof julesSessions.$inferSelect;
@@ -109,6 +109,16 @@ export async function updateJulesLiveState(
     ...(v.sessionUrl ? { session_url: v.sessionUrl } : {}),
     updated_at: new Date().toISOString(),
   }).where(eq(julesSessions.id, id));
+}
+
+/** Launched sessions whose opened PR hasn't been captured yet (for the cron capture). */
+export async function listLaunchedSessionsWithoutPr(
+  env: Pick<Env, 'DB'>, limit = 10,
+): Promise<JulesSessionRow[]> {
+  const db = getDb(env);
+  return db.select().from(julesSessions)
+    .where(and(eq(julesSessions.state, 'launched'), isNotNull(julesSessions.session_id), isNull(julesSessions.created_pr_number)))
+    .limit(limit).all();
 }
 
 export async function listJulesSessions(

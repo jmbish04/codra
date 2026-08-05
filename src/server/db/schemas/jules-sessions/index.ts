@@ -23,4 +23,8 @@ export const julesSessions = sqliteTable('jules_sessions', {
   session_state: text('session_state'),
   error_msg: text('error_msg'),
   pr_comment_id: integer('pr_comment_id'),
+  // The PR this session opened (captured after launch) — links a reviewed PR
+  // back to its Jules session so codra can direct corrections to it.
+  created_pr_number: integer('created_pr_number'),
+  created_pr_url: text('created_pr_url'),
 });
