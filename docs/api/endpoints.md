@@ -1,6 +1,6 @@
 # API Endpoints
 
-[Return to Index](../README.md)
+[Return to Parent Directory](../api.md)
 
 Codra provides a RESTful API powered by Hono on Cloudflare Workers.
 
