@@ -12,6 +12,9 @@ import { getWorkerApiKey } from '@server/utils/secrets';
 import { notifyJobsChanged } from '@server/core/jobs-feed';
 import { GitHubClient } from '@server/core/github';
 
+/**
+ * handleGitHubWebhook
+ */
 export async function handleGitHubWebhook(c: Context<AppEnv>) {
     const eventName = c.req.header('x-github-event');
     const deliveryId = c.req.header('x-github-delivery');
@@ -41,6 +44,9 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
     // Finalize the delivery's outcome and return the response. Only the first
     // sighting of a delivery id (inserted === true) writes an outcome, so a
     // duplicate retry never clobbers the original delivery's recorded result.
+    /**
+     * finish
+     */
     const finish = async (
       status: 200 | 202 | 401 | 500,
       body: Record<string, unknown>,
@@ -293,6 +299,9 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
     }
 }
 
+/**
+ * createWebhookRouter
+ */
 export function createWebhookRouter() {
   const app = new Hono<AppEnv>();
 

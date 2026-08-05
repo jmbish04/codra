@@ -10,6 +10,9 @@ interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
   versionBadge?: string;
 }
 
+/**
+ * PageHeader
+ */
 export function PageHeader({ 
   category, 
   title, 

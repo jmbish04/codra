@@ -10,12 +10,18 @@ export interface WatcherConfig {
 
 import { getSecret, getWorkerApiKey } from './secrets.js';
 
+/**
+ * req
+ */
 function req(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`Missing required env var ${name}`);
   return v;
 }
 
+/**
+ * loadConfig
+ */
 export function loadConfig(): WatcherConfig {
   // Secrets come from the local `tokens` CLI (secret store), not env/disk.
   // WORKER_URL / AGENT_ID / intervals are plain config from env.

@@ -9,9 +9,15 @@ const ACTIVE_STATUSES = new Set<JulesMonitorStatus>([
   'executing',
 ]);
 
+/**
+ * isActiveJulesStatus
+ */
 export function isActiveJulesStatus(status: JulesMonitorStatus): boolean {
   return ACTIVE_STATUSES.has(status);
 }
+/**
+ * monitorStatusLabel
+ */
 export function monitorStatusLabel(status: JulesMonitorStatus): string {
   const labels: Record<JulesMonitorStatus, string> = {
     pending: 'Pending',
@@ -27,6 +33,9 @@ export function monitorStatusLabel(status: JulesMonitorStatus): string {
   return labels[status];
 }
 
+/**
+ * monitorStatusTone
+ */
 function monitorStatusTone(status: JulesMonitorStatus): NonNullable<BadgeProps['variant']> {
   if (status === 'accepted') return 'success';
   if (status === 'pr_ready') return 'default';
@@ -36,6 +45,9 @@ function monitorStatusTone(status: JulesMonitorStatus): NonNullable<BadgeProps['
   return 'info';
 }
 
+/**
+ * JulesStatusBadge
+ */
 export function JulesStatusBadge({ status }: { status: JulesMonitorStatus }) {
   return (
     <Badge variant={monitorStatusTone(status)}>
@@ -47,6 +59,9 @@ export function JulesStatusBadge({ status }: { status: JulesMonitorStatus }) {
   );
 }
 
+/**
+ * activityLabel
+ */
 export function activityLabel(type: JulesActivityType): string {
   const labels: Record<string, string> = {
     userMessaged: 'User message',

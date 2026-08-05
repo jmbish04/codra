@@ -13,6 +13,9 @@ import type { JulesSessionDto, JulesSessionLiveDto } from '@shared/api';
 const LIVE_POLL_MS = 15000;
 const TERMINAL_LIVE_STATES = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
+/**
+ * stateTone
+ */
 function stateTone(state: JulesSessionDto['state']): NonNullable<BadgeProps['variant']> {
   switch (state) {
     case 'launched': return 'success';
@@ -23,6 +26,9 @@ function stateTone(state: JulesSessionDto['state']): NonNullable<BadgeProps['var
   }
 }
 
+/**
+ * liveTone
+ */
 function liveTone(sessionState: string | null): NonNullable<BadgeProps['variant']> {
   const s = (sessionState ?? '').toUpperCase();
   if (s === 'COMPLETED') return 'success';
@@ -31,15 +37,24 @@ function liveTone(sessionState: string | null): NonNullable<BadgeProps['variant'
   return 'info'; // QUEUED / PLANNING / IN_PROGRESS / AWAITING_*
 }
 
+/**
+ * prettyLiveState
+ */
 function prettyLiveState(sessionState: string | null): string {
   if (!sessionState) return 'unknown';
   return sessionState.replace(/_/g, ' ').toLowerCase();
 }
 
+/**
+ * isNonTerminal
+ */
 function isNonTerminal(live: JulesSessionLiveDto): boolean {
   return live.live && !TERMINAL_LIVE_STATES.has((live.sessionState ?? '').toUpperCase());
 }
 
+/**
+ * JulesOperationsPage
+ */
 export function JulesOperationsPage() {
   const [sessions, setSessions] = useState<JulesSessionDto[]>([]);
   const [live, setLive] = useState<Record<string, JulesSessionLiveDto>>({});

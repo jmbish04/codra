@@ -2,6 +2,9 @@ import { getDb } from './client';
 import { reconciliationReviews } from './schemas';
 import { desc, eq, sql } from 'drizzle-orm';
 
+/**
+ * countReviewAttempts
+ */
 export async function countReviewAttempts(env: Pick<Env, 'DB'>, reconciliationKey: string): Promise<number> {
   const db = getDb(env);
   const rows = await db.select({ n: sql<number>`count(*)` }).from(reconciliationReviews)
@@ -9,6 +12,9 @@ export async function countReviewAttempts(env: Pick<Env, 'DB'>, reconciliationKe
   return rows[0]?.n ?? 0;
 }
 
+/**
+ * recordReview
+ */
 export async function recordReview(
   env: Pick<Env, 'DB'>,
   input: { repositoryId: number; reconciliationKey: string; attempt: number; prNumber?: number | null; verdict: 'approved' | 'rejected'; feedback?: string | null; summary?: string | null },
@@ -20,6 +26,9 @@ export async function recordReview(
   });
 }
 
+/**
+ * listReviews
+ */
 export async function listReviews(env: Pick<Env, 'DB'>, reconciliationKey: string) {
   const db = getDb(env);
   return db.select().from(reconciliationReviews)

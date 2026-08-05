@@ -147,6 +147,9 @@ declare class DOMException extends Error {
     set stack(value: any);
 }
 type WorkerGlobalScopeEventMap = {
+    /**
+     * fetch
+     */
     fetch: FetchEvent;
     scheduled: ScheduledEvent;
     queue: QueueEvent;
@@ -340,7 +343,13 @@ declare namespace WebAssembly {
         grow(delta: number, value?: any): number;
         set(index: number, value?: any): void;
     }
+    /**
+     * instantiate
+     */
     function instantiate(module: Module, imports?: Imports): Promise<Instance>;
+    /**
+     * validate
+     */
     function validate(bytes: BufferSource): boolean;
 }
 /**
@@ -352,17 +361,44 @@ declare namespace WebAssembly {
 interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
     DOMException: typeof DOMException;
     WorkerGlobalScope: typeof WorkerGlobalScope;
+    /**
+     * btoa
+     */
     btoa(data: string): string;
+    /**
+     * atob
+     */
     atob(data: string): string;
+    /**
+     * setTimeout
+     */
     setTimeout(callback: (...args: any[]) => void, msDelay?: number): number;
     setTimeout<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
+    /**
+     * clearTimeout
+     */
     clearTimeout(timeoutId: number | null): void;
+    /**
+     * setInterval
+     */
     setInterval(callback: (...args: any[]) => void, msDelay?: number): number;
     setInterval<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
+    /**
+     * clearInterval
+     */
     clearInterval(timeoutId: number | null): void;
+    /**
+     * queueMicrotask
+     */
     queueMicrotask(task: Function): void;
     structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
+    /**
+     * reportError
+     */
     reportError(error: any): void;
+    /**
+     * fetch
+     */
     fetch(input: RequestInfo | URL, init?: RequestInit<RequestInitCfProperties>): Promise<Response>;
     self: ServiceWorkerGlobalScope;
     crypto: Crypto;
@@ -430,7 +466,13 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
     IdentityTransformStream: typeof IdentityTransformStream;
     HTMLRewriter: typeof HTMLRewriter;
 }
+/**
+ * addEventListener
+ */
 declare function addEventListener<Type extends keyof WorkerGlobalScopeEventMap>(type: Type, handler: EventListenerOrEventListenerObject<WorkerGlobalScopeEventMap[Type]>, options?: EventTargetAddEventListenerOptions | boolean): void;
+/**
+ * removeEventListener
+ */
 declare function removeEventListener<Type extends keyof WorkerGlobalScopeEventMap>(type: Type, handler: EventListenerOrEventListenerObject<WorkerGlobalScopeEventMap[Type]>, options?: EventTargetEventListenerOptions | boolean): void;
 /**
  * The **`dispatchEvent()`** method of the EventTarget sends an Event to the object, (synchronously) invoking the affected event listeners in the appropriate order.
@@ -443,6 +485,9 @@ declare function btoa(data: string): string;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/atob) */
 declare function atob(data: string): string;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setTimeout) */
+/**
+ * setTimeout
+ */
 declare function setTimeout(callback: (...args: any[]) => void, msDelay?: number): number;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setTimeout) */
 declare function setTimeout<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
@@ -453,10 +498,16 @@ declare function setInterval(callback: (...args: any[]) => void, msDelay?: numbe
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setInterval) */
 declare function setInterval<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/clearInterval) */
+/**
+ * clearInterval
+ */
 declare function clearInterval(timeoutId: number | null): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/queueMicrotask) */
 declare function queueMicrotask(task: Function): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
+/**
+ * structuredClone
+ */
 declare function structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/reportError) */
 declare function reportError(error: any): void;
@@ -492,6 +543,9 @@ declare const navigator: Navigator;
 interface TestController {
 }
 interface ExecutionContext<Props = unknown> {
+    /**
+     * waitUntil
+     */
     waitUntil(promise: Promise<any>): void;
     passThroughOnException(): void;
     readonly exports: Cloudflare.Exports;
@@ -574,6 +628,9 @@ type DurableObjectStub<T extends Rpc.DurableObjectBranded | undefined = undefine
     readonly name?: string;
 };
 interface DurableObjectId {
+    /**
+     * toString
+     */
     toString(): string;
     equals(other: DurableObjectId): boolean;
     readonly name?: string;
@@ -600,6 +657,9 @@ interface DurableObjectNamespaceGetDurableObjectOptions {
 interface DurableObjectClass<_T extends Rpc.DurableObjectBranded | undefined = undefined> {
 }
 interface DurableObjectState<Props = unknown> {
+    /**
+     * waitUntil
+     */
     waitUntil(promise: Promise<any>): void;
     readonly exports: Cloudflare.Exports;
     readonly props: Props;
@@ -3089,6 +3149,9 @@ declare class URLSearchParams {
     values(): IterableIterator<string>;
     forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: URLSearchParams) => void, thisArg?: This): void;
     /*function toString() { [native code] }*/
+    /**
+     * toString
+     */
     toString(): string;
     [Symbol.iterator](): IterableIterator<[
         key: string,
@@ -12348,7 +12411,24 @@ type EmailMessageBuilder = EmailReplyMessageBuilder & EmailDestinations;
  */
 interface SendEmail {
     send(message: EmailMessage): Promise<EmailSendResult>;
-    send(builder: EmailMessageBuilder): Promise<EmailSendResult>;
+    send(builder: {
+        /**
+         * from
+         */
+        from: string | EmailAddress;
+        /**
+         * to
+         */
+        to: string | EmailAddress | (string | EmailAddress)[];
+        subject: string;
+        replyTo?: string | EmailAddress;
+        cc?: string | EmailAddress | (string | EmailAddress)[];
+        bcc?: string | EmailAddress | (string | EmailAddress)[];
+        headers?: Record<string, string>;
+        text?: string;
+        html?: string;
+        attachments?: EmailAttachment[];
+    }): Promise<EmailSendResult>;
 }
 declare abstract class EmailEvent extends ExtendableEvent {
     readonly message: ForwardableEmailMessage;
@@ -12868,10 +12948,19 @@ declare module 'cloudflare:node' {
             port?: number | null | undefined;
         };
     }
+    /**
+     * httpServerHandler
+     */
     export function httpServerHandler(port: number): ExportedHandler;
+    /**
+     * httpServerHandler
+     */
     export function httpServerHandler(options: {
         port: number;
     }): ExportedHandler;
+    /**
+     * httpServerHandler
+     */
     export function httpServerHandler(server: NodeStyleServer): ExportedHandler;
 }
 type Params<P extends string = any> = Record<P, string | string[]>;
@@ -13258,8 +13347,17 @@ declare namespace CloudflareWorkersModule {
         run(event: Readonly<WorkflowEvent<T>>, step: WorkflowStep): Promise<unknown>;
     }
     export function waitUntil(promise: Promise<unknown>): void;
+    /**
+     * withEnv
+     */
     export function withEnv(newEnv: unknown, fn: () => unknown): unknown;
+    /**
+     * withExports
+     */
     export function withExports(newExports: unknown, fn: () => unknown): unknown;
+    /**
+     * withEnvAndExports
+     */
     export function withEnvAndExports(newEnv: unknown, newExports: unknown, fn: () => unknown): unknown;
     export const env: Cloudflare.Env;
     export const exports: Cloudflare.Exports;
@@ -13277,6 +13375,9 @@ interface SecretsStoreSecret {
     get(): Promise<string>;
 }
 declare module "cloudflare:sockets" {
+    /**
+     * _connect
+     */
     function _connect(address: string | SocketAddress, options?: SocketOptions): Socket;
     export { _connect as connect };
 }

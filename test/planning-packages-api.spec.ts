@@ -6,6 +6,9 @@ import { createTestEnv } from './helpers';
 
 // Mount the router in a bare app with a stub session — avoids importing
 // @server/app (quarantined: pulls Workers-runtime-only modules under node).
+/**
+ * makeApp
+ */
 function makeApp() {
   const app = new Hono<AppEnv>();
   app.use('*', async (c, next) => {

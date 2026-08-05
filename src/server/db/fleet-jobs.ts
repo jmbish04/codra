@@ -5,6 +5,9 @@ import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 export type FleetJobRow = typeof fleetJobs.$inferSelect;
 export type FleetJobKind = 'init' | 'analyze' | 'dispatch' | 'merge';
 
+/**
+ * createFleetJob
+ */
 export async function createFleetJob(
   env: Pick<Env, 'DB'>, input: { repositoryId: number; kind: FleetJobKind; params?: unknown; createdBy?: string | null },
 ): Promise<FleetJobRow> {
@@ -45,6 +48,9 @@ export async function claimFleetJob(env: Pick<Env, 'DB'>, jobId: string, claimed
   return rows.length > 0;
 }
 
+/**
+ * completeFleetJob
+ */
 export async function completeFleetJob(
   env: Pick<Env, 'DB'>, jobId: string, input: { status: 'completed' | 'failed'; result?: unknown; error?: string | null },
 ): Promise<void> {
@@ -56,11 +62,17 @@ export async function completeFleetJob(
   }).where(eq(fleetJobs.job_id, jobId));
 }
 
+/**
+ * getFleetJob
+ */
 export async function getFleetJob(env: Pick<Env, 'DB'>, jobId: string): Promise<FleetJobRow | null> {
   const db = getDb(env);
   return (await db.select().from(fleetJobs).where(eq(fleetJobs.job_id, jobId)).get()) ?? null;
 }
 
+/**
+ * listFleetJobs
+ */
 export async function listFleetJobs(
   env: Pick<Env, 'DB'>, q: { repositoryId?: number; status?: string; limit?: number } = {},
 ): Promise<FleetJobRow[]> {

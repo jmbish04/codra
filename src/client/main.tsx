@@ -4,6 +4,9 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { AppShell } from './components/layout/app-shell';
 
+/**
+ * safeLazy
+ */
 function safeLazy<T extends React.ComponentType<any>>(
   importFn: () => Promise<{ default: T }>
 ): React.LazyExoticComponent<T> {
@@ -57,6 +60,9 @@ import './app.css';
 import { ThemeProvider } from './lib/theme';
 import { useIsDarkMode } from './hooks/use-is-dark-mode';
 
+/**
+ * ToasterWrapper
+ */
 function ToasterWrapper() {
   const isDark = useIsDarkMode();
   return (
@@ -111,6 +117,9 @@ class ErrorBoundary extends React.Component<{ fallback?: React.ReactNode, childr
   }
 }
 
+/**
+ * withSuspense
+ */
 const withSuspense = (Component: React.ComponentType, isFullPage = false) => (
   <ErrorBoundary>
     <Suspense fallback={<div role="status" aria-busy="true" className={`flex items-center justify-center ${isFullPage ? 'h-screen' : 'h-full w-full'}`} />}>

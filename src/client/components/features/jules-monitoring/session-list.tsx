@@ -7,6 +7,9 @@ import { formatDateTime } from '@client/lib/format';
 import type { JulesMonitorTask } from './client';
 import { JulesStatusBadge } from './status';
 
+/**
+ * JulesSessionList
+ */
 export function JulesSessionList({
   tasks,
   loading,
@@ -78,6 +81,9 @@ export function JulesSessionList({
     </div>
   );
 }
+/**
+ * SessionsLoadError
+ */
 export function SessionsLoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div role="alert" className="flex flex-col items-start justify-between gap-3 rounded-lg border border-danger-border bg-danger-bg p-4 sm:flex-row sm:items-center">

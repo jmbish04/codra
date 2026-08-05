@@ -10,6 +10,9 @@ import { upsertActivities } from '@server/db/jules-activities';
 import { recordHeartbeat } from '@server/db/agent-heartbeats';
 import { createTestEnv } from './helpers';
 
+/**
+ * makeApp
+ */
 function makeApp() {
   const app = new Hono<AppEnv>();
   app.use('*', async (c, next) => {
@@ -20,6 +23,9 @@ function makeApp() {
   return app;
 }
 
+/**
+ * seedRepo
+ */
 async function seedRepo(env: Env, owner: string, repo: string) {
   const [row] = await getDb(env).insert(repositories).values({ installation_id: 1, owner, repo }).returning();
   return row.id;
