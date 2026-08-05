@@ -17,10 +17,11 @@ export async function sendJulesLogged(
   });
   try {
     await sendJulesMessage(apiKey, input.sessionId, input.text);
-    await updateInteractionStatus(env, row.id, 'sent');
+    await updateInteractionStatus(env, row.id, 'sent').catch(() => {});
     return { ok: true, interactionId: row.id };
   } catch (err) {
-    await updateInteractionStatus(env, row.id, 'error', err instanceof Error ? err.message : String(err));
+    // Guard the status write too — a failed send must not be masked by a DB error.
+    await updateInteractionStatus(env, row.id, 'error', err instanceof Error ? err.message : String(err)).catch(() => {});
     logger.error(`sendJulesLogged failed for ${input.sessionId}`, err instanceof Error ? err : new Error(String(err)));
     return { ok: false, interactionId: row.id };
   }
