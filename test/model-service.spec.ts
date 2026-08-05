@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRetryableModelError, ModelService } from '@server/services/model';
-import { reviewWithCloudflare } from '@server/models/cloudflare';
+import { reviewWithCloudflare, extractCloudflareText } from '@server/models/cloudflare';
 import { reviewWithGoogle } from '@server/models/google';
-import { createTestEnv, saveTestProviderApiKey } from './helpers';
+import { createTestEnv, saveTestProviderApiKey, seedReviewModels } from './helpers';
 import { defaultRepoConfig } from '@shared/schema';
 
 describe('ModelService', () => {
@@ -21,6 +21,7 @@ describe('ModelService', () => {
       } as any,
     });
 
+    await seedReviewModels(env);
     const service = new ModelService(env);
     const response = await (service as any).callModel('@cf/moonshotai/kimi-k2.5', {
       systemPrompt: 'system',
@@ -31,7 +32,7 @@ describe('ModelService', () => {
     expect(response.modelUsed).toBe('@cf/moonshotai/kimi-k2.6');
   });
 
-  it('preserves an explicitly empty fallback chain', () => {
+  it('appends the default Workers AI fallbacks to a configured strategy', () => {
     const service = new ModelService(createTestEnv());
     const selected = (service as any).selectModel({
       totalLineCount: 500,
@@ -45,9 +46,15 @@ describe('ModelService', () => {
       },
     });
 
+    // selectModel always appends DEFAULT_WORKERS_AI_FALLBACKS for resilience, so
+    // an empty configured fallback list still resolves to the default chain.
     expect(selected).toEqual({
       primary: 'gemma-4-31b-it',
-      fallbacks: [],
+      fallbacks: [
+        '@cf/moonshotai/kimi-k2.7-code',
+        '@cf/zai-org/glm-5.2',
+        '@cf/qwen/qwen2.5-coder-32b-instruct',
+      ],
     });
   });
 
@@ -60,62 +67,33 @@ describe('ModelService', () => {
     })).toThrow('No review model strategy is configured');
   });
 
-  it('turns Cloudflare reasoning-only responses into inconclusive review JSON', async () => {
-    const env = createTestEnv({
-      AI: {
-        async run() {
-          return {
-            choices: [
-              {
-                message: {
-                  content: null,
-                  reasoning: 'Long reasoning that consumed the completion budget.',
-                },
-                finish_reason: 'length',
-              },
-            ],
-            usage: { prompt_tokens: 1, completion_tokens: 4096 },
-          };
-        },
-      } as any,
-    });
+  // extractCloudflareText is the batch/synthesize path (throwOnNoContent omitted).
+  // The sync reviewWithCloudflare deliberately throws on reasoning-only responses
+  // so the model service falls back to another provider instead.
+  it('turns Cloudflare reasoning-only responses into inconclusive review JSON', () => {
+    const result = {
+      choices: [
+        { message: { content: null, reasoning: 'Long reasoning that consumed the completion budget.' }, finish_reason: 'length' },
+      ],
+      usage: { prompt_tokens: 1, completion_tokens: 4096 },
+    };
 
-    const response = await reviewWithCloudflare(env, '@cf/moonshotai/kimi-k2.6', {
-      systemPrompt: 'system',
-      userPrompt: 'user',
-    });
-    const parsed = JSON.parse(response.rawText);
+    const parsed = JSON.parse(extractCloudflareText(result, '@cf/moonshotai/kimi-k2.6'));
 
     expect(parsed.findings).toEqual([]);
     expect(parsed.overall_correctness).toBe('patch is incorrect');
     expect(parsed.overall_explanation).toContain('inconclusive');
   });
 
-  it('does not parse Cloudflare reasoning as review JSON when final content is missing', async () => {
-    const env = createTestEnv({
-      AI: {
-        async run() {
-          return {
-            choices: [
-              {
-                message: {
-                  content: null,
-                  reasoning: 'Reasoning mentioned an object like {"foo":"bar"} but never produced final JSON.',
-                },
-                finish_reason: 'length',
-              },
-            ],
-            usage: { prompt_tokens: 1, completion_tokens: 8192 },
-          };
-        },
-      } as any,
-    });
+  it('does not parse Cloudflare reasoning as review JSON when final content is missing', () => {
+    const result = {
+      choices: [
+        { message: { content: null, reasoning: 'Reasoning mentioned an object like {"foo":"bar"} but never produced final JSON.' }, finish_reason: 'length' },
+      ],
+      usage: { prompt_tokens: 1, completion_tokens: 8192 },
+    };
 
-    const response = await reviewWithCloudflare(env, '@cf/zai-org/glm-4.7-flash', {
-      systemPrompt: 'system',
-      userPrompt: 'user',
-    });
-    const parsed = JSON.parse(response.rawText);
+    const parsed = JSON.parse(extractCloudflareText(result, '@cf/zai-org/glm-4.7-flash'));
 
     expect(parsed.findings).toEqual([]);
     expect(parsed.overall_explanation).toContain('reasoning-only response');
@@ -260,6 +238,7 @@ describe('ModelService', () => {
       } as any,
     });
     await saveTestProviderApiKey(env);
+    await seedReviewModels(env);
     const service = new ModelService(env);
 
     const response = await service.reviewFile({
@@ -302,6 +281,7 @@ describe('ModelService', () => {
       } as any,
     });
 
+    await seedReviewModels(env);
     const service = new ModelService(env);
     await expect(
       service.reviewFile({
@@ -370,6 +350,7 @@ describe('ModelService', () => {
       } as any,
     });
     await saveTestProviderApiKey(env);
+    await seedReviewModels(env);
     const service = new ModelService(env, undefined, { jobId: 'job-provider-skip' });
     const file = {
       path: 'src/app.ts',
@@ -422,6 +403,7 @@ describe('ModelService', () => {
     });
     const env = createTestEnv();
     await saveTestProviderApiKey(env);
+    await seedReviewModels(env);
     const service = new ModelService(env);
     const largeFile = {
       path: 'src/large.ts',
@@ -482,6 +464,7 @@ describe('ModelService', () => {
     });
     const env = createTestEnv();
     await saveTestProviderApiKey(env);
+    await seedReviewModels(env);
     const service = new ModelService(env);
     const largeFile = {
       path: 'src/large.ts',

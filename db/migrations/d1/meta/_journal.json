@@ -148,6 +148,55 @@
       "when": 1785402316461,
       "tag": "0020_graceful_hellcat",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1785680560674,
+      "tag": "0021_tiny_abomination",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1785691739986,
+      "tag": "0022_tidy_starjammers",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1785693101297,
+      "tag": "0023_perpetual_layla_miller",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1785694312535,
+      "tag": "0024_nervous_slipstream",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1785696254640,
+      "tag": "0025_wise_mariko_yashida",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1785696402387,
+      "tag": "0026_soft_juggernaut",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1785859368016,
+      "tag": "0027_loose_nemesis",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,3 @@
+
+/* ai-elements workflow edge dash animation */
+@keyframes ai-dash { to { stroke-dashoffset: -12; } }

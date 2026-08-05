@@ -1,8 +1,10 @@
 import path from 'node:path';
 import { encryptLlmApiKey } from '@server/core/llm-crypto';
+import { createLlmProvider, findLlmProviderByName } from '@server/db/model-configs';
 import { createD1 } from './d1-sqlite';
 import { getDb } from '@server/db/client';
 import { repositories, repoConfigs } from '@server/db/schemas';
+import type { LlmApiFormat } from '@shared/schema';
 import { sql } from 'drizzle-orm';
 
 
@@ -60,6 +62,37 @@ export class MockQueue {
   }
 }
 
+/** Minimal in-memory R2 bucket — enough for planning-package transcript put/get. */
+export class MemoryR2 {
+  public readonly store = new Map<string, Uint8Array>();
+
+  async put(key: string, value: ArrayBuffer | Uint8Array | string) {
+    const bytes = typeof value === 'string' ? new TextEncoder().encode(value)
+      : value instanceof Uint8Array ? value : new Uint8Array(value);
+    this.store.set(key, bytes);
+    return { key, size: bytes.byteLength } as any;
+  }
+
+  async get(key: string) {
+    const bytes = this.store.get(key);
+    if (!bytes) return null;
+    return {
+      key,
+      size: bytes.byteLength,
+      body: new Response(bytes as unknown as BodyInit).body,
+      async text() { return new TextDecoder().decode(bytes); },
+      async arrayBuffer() { return bytes.buffer; },
+    } as any;
+  }
+
+  async head(key: string) {
+    const bytes = this.store.get(key);
+    return bytes ? ({ key, size: bytes.byteLength } as any) : null;
+  }
+
+  async delete(key: string) { this.store.delete(key); }
+}
+
 function usableEnvValue(value: string | undefined) {
   return value && value !== 'undefined' && value !== 'null' ? value : null;
 }
@@ -85,6 +118,7 @@ export function createTestEnv(overrides: Partial<Record<keyof Env, unknown>> = {
     },
     APP_KV: new MemoryKV() as unknown as KVNamespace,
     PROMPTS_KV: new MemoryKV() as unknown as KVNamespace,
+    PLANNING_ARTIFACTS: new MemoryR2() as unknown as R2Bucket,
     REVIEW_QUEUE: new MockQueue() as any,
     ASSETS: new MockAssets() as any,
     DB: createD1(path.resolve(process.cwd(), 'db/migrations/d1')) as any,
@@ -121,6 +155,56 @@ export async function saveTestProviderApiKey(env: Env, providerName = 'Google', 
     SET encrypted_api_key = ${encrypted}, enabled = 1, updated_at = CURRENT_TIMESTAMP
     WHERE name = ${providerName}
   `);
+}
+
+/**
+ * Seed a `model_configs` row (and its `llm_providers` row) so
+ * `ModelService.resolveModel` can resolve `modelId`. Cloudflare Workers AI needs
+ * no API key (it uses the `env.AI` binding); the HTTP providers (gemini/openai/
+ * anthropic) get an encrypted test key. Idempotent per provider name.
+ */
+export async function seedModelConfig(
+  env: Env,
+  input: { modelId: string; apiFormat?: LlmApiFormat; providerName?: string; modelName?: string; apiKey?: string },
+) {
+  const apiFormat = input.apiFormat ?? 'cloudflare-workers-ai';
+  const providerName = input.providerName ?? (
+    apiFormat === 'cloudflare-workers-ai' ? 'Cloudflare Workers' : apiFormat === 'gemini' ? 'Google' : apiFormat
+  );
+  const needsKey = apiFormat !== 'cloudflare-workers-ai';
+  const encryptedApiKey = needsKey ? await encryptLlmApiKey(env, input.apiKey ?? 'test-key') : null;
+
+  const provider = (await findLlmProviderByName(env, providerName)) ?? (await createLlmProvider(env, {
+    name: providerName, apiFormat, baseUrl: null, encryptedApiKey, enabled: true,
+  }));
+
+  const db = getDb(env);
+  await db.run(sql`
+    INSERT OR REPLACE INTO model_configs (model_id, provider, provider_id, model_name, rpm, tpm, rpd)
+    VALUES (${input.modelId}, ${providerName}, ${provider.id}, ${input.modelName ?? input.modelId}, 1000, 1000000, 100000)
+  `);
+  return provider;
+}
+
+/**
+ * Seed the standard review model set — the Cloudflare Workers AI models plus the
+ * DEFAULT_WORKERS_AI_FALLBACKS that ModelService always appends to a strategy,
+ * and the Gemma-on-Google models — so any review chain resolves in tests.
+ */
+export async function seedReviewModels(env: Env) {
+  const cloudflareModels = [
+    '@cf/moonshotai/kimi-k2.6',
+    '@cf/zai-org/glm-4.7-flash',
+    '@cf/moonshotai/kimi-k2.7-code',
+    '@cf/zai-org/glm-5.2',
+    '@cf/qwen/qwen2.5-coder-32b-instruct',
+  ];
+  for (const modelId of cloudflareModels) {
+    await seedModelConfig(env, { modelId, apiFormat: 'cloudflare-workers-ai' });
+  }
+  for (const modelId of ['gemma-4-31b-it', 'gemma-4-26b-a4b-it']) {
+    await seedModelConfig(env, { modelId, apiFormat: 'gemini', providerName: 'Google' });
+  }
 }
 
 /**

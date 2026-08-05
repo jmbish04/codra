@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Starts the codra Jules watcher at login and keeps it alive.
+  Edit the three __PLACEHOLDER__ values, then:
+    cp com.codra.jules-watcher.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.codra.jules-watcher.plist
+  Reload after edits:
+    launchctl unload ~/Library/LaunchAgents/com.codra.jules-watcher.plist && \
+    launchctl load   ~/Library/LaunchAgents/com.codra.jules-watcher.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.codra.jules-watcher</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BUN_PATH__</string>          <!-- e.g. /opt/homebrew/bin/bun  (run: which bun) -->
+    <string>run</string>
+    <string>__REPO__/tools/jules-watcher/src/index.ts</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__/tools/jules-watcher</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>WORKER_URL</key>
+    <string>https://codra.hacolby.workers.dev</string>
+    <!-- PATH so `tokens` and `bun` resolve under launchd's minimal env -->
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>__REPO__/tools/jules-watcher/watcher.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__REPO__/tools/jules-watcher/watcher.err.log</string>
+</dict>
+</plist>

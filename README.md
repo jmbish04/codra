@@ -93,8 +93,18 @@ The internal documentation suite lives in the `docs/` directory. It includes doc
   secrets (`src/server/core/github-secrets.ts`) requires the GitHub App's
   **Actions Secrets: write** permission; without it, Codra writes the secret
   names and setup steps into the deploy-workflow PR body instead.
+## Development
+
+### Setup & Run
+1. Install dependencies: `pnpm install`
+2. Start the local development server: `npm run dev`
+
+### Testing
+Execute the test suite (Vitest and Playwright) using: `npm test`
 
 ## Documentation
+
+For local setup and architectural context, see the [docs/](docs/) suite in this repository.
 
 The full setup and operations guides live at [codra.run/docs](https://codra.run/docs).
 
