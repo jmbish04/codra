@@ -21,3 +21,4 @@ export * from './agent-heartbeats';
 export * from './jules-activities';
 export * from './fleet-jobs';
 export * from './reconciliation-reviews';
+export * from './jules-interactions';

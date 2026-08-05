@@ -87,6 +87,13 @@ export default {
         logger.error('Jules orchestration poll failed', error instanceof Error ? error : new Error(String(error)));
       })
     );
+    // Capture the PRs that launched Jules sessions opened, so a later review of
+    // that PR can route corrections back to the session. No-op when none pending.
+    ctx.waitUntil(
+      import('@server/core/jules').then(({ captureLaunchedSessionPrs }) => captureLaunchedSessionPrs(env)).catch((error) => {
+        logger.error('Jules PR capture failed', error instanceof Error ? error : new Error(String(error)));
+      })
+    );
   },
 } satisfies ExportedHandler<Env>;
 

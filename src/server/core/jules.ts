@@ -1,7 +1,9 @@
 import { logger } from '@server/core/logger';
 import { getSecretStoreBinding } from '@server/utils/secrets';
-import { listStagedJulesSessions, markJulesLaunched, markJulesOutcome } from '@server/db/jules-sessions';
-import { isRepoConnected as realIsRepoConnected, startJulesSession as realStartJulesSession } from '@server/services/jules';
+import { listStagedJulesSessions, markJulesLaunched, markJulesOutcome, listLaunchedSessionsWithoutPr } from '@server/db/jules-sessions';
+import { isRepoConnected as realIsRepoConnected, startJulesSession as realStartJulesSession, getJulesSession } from '@server/services/jules';
+import { logLaunch } from '@server/services/jules-interactions';
+import { setJulesSessionCreatedPr } from '@server/db/jules-interactions';
 
 type Deps = { isRepoConnected: typeof realIsRepoConnected; startJulesSession: typeof realStartJulesSession };
 const DEFAULT_DEPS: Deps = { isRepoConnected: realIsRepoConnected, startJulesSession: realStartJulesSession };
@@ -55,6 +57,7 @@ export async function launchStagedJulesSessions(
       try {
         const s = await deps.startJulesSession(apiKey, { owner: ctx.owner, repo: ctx.repo, branch, prompt: row.prompt, title: 'Codra: documentation improvements' });
         await markJulesLaunched(env, row.id, { sessionId: s.id, sessionUrl: s.url, sessionState: s.state });
+        await logLaunch(env, { sessionId: s.id, repository: `${ctx.owner}/${ctx.repo}`, prNumber: ctx.prNumber, text: row.prompt }).catch(() => {});
         launched++;
         const body = `✅ **Jules session opened** to address the documentation gaps.\n\n- Session: ${s.url}\n- ID: \`${s.id}\``;
         if (row.pr_comment_id != null) await github.updateIssueComment(ctx.owner, ctx.repo, row.pr_comment_id, body).catch(() => {});
@@ -69,4 +72,33 @@ export async function launchStagedJulesSessions(
     logger.error('launchStagedJulesSessions failed', err instanceof Error ? err : new Error(String(err)));
     return 0;
   }
+}
+
+/**
+ * Bounded cron step: for launched Jules sessions whose opened PR we haven't
+ * captured yet, fetch the session's PR from the SDK and record it — so a later
+ * review of that PR resolves back to this session. No-op when none pending.
+ */
+export async function captureLaunchedSessionPrs(env: Env): Promise<number> {
+  const rows = await listLaunchedSessionsWithoutPr(env);
+  if (rows.length === 0) return 0;
+  let apiKey = '';
+  try { apiKey = await getSecretStoreBinding(env, 'JULES_API_KEY'); } catch { apiKey = ''; }
+  if (!apiKey) return 0;
+
+  let captured = 0;
+  for (const row of rows) {
+    if (!row.session_id) continue;
+    try {
+      const live = await getJulesSession(apiKey, row.session_id);
+      const m = live.pullRequestUrl?.match(/\/pull\/(\d+)/);
+      if (m) {
+        await setJulesSessionCreatedPr(env, row.session_id, { number: Number(m[1]), url: live.pullRequestUrl! });
+        captured++;
+      }
+    } catch (err) {
+      logger.warn('captureLaunchedSessionPrs: session fetch failed', { session: row.session_id, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return captured;
 }

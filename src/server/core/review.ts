@@ -1268,6 +1268,19 @@ async function runFinalizePhase(
     })),
   });
 
+  // If this PR was opened by a live Jules session and the review explicitly
+  // requests changes (verdict 'comment' — NOT an approve, and not a 'failed'
+  // partial where files couldn't be reviewed), direct the corrections to Jules
+  // over the SDK too (indexed in jules_interactions), not just as PR comments —
+  // best-effort, never blocks the review.
+  if (verdictSummary.verdict === 'comment' && finalComments.length > 0) {
+    const { directCorrectionsToJules } = await import('@server/core/jules-pr-correction');
+    await directCorrectionsToJules(env, github, {
+      owner: job.owner, repo: job.repo, prNumber: job.prNumber,
+      comments: finalComments.map((c) => ({ path: c.path, line: c.line, severity: c.severity, title: c.title, body: c.body })),
+    }).catch(() => {});
+  }
+
   // Build codra's running list of read-only endpoints / MCP tools / frontend
   // pages this PR touched, then test the API ones and report back (best-effort).
   const testJob = { id: job.id, owner: job.owner, repo: job.repo, prNumber: job.prNumber };
