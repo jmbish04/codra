@@ -45,7 +45,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 migrations apply <YOUR_D1_DB_NAME> --remote
+          command: d1 migrations apply DB --remote
 
       - name: Check recent deployments / build status
         if: ${{ github.event.inputs.action == 'check-logs' }}
