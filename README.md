@@ -73,13 +73,27 @@ Codra listens to GitHub pull request events, runs AI-powered review jobs, posts 
 
 ## Installation, Running, and Testing
 
-- **Installation**: Use `pnpm install` to install dependencies.
-- **Running**: Start the local development server (client and worker) using `npm run dev`. Generate database migrations with `npm run db:generate` and apply them using `npm run migrate:local`.
-- **Testing**: Run the test suite (Vitest + Playwright) via `npm test` or in watch mode using `npm run test:watch`. No external database is needed, as tests run on an in-memory SQLite D1 instance.
+### Setup & Run
+1. Install dependencies: `pnpm install`
+2. Start the local development server: `npm run dev`
+3. Generate database migrations with `npm run db:generate` and apply them using `npm run migrate:local`.
 
-## Docs Suite
+### Testing
+Execute the test suite (Vitest and Playwright) via `npm test` or in watch mode using `npm run test:watch`. No external database is needed, as tests run on an in-memory SQLite D1 instance.
+
+## Documentation
+
+For local setup and architectural context, see the [docs/](docs/) suite in this repository.
 
 The internal documentation suite lives in the `docs/` directory. It includes documents like `ROADMAP.md`, `REBUILD-PLAN.md`, and other guides used during development.
+
+The full setup and operations guides live at [codra.run/docs](https://codra.run/docs).
+
+- [Installation guide](https://codra.run/docs/installation)
+- [Configuration guide](https://codra.run/docs/configuration)
+- [Deploy with Neon](https://codra.run/docs/neon)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
 
 ## Docs-gap Jules tasks & deploy workflow
 
@@ -93,26 +107,6 @@ The internal documentation suite lives in the `docs/` directory. It includes doc
   secrets (`src/server/core/github-secrets.ts`) requires the GitHub App's
   **Actions Secrets: write** permission; without it, Codra writes the secret
   names and setup steps into the deploy-workflow PR body instead.
-## Development
-
-### Setup & Run
-1. Install dependencies: `pnpm install`
-2. Start the local development server: `npm run dev`
-
-### Testing
-Execute the test suite (Vitest and Playwright) using: `npm test`
-
-## Documentation
-
-For local setup and architectural context, see the [docs/](docs/) suite in this repository.
-
-The full setup and operations guides live at [codra.run/docs](https://codra.run/docs).
-
-- [Installation guide](https://codra.run/docs/installation)
-- [Configuration guide](https://codra.run/docs/configuration)
-- [Deploy with Neon](https://codra.run/docs/neon)
-- [Contributing](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
 
 ## Contributing
 
