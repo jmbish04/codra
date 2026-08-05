@@ -102,8 +102,34 @@ The internal documentation suite lives in the `docs/` directory. It includes doc
 ### Testing
 Execute the test suite (Vitest and Playwright) using: `npm test`
 
+## Development & Testing
+
+Codra uses `pnpm` for dependency management.
+
+1. **Install dependencies:**
+   ```bash
+   pnpm install
+   ```
+2. **Database setup:**
+   Generate and apply the local SQLite schema using D1:
+   ```bash
+   pnpm run db:generate
+   pnpm run migrate:local
+   ```
+3. **Run locally:**
+   Start the local development server (client and worker):
+   ```bash
+   pnpm run dev
+   ```
+4. **Run tests:**
+   Execute the test suite (Vitest and Playwright):
+   ```bash
+   pnpm test
+   ```
+
 ## Documentation
 
+The full setup and operations guides live at [codra.run/docs](https://codra.run/docs). The internal documentation suite for the repository (such as the rebuild plan and roadmap) lives in the `docs/` directory at the repository root.
 For local setup and architectural context, see the [docs/](docs/) suite in this repository.
 
 The full setup and operations guides live at [codra.run/docs](https://codra.run/docs).
