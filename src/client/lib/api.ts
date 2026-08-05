@@ -404,6 +404,14 @@ export const api = {
       method: 'POST',
     });
   },
+  /** Cancel one queued/running job. Rejects (409) if the job is already terminal. */
+  cancelJob(id: string) {
+    return request<{ ok: true }>(`/api/jobs/${id}/cancel`, { method: 'POST' });
+  },
+  /** Cancel every queued job at once ("clear queue"); returns how many were cancelled. */
+  cancelQueuedJobs() {
+    return request<{ cancelledCount: number }>('/api/jobs/cancel-queued', { method: 'POST' });
+  },
   getRepos() {
     return request<RepoConfigsResponse>('/api/repos');
   },

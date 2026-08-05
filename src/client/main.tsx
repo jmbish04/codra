@@ -28,6 +28,7 @@ const LandingPage = safeLazy(() => import('./pages/landing').then(m => ({ defaul
 const DashboardPage = safeLazy(() => import('./pages/dashboard').then(m => ({ default: m.DashboardPage })));
 const LoginPage = safeLazy(() => import('./pages/login').then(m => ({ default: m.LoginPage })));
 const JobsPage = safeLazy(() => import('./pages/jobs').then(m => ({ default: m.JobsPage })));
+const QueuePage = safeLazy(() => import('./pages/queue').then(m => ({ default: m.QueuePage })));
 const WebhooksPage = safeLazy(() => import('./pages/webhooks').then(m => ({ default: m.WebhooksPage })));
 const StandardizationPage = safeLazy(() => import('./pages/standardization').then(m => ({ default: m.StandardizationPage })));
 const ActionsPage = safeLazy(() => import('./pages/actions').then(m => ({ default: m.ActionsPage })));
@@ -147,6 +148,7 @@ const router = createBrowserRouter([
     children: [
       { path: 'dashboard', element: withSuspense(DashboardPage) },
       { path: 'jobs', element: withSuspense(JobsPage) },
+      { path: 'queue', element: withSuspense(QueuePage) },
       { path: 'webhooks', element: withSuspense(WebhooksPage) },
       { path: 'standardization', element: withSuspense(StandardizationPage) },
       { path: 'actions', element: withSuspense(ActionsPage) },

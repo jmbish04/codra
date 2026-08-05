@@ -3,7 +3,7 @@ import type { Context } from 'hono';
 import { defaultRepoConfig, jobsQuerySchema } from '@shared/schema';
 import { notifyJobsChanged } from '@server/core/jobs-feed';
 import type { AppEnv } from '@server/env';
-import { bytesToHex, getJobDetail, getJobForProcessing, insertJob, listJobs, mapJob, supersedeOlderJobs, forceRestartJob } from '@server/db/jobs';
+import { bytesToHex, getJobDetail, getJobForProcessing, insertJob, listJobs, mapJob, supersedeOlderJobs, forceRestartJob, cancelJob, cancelQueuedJobs } from '@server/db/jobs';
 import { jsonError } from '@server/core/http';
 import { scheduleBestEffortJobMaintenance } from '@server/core/job-recovery';
 import { loadRepoConfig } from '@server/core/config';
@@ -70,6 +70,26 @@ export function createJobsRouter() {
     response.headers.set('Last-Modified', lastModified);
     response.headers.set('Cache-Control', 'private, no-cache');
     return response;
+  });
+
+  // Clear the whole queue in one shot. Placed before '/:id/*' so 'cancel-queued'
+  // is never captured as a job id. Superseding queued jobs makes their pending
+  // REVIEW_QUEUE messages no-op on dequeue — the immediate cost stop-button.
+  app.post('/cancel-queued', async (c) => {
+    const cancelledIds = await cancelQueuedJobs(c.env, 'Queue cleared from dashboard');
+    c.executionCtx.waitUntil(notifyJobsChanged(c.env, {}));
+    return c.json({ cancelledCount: cancelledIds.length });
+  });
+
+  // Cancel a single queued/running job. No-op (409) if already terminal.
+  app.post('/:id/cancel', async (c) => {
+    const jobId = c.req.param('id');
+    const cancelled = await cancelJob(c.env, jobId, 'Cancelled from dashboard');
+    if (!cancelled) {
+      return jsonError('Job not found or not cancellable (already finished).', 409);
+    }
+    c.executionCtx.waitUntil(notifyJobsChanged(c.env, { jobId, status: 'superseded' }));
+    return c.json({ ok: true });
   });
 
   app.post('/:id/retry', async (c) => {
