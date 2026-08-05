@@ -35,6 +35,9 @@ const TERMINAL_STATUSES = ['pr_ready', 'accepted', 'stuck', 'failed'] as const;
 const WATCHER_ONLINE_MS = 90_000;
 const WATCHER_STALE_MS = 600_000;
 
+/**
+ * sessionUrl
+ */
 function sessionUrl(sessionId: string | null): string | null {
   return sessionId ? `https://jules.google.com/session/${sessionId}` : null;
 }
@@ -44,6 +47,9 @@ type JoinedRow = {
   title: string | null; slug: string | null; owner: string | null; repo: string | null;
 };
 
+/**
+ * mapTask
+ */
 function mapTask(r: JoinedRow): JulesMonitorTask {
   return {
     taskId: r.t.task_id, packageId: r.t.package_id,
@@ -55,6 +61,9 @@ function mapTask(r: JoinedRow): JulesMonitorTask {
   };
 }
 
+/**
+ * statusFilter
+ */
 function statusFilter(status?: string) {
   if (!status || status === 'all') return undefined;
   if (status === 'active') return inArray(julesOrchestrationTasks.status, [...ACTIVE_STATUSES]);
@@ -68,12 +77,18 @@ const baseSelect = {
   owner: repositories.owner, repo: repositories.repo,
 };
 
+/**
+ * fromJoined
+ */
 function fromJoined(db: ReturnType<typeof getDb>) {
   return db.select(baseSelect).from(julesOrchestrationTasks)
     .leftJoin(planningPackages, eq(planningPackages.id, julesOrchestrationTasks.package_id))
     .leftJoin(repositories, eq(repositories.id, julesOrchestrationTasks.repository_id));
 }
 
+/**
+ * listMonitorTasks
+ */
 export async function listMonitorTasks(
   env: Pick<Env, 'DB'>, params: { status?: string; repository?: string; query?: string; limit?: number; offset?: number },
 ): Promise<{ tasks: JulesMonitorTask[]; total: number }> {
@@ -98,12 +113,18 @@ export async function listMonitorTasks(
   return { tasks: (rows as JoinedRow[]).map(mapTask), total: countRows[0]?.n ?? 0 };
 }
 
+/**
+ * getMonitorTask
+ */
 export async function getMonitorTask(env: Pick<Env, 'DB'>, taskId: string): Promise<JulesMonitorTask | null> {
   const db = getDb(env);
   const row = await fromJoined(db).where(eq(julesOrchestrationTasks.task_id, taskId)).get();
   return row ? mapTask(row as JoinedRow) : null;
 }
 
+/**
+ * listMonitorEvents
+ */
 export async function listMonitorEvents(env: Pick<Env, 'DB'>, taskId: string): Promise<JulesMonitorEvent[]> {
   const db = getDb(env);
   const rows = await db.select().from(julesOrchestrationEvents)
@@ -118,6 +139,9 @@ export async function listMonitorEvents(env: Pick<Env, 'DB'>, taskId: string): P
   }));
 }
 
+/**
+ * deriveHealth
+ */
 export async function deriveHealth(env: Pick<Env, 'DB'>, nowMs = Date.now()): Promise<JulesMonitorHealth> {
   const agents = await listAgents(env);
   const latest = agents[0] ?? null;
@@ -141,6 +165,9 @@ export async function deriveHealth(env: Pick<Env, 'DB'>, nowMs = Date.now()): Pr
   };
 }
 
+/**
+ * buildSummary
+ */
 export async function buildSummary(env: Pick<Env, 'DB'>): Promise<JulesMonitorSummary> {
   const db = getDb(env);
   const rows = await db.select({ status: julesOrchestrationTasks.status, n: sql<number>`count(*)` })

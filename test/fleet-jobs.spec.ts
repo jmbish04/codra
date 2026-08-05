@@ -10,6 +10,9 @@ import { createTestEnv } from './helpers';
 const KEY = 'test-webhook-secret';
 const authed = { 'X-API-Key': KEY, 'content-type': 'application/json' } as const;
 
+/**
+ * seedRepo
+ */
 async function seedRepo(env: Env, owner: string, repo: string) {
   const [row] = await getDb(env).insert(repositories).values({ installation_id: 1, owner, repo }).returning();
   return row.id;

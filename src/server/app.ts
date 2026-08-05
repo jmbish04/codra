@@ -31,10 +31,16 @@ import { createMcpOAuthRouter } from '@server/routes/api/mcp-oauth';
 import { GitHubLikeMCP } from '@server/agents/orchestrator';
 import { getSecretStoreBinding } from '@server/utils/secrets';
 
+/**
+ * serveIndex
+ */
 async function serveIndex(c: Context<AppEnv>) {
   return c.env.ASSETS.fetch(new URL('/index.html', c.req.url));
 }
 
+/**
+ * verifyMcpAuth
+ */
 async function verifyMcpAuth(c: Context<AppEnv>, next: any) {
   const authHeader = c.req.header('Authorization');
   
@@ -65,6 +71,9 @@ async function verifyMcpAuth(c: Context<AppEnv>, next: any) {
   });
 }
 
+/**
+ * createApp
+ */
 export function createApp() {
   const app = new Hono<AppEnv>();
 

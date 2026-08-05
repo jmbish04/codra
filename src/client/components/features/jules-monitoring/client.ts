@@ -134,12 +134,18 @@ type JulesActivitiesResponse = {
   syncedAt: string | null;
 };
 
+/**
+ * pathSegment
+ */
 function pathSegment(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) throw new Error('A task id is required.');
   return encodeURIComponent(trimmed);
 }
 
+/**
+ * queryString
+ */
 function queryString(values: Record<string, string | number | undefined>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(values)) {
@@ -149,6 +155,9 @@ function queryString(values: Record<string, string | number | undefined>): strin
   return query ? `?${query}` : '';
 }
 
+/**
+ * request
+ */
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const method = init?.method?.toUpperCase() ?? 'GET';
   const headers = new Headers(init?.headers);

@@ -18,6 +18,9 @@ import { formatDateTime } from '@client/lib/format';
 import type { JulesActivity, JulesArtifact, JulesMonitorEvent } from './client';
 import { activityLabel } from './status';
 
+/**
+ * ActivityIcon
+ */
 function ActivityIcon({ activity }: { activity: JulesActivity }) {
   const className = 'h-4 w-4';
   if (activity.type === 'userMessaged') return <UserRound className={className} />;
@@ -28,6 +31,9 @@ function ActivityIcon({ activity }: { activity: JulesActivity }) {
   if (activity.type === 'sessionFailed') return <XCircle className={className} />;
   return <CircleDot className={className} />;
 }
+/**
+ * ArtifactSummary
+ */
 function ArtifactSummary({ artifact }: { artifact: JulesArtifact }) {
   if (artifact.type === 'bashOutput') {
     return (
@@ -54,6 +60,9 @@ function ArtifactSummary({ artifact }: { artifact: JulesArtifact }) {
   return <div className="rounded-md border border-border bg-secondary/35 p-3 text-xs text-muted-foreground">{artifact.summary || artifact.label || artifact.type}</div>;
 }
 
+/**
+ * ActivityBody
+ */
 function ActivityBody({ activity }: { activity: JulesActivity }) {
   if (activity.type === 'planGenerated' && activity.plan) {
     return (
@@ -71,6 +80,9 @@ function ActivityBody({ activity }: { activity: JulesActivity }) {
   return content ? <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">{content}</p> : null;
 }
 
+/**
+ * JulesActivityTimeline
+ */
 export function JulesActivityTimeline({ activities, loading }: { activities: JulesActivity[]; loading: boolean }) {
   if (loading) return <div className="space-y-3" aria-busy="true">{Array.from({ length: 3 }).map((_, index) => <SkeletonCard key={index} lines={2} />)}</div>;
   if (activities.length === 0) return <EmptyState icon={<MessageSquare />} title="No Jules activity yet" description="Activity appears after the session starts producing messages, plans, and progress updates." className="py-10" />;
@@ -94,6 +106,9 @@ export function JulesActivityTimeline({ activities, loading }: { activities: Jul
   );
 }
 
+/**
+ * CodraEventTimeline
+ */
 export function CodraEventTimeline({ events }: { events: JulesMonitorEvent[] }) {
   if (events.length === 0) return <p className="py-6 text-center text-sm text-muted-foreground">No Codra orchestration events recorded.</p>;
   return (

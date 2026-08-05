@@ -23,6 +23,9 @@ type Env2 = Pick<Env, 'DB' | 'PLANNING_ARTIFACTS'>;
 /** Cap inlined transcript size (chars) so a huge dump can't blow the tool response. */
 export const CONTEXT_INLINE_CAP = 700_000;
 
+/**
+ * mcpListPlanningPackages
+ */
 export async function mcpListPlanningPackages(
   env: Env2, args: { repo?: number; status?: string; limit?: number },
 ): Promise<{ packages: PackageRow[] }> {
@@ -33,6 +36,9 @@ export type GetPackageResult =
   | { error: 'not_found' }
   | { package: PackageRow; revisions: RevisionRow[] | FullRevision[]; tasks: PackageTaskRow[]; context?: Record<string, string> };
 
+/**
+ * mcpGetPlanningPackage
+ */
 export async function mcpGetPlanningPackage(
   env: Env2, args: { packageId: string; includeRevisions?: boolean; includeContext?: boolean },
 ): Promise<GetPackageResult> {
@@ -41,6 +47,9 @@ export async function mcpGetPlanningPackage(
   const [summaries, tasks] = await Promise.all([listRevisions(env, pkg.id), listPackageTasks(env, pkg.id)]);
   if (!args.includeRevisions) return { package: pkg, revisions: summaries, tasks };
 
+  /**
+   * full
+   */
   const full = (await Promise.all(summaries.map((r) => getRevision(env, pkg.id, r.revision_number)))).filter(Boolean) as FullRevision[];
   const result: GetPackageResult = { package: pkg, revisions: full, tasks };
   if (args.includeContext) {
@@ -59,6 +68,9 @@ export async function mcpGetPlanningPackage(
   return result;
 }
 
+/**
+ * mcpGetPlanningRevision
+ */
 export async function mcpGetPlanningRevision(
   env: Env2, args: { packageId: string; revisionNumber: number },
 ): Promise<{ revision: FullRevision } | { error: 'not_found' }> {
@@ -66,6 +78,9 @@ export async function mcpGetPlanningRevision(
   return rev ? { revision: rev } : { error: 'not_found' };
 }
 
+/**
+ * mcpCreatePlanningPackage
+ */
 export async function mcpCreatePlanningPackage(
   env: Env2, args: { repositoryId: number; title: string; slug?: string; promptMarkdown?: string; createdBy?: string },
 ): Promise<{ package: PackageRow }> {
@@ -76,6 +91,9 @@ export async function mcpCreatePlanningPackage(
   return { package: pkg };
 }
 
+/**
+ * mcpSubmitPlanningRevision
+ */
 export async function mcpSubmitPlanningRevision(
   env: Env2, packageId: string, input: UpsertRevisionInput,
 ): Promise<{ revision: { id: string; revisionNumber: number } } | { error: 'not_found' }> {
@@ -83,12 +101,18 @@ export async function mcpSubmitPlanningRevision(
   return { revision: await upsertRevision(env, packageId, input) };
 }
 
+/**
+ * mcpExportPlanningPackages
+ */
 export async function mcpExportPlanningPackages(
   env: Env2, args: { planIds: string[] },
 ): Promise<{ packages: PackageExport[] }> {
   return { packages: await exportPackages(env, args.planIds) };
 }
 
+/**
+ * mcpRequestFleetRun
+ */
 export async function mcpRequestFleetRun(
   env: Env2, args: { repositoryId: number; kind: FleetJobKind; params?: unknown },
 ): Promise<{ job: { jobId: string; kind: string; status: string } }> {
@@ -96,6 +120,9 @@ export async function mcpRequestFleetRun(
   return { job: { jobId: job.job_id, kind: job.kind, status: job.status } };
 }
 
+/**
+ * mcpUpdatePlanTask
+ */
 export async function mcpUpdatePlanTask(
   env: Env2, args: { packageId: string; taskKey: string; status?: string; assignee?: string | null; prNumber?: number | null; notes?: string | null },
 ): Promise<{ ok: true; taskKey: string } | { error: 'not_found' }> {

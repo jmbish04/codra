@@ -57,6 +57,9 @@ describe('jules-orchestration db', () => {
     await logTaskEvent(env, t1.task_id, 'PR_CREATED', { url: 'https://github.com/o/r/pull/1' });
 
     const report = await globalOrchestrationReport(env);
+    /**
+     * key
+     */
     const key = (r: { repository_id: number; status: string }) => `${r.repository_id}:${r.status}`;
     const keys = report.map(key);
     expect(keys).toContain('1:pr_ready');

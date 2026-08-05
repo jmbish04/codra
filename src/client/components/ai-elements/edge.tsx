@@ -1,5 +1,8 @@
 import { BaseEdge, getBezierPath, type EdgeProps } from '@xyflow/react';
 
+/**
+ * bezier
+ */
 function bezier(props: EdgeProps) {
   const [path] = getBezierPath({
     sourceX: props.sourceX, sourceY: props.sourceY, sourcePosition: props.sourcePosition,

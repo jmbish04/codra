@@ -20,6 +20,9 @@ import {
 
 const REFRESH_MS = 20_000;
 
+/**
+ * JulesSessionDetailPage
+ */
 export function JulesSessionDetailPage() {
   const { taskId = '' } = useParams();
   const [task, setTask] = useState<JulesMonitorTask | null>(null);

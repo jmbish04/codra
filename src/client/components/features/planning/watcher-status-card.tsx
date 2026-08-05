@@ -27,6 +27,9 @@ const RECOVERY_PROMPT = `The codra "jules-watcher" daemon on my Mac is offline. 
 
 The worker's cron poller is the fallback and keeps Jules moving while the watcher is down, so there is no rush — but real-time triggering resumes only once this is back up.`;
 
+/**
+ * WatcherStatusCard
+ */
 export function WatcherStatusCard() {
   const [agents, setAgents] = useState<WatcherAgentDto[]>([]);
   const [alive, setAlive] = useState<boolean | null>(null);
@@ -38,6 +41,9 @@ export function WatcherStatusCard() {
     const load = () => api.getWatcherAgents()
       .then((res) => { if (mounted.current) { setAgents(res.agents); setAlive(res.alive); setError(null); } })
       .catch((e) => { if (mounted.current) setError(e instanceof Error ? e.message : 'Failed to load watcher status.'); });
+    /**
+     * load
+     */
     load();
     const id = setInterval(load, POLL_MS);
     return () => { mounted.current = false; clearInterval(id); };

@@ -48,6 +48,13 @@ driver** anywhere in the runtime.
   `GITHUB_WEBHOOK_SECRET`. The GitHub App's webhook secret must equal
   `WORKER_API_KEY`.
 
+## Development & Commands
+
+- **Build/Install**: `pnpm install`
+- **Development Server**: `npm run dev`
+- **Tests**: `npm test`
+- **Linting**: (If applicable, generally part of standard npm checks). Follow the existing code style.
+
 ## Stack summary
 
 - **Worker**: Cloudflare Workers, Hono, Wrangler

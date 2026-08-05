@@ -10,6 +10,9 @@ import { Play, ExternalLink } from 'lucide-react';
 
 const TASK_STATES = ['pending', 'in_progress', 'in_review', 'blocked', 'deferred', 'done'];
 
+/**
+ * PlanningDetailPage
+ */
 export function PlanningDetailPage() {
   const { id = '' } = useParams();
   const [detail, setDetail] = useState<PlanningPackageDetailResponse | null>(null);
@@ -19,6 +22,9 @@ export function PlanningDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
 
+  /**
+   * load
+   */
   const load = () => api.getPlanningPackage(id)
     .then((d) => {
       setDetail(d); setTasks(d.tasks); setError(null);
@@ -35,6 +41,9 @@ export function PlanningDetailPage() {
     return () => { live = false; };
   }, [id, revNum]);
 
+  /**
+   * orchestrate
+   */
   const orchestrate = async () => {
     if (running) return; // guard against duplicate orchestrations
     setRunning(true);
@@ -44,6 +53,9 @@ export function PlanningDetailPage() {
     finally { setRunning(false); }
   };
 
+  /**
+   * setTask
+   */
   const setTask = async (taskKey: string, patch: { status?: string; assignee?: string | null }) => {
     setTasks((ts) => ts.map((t) => t.task_key === taskKey ? { ...t, ...('status' in patch ? { status: patch.status! } : {}), ...('assignee' in patch ? { assignee: patch.assignee ?? null } : {}) } : t));
     try { await api.updatePlanningTask(id, taskKey, patch); } catch { load(); }
@@ -164,6 +176,9 @@ export function PlanningDetailPage() {
   );
 }
 
+/**
+ * Section
+ */
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="rounded-lg border border-border">
@@ -172,6 +187,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </section>
   );
 }
+/**
+ * Prose
+ */
 function Prose({ label, text }: { label: string; text: string }) {
   return (
     <section>

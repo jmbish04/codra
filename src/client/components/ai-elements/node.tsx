@@ -25,18 +25,33 @@ export function Node({
   );
 }
 
+/**
+ * NodeHeader
+ */
 export function NodeHeader({ children }: { children: ReactNode }) {
   return <div className="border-b border-border px-3 py-2">{children}</div>;
 }
+/**
+ * NodeTitle
+ */
 export function NodeTitle({ children }: { children: ReactNode }) {
   return <div className="text-sm font-semibold">{children}</div>;
 }
+/**
+ * NodeDescription
+ */
 export function NodeDescription({ children }: { children: ReactNode }) {
   return <div className="text-xs text-muted-foreground">{children}</div>;
 }
+/**
+ * NodeContent
+ */
 export function NodeContent({ children }: { children: ReactNode }) {
   return <div className="px-3 py-2">{children}</div>;
 }
+/**
+ * NodeFooter
+ */
 export function NodeFooter({ children }: { children: ReactNode }) {
   return <div className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground">{children}</div>;
 }

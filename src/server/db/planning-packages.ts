@@ -13,10 +13,16 @@ export type RevisionRow = typeof packageRevisions.$inferSelect;
 // has 7 columns, so 10 rows = 70 params — safe for every child table.
 // ponytail: fixed chunk of 10; only revisit if a child table grows past ~9 columns.
 const CHUNK = 10;
+/**
+ * insertChunked
+ */
 async function insertChunked<T>(rows: T[], run: (batch: T[]) => Promise<unknown>) {
   for (let i = 0; i < rows.length; i += CHUNK) await run(rows.slice(i, i + CHUNK));
 }
 
+/**
+ * createPackage
+ */
 export async function createPackage(env: Pick<Env, 'DB'>, input: {
   repositoryId: number; slug: string; title: string; requestPromptJson?: string | null; createdBy?: string | null;
 }): Promise<PackageRow> {
@@ -28,11 +34,17 @@ export async function createPackage(env: Pick<Env, 'DB'>, input: {
   return row;
 }
 
+/**
+ * getPackage
+ */
 export async function getPackage(env: Pick<Env, 'DB'>, id: string): Promise<PackageRow | null> {
   const db = getDb(env);
   return (await db.select().from(planningPackages).where(eq(planningPackages.id, id)).get()) ?? null;
 }
 
+/**
+ * listPackages
+ */
 export async function listPackages(env: Pick<Env, 'DB'>, q: {
   repositoryId?: number; status?: string; limit?: number; offset?: number;
 }): Promise<PackageRow[]> {
@@ -46,6 +58,9 @@ export async function listPackages(env: Pick<Env, 'DB'>, q: {
     .limit(q.limit ?? 100).offset(q.offset ?? 0).all();
 }
 
+/**
+ * updatePackage
+ */
 export async function updatePackage(env: Pick<Env, 'DB'>, id: string, patch: {
   title?: string; status?: string; requestPromptJson?: string | null; currentRevisionId?: string | null;
 }): Promise<void> {
@@ -132,6 +147,9 @@ export type FullRevision = RevisionRow & {
   diagrams: (typeof revisionDiagrams.$inferSelect)[];
 };
 
+/**
+ * getRevision
+ */
 export async function getRevision(
   env: Pick<Env, 'DB'>, packageId: string, revisionNumber: number,
 ): Promise<FullRevision | null> {
@@ -152,6 +170,9 @@ export async function getRevision(
   return { ...rev, changeItems, tasks, fileChanges, codeCards, apiChanges, migrations, diagrams };
 }
 
+/**
+ * listRevisions
+ */
 export async function listRevisions(env: Pick<Env, 'DB'>, packageId: string): Promise<RevisionRow[]> {
   const db = getDb(env);
   return db.select().from(packageRevisions).where(eq(packageRevisions.package_id, packageId))
@@ -200,6 +221,9 @@ export async function reconcilePackageTasks(
     .values(b.map((t) => ({ package_id: packageId, task_key: t.task_key }))));
 }
 
+/**
+ * updateTask
+ */
 export async function updateTask(
   env: Pick<Env, 'DB'>, packageId: string, taskKey: string,
   patch: { status?: string; assignee?: string | null; prNumber?: number | null; notes?: string | null },
@@ -215,6 +239,9 @@ export async function updateTask(
     .onConflictDoUpdate({ target: [packageTasks.package_id, packageTasks.task_key], set });
 }
 
+/**
+ * listPackageTasks
+ */
 export async function listPackageTasks(env: Pick<Env, 'DB'>, packageId: string): Promise<PackageTaskRow[]> {
   const db = getDb(env);
   return db.select().from(packageTasks).where(eq(packageTasks.package_id, packageId))
@@ -230,6 +257,9 @@ export async function exportPackages(env: Pick<Env, 'DB'>, planIds: string[]): P
     const pkg = await getPackage(env, id);
     if (!pkg) continue;
     const revs = await listRevisions(env, id);
+    /**
+     * revisions
+     */
     const revisions = (await Promise.all(revs.map((r) => getRevision(env, id, r.revision_number)))).filter(Boolean) as FullRevision[];
     out.push({ package: pkg, revisions, tasks: await listPackageTasks(env, id) });
   }

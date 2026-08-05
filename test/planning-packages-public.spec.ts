@@ -8,6 +8,9 @@ import { createTestEnv } from './helpers';
 
 // Mirror app.ts registration order: public router BEFORE the /api/* guard, so the
 // public export bypasses auth while sibling /api/* paths do not.
+/**
+ * makeApp
+ */
 function makeApp() {
   const app = new Hono<AppEnv>();
   app.route('/api/public/planning-packages', createPublicPlanningRouter());
