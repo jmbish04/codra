@@ -745,7 +745,12 @@ export async function findActiveJobsForPr(
 }
 
 /** Cancel a job (terminal 'superseded' status) with a reason — used when a PR closes. */
-export async function cancelJob(env: Pick<Env, 'DB'>, jobId: string, reason: string) {
+/**
+ * Cancel a single job by superseding it. Only queued/running jobs are
+ * cancellable; a terminal job (done/failed/superseded/merged/closed) is left
+ * untouched. Returns true iff a row was actually changed.
+ */
+export async function cancelJob(env: Pick<Env, 'DB'>, jobId: string, reason: string): Promise<boolean> {
   const db = getDb(env);
   // Only queued/running jobs are cancellable; a terminal job stays as-is. The
   // returned rows tell the caller whether anything actually changed.

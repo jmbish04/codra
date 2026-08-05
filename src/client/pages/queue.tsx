@@ -23,6 +23,11 @@ function timeAgo(value: string) {
   return 'just now';
 }
 
+/**
+ * Queue dashboard: lists every job waiting to run, with a "Clear queue" bulk
+ * cancel (confirmation first) and per-row cancel. Cancelling supersedes the job
+ * so its pending REVIEW_QUEUE message no-ops on dequeue — no model cost spent.
+ */
 export function QueuePage() {
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
