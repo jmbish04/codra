@@ -1,50 +1,57 @@
 # Frontend Routing
 
-[Return to Index](../README.md)
+[Return to Parent Directory](../frontend.md)
 
-Codra uses `react-router-dom` for client-side routing in a React Single Page Application (SPA).
+Codra uses `react-router-dom` for client-side routing within a React Single Page Application (SPA).
 
-Below is the complete route table outlining the paths and components registered in `src/client/main.tsx`.
+The routing table is registered in `src/client/main.tsx` utilizing `createBrowserRouter` and `RouterProvider`.
 
-| Path | Component | Description |
+## Loading Guards and Boundaries
+
+Most components are wrapped in a `withSuspense` HOC.
+This acts as a loader guard:
+- It wraps the component in an `<ErrorBoundary>` to catch rendering errors.
+- It provides a React `<Suspense>` boundary with a fallback loader (`<div role="status" aria-busy="true"... />`) while the lazy-loaded page component fetches.
+
+## Explicit Route Tree
+
+Below is the complete route tree explicitly extracted from the application logic.
+
+| Path | Component Rendered | Description / Guard |
 |------|-----------|-------------|
-| `/` | `LandingPage` | The public landing page. Full page suspense. |
-| `/login` | `LoginPage` | The login page for GitHub OAuth. Full page suspense. |
-| `/test-report/:jobId` | `TestReportPage` | Public test report accessible via PR links. Full page suspense. |
+| `/` | `LandingPage` | The public landing page. Wrapped in `withSuspense(..., true)` for a full-page loader. |
+| `/login` | `LoginPage` | The login page for GitHub OAuth. Wrapped in `withSuspense(..., true)`. |
+| `/test-report/:jobId` | `TestReportPage` | Public test report accessible via PR links. Wrapped in `withSuspense(..., true)`. |
+| `*` (Catch-all) | `NotFoundPage` | 404 Not Found error page. Wrapped in `withSuspense(..., true)`. |
 
-## Authenticated App Shell Routes
-These routes are nested under the `<AppShell />` layout.
+### Authenticated App Shell Routes
+These routes are nested as children under the `<AppShell />` layout element. They rely on `withSuspense` for inline component loading boundaries.
 
-| Path | Component | Description |
-|------|-----------|-------------|
-| `/dashboard` | `DashboardPage` | Overview of system stats and recent jobs. |
-| `/jobs` | `JobsPage` | List of review jobs. |
-| `/jobs/:id` | `JobDetailPage` | Specific review job details. |
-| `/jobs/:id/logs` | `JobLogsPage` | Logs for a specific review job. |
-| `/webhooks` | `WebhooksPage` | Webhook delivery inspection. |
-| `/standardization` | `StandardizationPage` | Custom rules and standards configuration. |
-| `/actions` | `ActionsPage` | Automated actions and integrations. |
-| `/secrets` | `SecretsPage` | Secrets management dashboard. |
-| `/testing` | `TestingPage` | Test runs overview. |
-| `/changelog/:slug` | `ChangelogDetailPage` | Platform changelog details. |
-| `/repos` | `ReposPage` | Connected GitHub repositories settings. |
-| `/stats` | `StatsPage` | System performance and token usage stats. |
-| `/settings` | `SettingsPage` | Global application settings. |
-| `/prompts` | `PromptsPage` | LLM prompt management. |
-| `/best-practices` | `BestPracticesPage` | Guidelines for code quality. |
-| `/docs-review` | `DocsReviewPage` | Documentation gap review settings. |
-| `/setup` | `SetupGuidePage` | Platform setup and onboarding guide. |
-| `/commands` | `CommandsPage` | Slash commands configuration. |
-| `/jules` | `JulesIntegrationPage` | Jules agent integration settings. |
-| `/jules/operations` | `JulesOperationsPage` | Jules operations overview. |
-| `/jules/monitor` | `JulesMonitorPage` | Monitoring page for active Jules sessions. |
-| `/jules/monitor/:taskId` | `JulesSessionDetailPage` | Details of a specific Jules session. |
-| `/jules/workflow` | `JulesWorkflowPage` | Configuration for Jules workflow rules. |
-| `/planning` | `PlanningListPage` | List of planning packages. |
-| `/planning/new` | `PlanningNewPage` | Create a new planning package. |
-| `/planning/:id` | `PlanningDetailPage` | Details for a planning package. |
-
-## Fallback
-| Path | Component | Description |
-|------|-----------|-------------|
-| `*` (Catch-all) | `NotFoundPage` | 404 Not Found error page. Full page suspense. |
+| Path | Component Rendered |
+|------|-----------|
+| `dashboard` | `DashboardPage` |
+| `jobs` | `JobsPage` |
+| `webhooks` | `WebhooksPage` |
+| `standardization` | `StandardizationPage` |
+| `actions` | `ActionsPage` |
+| `secrets` | `SecretsPage` |
+| `testing` | `TestingPage` |
+| `jobs/:id` | `JobDetailPage` |
+| `jobs/:id/logs` | `JobLogsPage` |
+| `changelog/:slug` | `ChangelogDetailPage` |
+| `repos` | `ReposPage` |
+| `stats` | `StatsPage` |
+| `settings` | `SettingsPage` |
+| `prompts` | `PromptsPage` |
+| `best-practices` | `BestPracticesPage` |
+| `docs-review` | `DocsReviewPage` |
+| `setup` | `SetupGuidePage` |
+| `commands` | `CommandsPage` |
+| `jules` | `JulesIntegrationPage` |
+| `jules/operations` | `JulesOperationsPage` |
+| `jules/monitor` | `JulesMonitorPage` |
+| `jules/workflow` | `JulesWorkflowPage` |
+| `planning` | `PlanningListPage` |
+| `planning/new` | `PlanningNewPage` |
+| `planning/:id` | `PlanningDetailPage` |
+| `jules/monitor/:taskId` | `JulesSessionDetailPage` |

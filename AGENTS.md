@@ -53,7 +53,7 @@ driver** anywhere in the runtime.
 - **Build/Install**: `pnpm install`
 - **Development Server**: `npm run dev`
 - **Tests**: `npm test`
-- **Linting**: (If applicable, generally part of standard npm checks). Follow the existing code style.
+- **Linting**: `npm run typecheck`
 
 ## Stack summary
 

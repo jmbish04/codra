@@ -71,74 +71,39 @@ Codra listens to GitHub pull request events, runs AI-powered review jobs, posts 
 - **GitHub**: GitHub App webhooks, checks, reviews, and OAuth
 - **Quality**: TypeScript, Zod, Vitest, Playwright browser tests
 
-## Installation, Running, and Testing
+## Development, Installation, and Testing
 
-- **Installation**: Use `pnpm install` to install dependencies.
-- **Running**: Start the local development server (client and worker) using `npm run dev`. Generate database migrations with `npm run db:generate` and apply them using `npm run migrate:local`.
-- **Testing**: Run the test suite (Vitest + Playwright) via `npm test` or in watch mode using `npm run test:watch`. No external database is needed, as tests run on an in-memory SQLite D1 instance.
+Codra is easy to run and develop locally. We use `pnpm` for dependency management.
 
-## Docs Suite
-
-The internal documentation suite lives in the `docs/` directory. It includes documents like `ROADMAP.md`, `REBUILD-PLAN.md`, and other guides used during development.
-
-## Docs-gap Jules tasks & deploy workflow
-
-- The review pipeline (`src/server/core/review.ts`) has two opt-out toggles in
-  `config.review`: `jules.enabled` (docs-gap → Jules session, launched only
-  on PR merge) and `deployWorkflow.enabled` (separate `codra/deploy-workflow-*`
-  PR adding `.github/workflows/deploy.yml`). Both default to `true` — see
-  `src/server/core/jules.ts`, `src/server/core/jules-docs-gap.ts`, and
-  `src/server/core/deploy-workflow.ts`.
-- Auto-setting the `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_TOKEN` Actions
-  secrets (`src/server/core/github-secrets.ts`) requires the GitHub App's
-  **Actions Secrets: write** permission; without it, Codra writes the secret
-  names and setup steps into the deploy-workflow PR body instead.
-## Development
-
-### Setup & Run
-1. Install dependencies: `pnpm install`
-2. Start the local development server: `npm run dev`
-
-### Testing
-Execute the test suite (Vitest and Playwright) using: `npm test`
-
-## Development & Testing
-
-Codra uses `pnpm` for dependency management.
-
-1. **Install dependencies:**
+1. **Installation:** Install project dependencies with `pnpm install`.
+2. **Database setup:** Generate and apply the local SQLite schema using D1:
    ```bash
-   pnpm install
+   npm run db:generate
+   npm run migrate:local
    ```
-2. **Database setup:**
-   Generate and apply the local SQLite schema using D1:
-   ```bash
-   pnpm run db:generate
-   pnpm run migrate:local
-   ```
-3. **Run locally:**
-   Start the local development server (client and worker):
-   ```bash
-   pnpm run dev
-   ```
-4. **Run tests:**
-   Execute the test suite (Vitest and Playwright):
-   ```bash
-   pnpm test
-   ```
+3. **Running locally:** Start the local development server (client and worker) using `npm run dev`.
+4. **Testing:** Execute the test suite (Vitest and Playwright) using `npm test`. The test suite runs on an in-memory SQLite D1 instance, requiring no external database setup.
 
 ## Documentation
 
-The full setup and operations guides live at [codra.run/docs](https://codra.run/docs). The internal documentation suite for the repository (such as the rebuild plan and roadmap) lives in the `docs/` directory at the repository root.
-For local setup and architectural context, see the [docs/](docs/) suite in this repository.
+The internal documentation suite lives in the `docs/` directory. It includes architecture details, setup instructions, deployment guides, and API / Frontend routing specs. Start at the [Index (docs/README.md)](./docs/README.md).
 
-The full setup and operations guides live at [codra.run/docs](https://codra.run/docs).
-
+For full setup and operations guides, visit [codra.run/docs](https://codra.run/docs).
 - [Installation guide](https://codra.run/docs/installation)
 - [Configuration guide](https://codra.run/docs/configuration)
 - [Deploy with Neon](https://codra.run/docs/neon)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
+
+## Docs-gap Jules Tasks & Deploy Workflow
+
+Codra includes built-in workflows for docs-gap detection and deployment scaffolding. The review pipeline (`src/server/core/review.ts`) has two opt-out toggles under `config.review`:
+
+- `jules.enabled`: Automates a Jules session to resolve documentation gaps, launched only on PR merge. (Defaults to `true` – see `src/server/core/jules.ts` and `src/server/core/jules-docs-gap.ts`).
+- `deployWorkflow.enabled`: Automates the creation of a separate `codra/deploy-workflow-*` PR that adds `.github/workflows/deploy.yml`. (Defaults to `true` – see `src/server/core/deploy-workflow.ts`).
+
+**Note on Secrets:**
+Auto-setting the `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` Actions secrets (`src/server/core/github-secrets.ts`) requires the GitHub App to have **Actions Secrets: write** permission. Without this permission, Codra gracefully degrades by writing the secret names and setup instructions directly into the deploy-workflow PR body instead.
 
 ## Contributing
 
