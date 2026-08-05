@@ -12,7 +12,7 @@ import { logger } from '@server/core/logger';
  * For repos codra HAS reviewed, the per-repo PR-number watermark is the tighter
  * gate. ponytail: a constant is enough; make it a config row if it needs tuning.
  */
-const SYNC_MIN_PR_CREATED_AT = '2026-07-23T00:00:00Z';
+const SYNC_MIN_PR_CREATED_AT = '2026-07-24T00:00:00Z';
 
 export type RepoSyncStat = {
   owner: string;
