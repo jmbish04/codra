@@ -71,6 +71,28 @@ Codra listens to GitHub pull request events, runs AI-powered review jobs, posts 
 - **GitHub**: GitHub App webhooks, checks, reviews, and OAuth
 - **Quality**: TypeScript, Zod, Vitest, Playwright browser tests
 
+## Installation, Running, and Testing
+
+- **Installation**: Use `pnpm install` to install dependencies.
+- **Running**: Start the local development server (client and worker) using `npm run dev`. Generate database migrations with `npm run db:generate` and apply them using `npm run migrate:local`.
+- **Testing**: Run the test suite (Vitest + Playwright) via `npm test` or in watch mode using `npm run test:watch`. No external database is needed, as tests run on an in-memory SQLite D1 instance.
+
+## Docs Suite
+
+The internal documentation suite lives in the `docs/` directory. It includes documents like `ROADMAP.md`, `REBUILD-PLAN.md`, and other guides used during development.
+
+## Docs-gap Jules tasks & deploy workflow
+
+- The review pipeline (`src/server/core/review.ts`) has two opt-out toggles in
+  `config.review`: `jules.enabled` (docs-gap → Jules session, launched only
+  on PR merge) and `deployWorkflow.enabled` (separate `codra/deploy-workflow-*`
+  PR adding `.github/workflows/deploy.yml`). Both default to `true` — see
+  `src/server/core/jules.ts`, `src/server/core/jules-docs-gap.ts`, and
+  `src/server/core/deploy-workflow.ts`.
+- Auto-setting the `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_TOKEN` Actions
+  secrets (`src/server/core/github-secrets.ts`) requires the GitHub App's
+  **Actions Secrets: write** permission; without it, Codra writes the secret
+  names and setup steps into the deploy-workflow PR body instead.
 ## Development
 
 ### Setup & Run
