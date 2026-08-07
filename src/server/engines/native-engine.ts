@@ -3,6 +3,12 @@ import type { ParsedReviewComment } from '@shared/schema';
 import { planReviewers } from '@server/core/reviewer-plan';
 import { REVIEWERS, buildReviewerSystemPrompt } from '@server/prompts/reviewers';
 
+/**
+ * ReviewEngine interface implementation reserved for Spec 2 engines
+ * (ComputerEngine/OpenCodeEngine). NOT wired into the live review pipeline —
+ * the production native review path is `reviewAndPersistFile` in
+ * src/server/core/review.ts, which fans out reviewers inside the metered loop.
+ */
 export class NativeEngine implements ReviewEngine {
   readonly name = 'native' as const;
   async healthCheck() { return true; } // always available

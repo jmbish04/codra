@@ -1,5 +1,4 @@
 import type { RepoConfig } from '@shared/schema';
-import { sanitizeForPrompt } from '@server/core/prompt-safety';
 
 export type ReviewerId = 'security' | 'bugs' | 'performance' | 'correctness' | 'quality' | 'docs';
 

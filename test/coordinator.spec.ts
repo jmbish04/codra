@@ -25,6 +25,14 @@ describe('coordinateFindings', () => {
     expect(runModel).not.toHaveBeenCalled();
     expect(out).toHaveLength(1);
   });
+
+  it('caps source fetches at MAX_SOURCE_FETCHES distinct paths', async () => {
+    const comments = Array.from({ length: 12 }, (_, i) => c({ path: `file${i}.ts`, confidenceScore: 0.1 }));
+    const fetchSource = vi.fn(async () => 'source content');
+    const runModel = vi.fn(async () => ({ keep: comments.map((_, i) => i) }));
+    await coordinateFindings({ comments, sharedContext: 'S', runModel, fetchSource });
+    expect(fetchSource).toHaveBeenCalledTimes(8);
+  });
 });
 
 describe('windowSourceLines', () => {

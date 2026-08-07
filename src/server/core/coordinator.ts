@@ -8,6 +8,10 @@ export type SourceFetcher = (path: string, line: number | null) => Promise<strin
 /** Half-window (lines) fetched on each side of a finding's line for source verification. */
 const SOURCE_WINDOW = 20;
 
+/** Cap on distinct source paths fetched per coordinator pass, so finalize's other
+ *  GitHub subrequests (createReview, etc.) don't blow the Workers 50-subrequest limit. */
+const MAX_SOURCE_FETCHES = 8;
+
 /**
  * Slices `content` to a window of lines centered on `line` (1-based), or the
  * file head when `line` is null. Extracted for isolated unit testing.
@@ -53,9 +57,12 @@ export async function coordinateFindings(input: {
 
   const threshold = input.lowConfidence ?? 0.6;
   const sourceBlocks: string[] = [];
+  const fetchedPaths = new Set<string>();
   for (let i = 0; i < comments.length; i++) {
     const cm = comments[i];
     if ((cm.confidenceScore ?? 1) < threshold) {
+      if (!fetchedPaths.has(cm.path) && fetchedPaths.size >= MAX_SOURCE_FETCHES) continue;
+      fetchedPaths.add(cm.path);
       const src = await fetchSource(cm.path, cm.line ?? null);
       if (src) sourceBlocks.push(`[#${i} ${cm.path}:${cm.line}]\n${sanitizeForPrompt(src)}`);
     }
