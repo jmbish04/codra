@@ -46,7 +46,7 @@ export function isGeneratedFile(file: FileDiff): boolean {
   if (isMigrationPath(file.path)) return false;
   const addedHead = file.hunks
     .flatMap((h) => h.lines)
-    .filter((l) => l.kind !== 'del')
+    .filter((l) => l.kind === 'add')
     .slice(0, 5)
     .map((l) => l.content)
     .join('\n');
