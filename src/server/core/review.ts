@@ -12,7 +12,7 @@ import { filterReviewableFiles, parseUnifiedDiff, renderFileDiff } from './diff'
 import { planReviewers, selectFilePlanForBudget } from '@server/core/reviewer-plan';
 import { REVIEWERS, buildReviewerSystemPrompt, type ReviewerId } from '@server/prompts/reviewers';
 import { buildSharedContext } from '@server/core/shared-context';
-import { aggregateReviewerResults, type ReviewerCallResult } from '@server/core/reviewer-aggregate';
+import { aggregateReviewerResults, limitFinalReviewComments, type ReviewerCallResult } from '@server/core/reviewer-aggregate';
 import { coordinateFindings, parseCoordinatorKeep, windowSourceLines } from '@server/core/coordinator';
 import { COORDINATOR_SCHEMA } from '@server/models/schemas';
 
@@ -685,6 +685,10 @@ async function runReviewPhase(
   // gate below simply no-ops (matches the tracker-less TokenTracker usage
   // pattern already used elsewhere in this file, e.g. GitHubClient/model.ts).
   const tracker = model.getTracker?.();
+  // Subrequests already reserved for files kicked off in parallel this chunk.
+  // Without this, each file's gate sees the same stale counter and up to
+  // REVIEW_CHUNK_FILE_LIMIT files can all pass hasRemainingSubrequests at once.
+  let reservedSubrequestsThisChunk = 0;
 
   // 30s heartbeat for the (potentially minutes-long) reviewer fan-out below:
   // extends the lease + nudges the check-run so a stalled check doesn't read
@@ -731,9 +735,14 @@ async function runReviewPhase(
     // trivial-tier degrade-instead-of-stall fallback.
     let filePlan = plan;
     if (willCallModel && tracker) {
-      const decision = selectFilePlanForBudget(plan, processedThisChunk, (needed) => tracker.hasRemainingSubrequests(needed));
+      const decision = selectFilePlanForBudget(
+        plan,
+        processedThisChunk,
+        (needed) => tracker.hasRemainingSubrequests(needed + reservedSubrequestsThisChunk),
+      );
       if (decision.action === 'defer') break;
       filePlan = decision.plan;
+      reservedSubrequestsThisChunk += filePlan.length + 2;
       if (filePlan !== plan) {
         logger.warn(`Reviewer plan (${plan.length}) doesn't fit the subrequest budget for ${file.path}; using reduced set`, {
           reduced: filePlan,
@@ -1447,7 +1456,12 @@ async function runFinalizePhase(
   const files = filterReviewableFiles(parseUnifiedDiff(rawDiff), config.review);
   const reviews = await getFileReviewsForJobs(env, [job.id]);
 
-  if (reviews.length < files.length) {
+  const reviewByPath = new Map(reviews.map((review) => [review.file_path, review]));
+  const incompleteFiles = files.some((file) => {
+    const review = reviewByPath.get(file.path);
+    return !review || !countsAsHandledFileReview(review);
+  });
+  if (incompleteFiles) {
     await updateJobStep(env, job.id, 'Reviewing Files', { status: 'running' });
     await enqueueJobPhase(env, job.id, 'review');
     return;
@@ -1514,16 +1528,11 @@ async function runFinalizePhase(
     }
   }
 
-  const severityRanks: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3, nit: 4 };
-  const minRank = severityRanks[config.review.min_severity] ?? 4;
-
-  let finalComments = coordinatedComments.filter(c => (severityRanks[c.severity] ?? 4) <= minRank);
-  finalComments.sort((a, b) => (severityRanks[a.severity] ?? 4) - (severityRanks[b.severity] ?? 4));
-
-  const omittedCount = coordinatedComments.length - Math.min(finalComments.length, config.review.max_comments);
-  if (finalComments.length > config.review.max_comments) {
-    finalComments = finalComments.slice(0, config.review.max_comments);
-  }
+  const { comments: finalComments, omittedCount } = limitFinalReviewComments(
+    coordinatedComments,
+    config.review.min_severity,
+    config.review.max_comments,
+  );
 
   const verdictSummary = formatter.summarizeVerdict(finalComments, hasFailures);
   await updateJobStep(env, job.id, 'Generating Summary', { status: 'done' });
