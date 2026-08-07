@@ -14,5 +14,5 @@ const TAG_RE = new RegExp(`</?\\s*(?:${BOUNDARY_TAGS.join('|')})(?:[^>])*>`, 'gi
  *  untouched. */
 export function sanitizeForPrompt(text: string | null | undefined): string {
   if (!text) return '';
-  return text.replace(TAG_RE, (m) => m.replace('<', '&lt;').replace('>', '&gt;'));
+  return text.replace(TAG_RE, (m) => m.replace(/</g, '&lt;').replace(/>/g, '&gt;'));
 }

@@ -42,4 +42,13 @@ describe('sanitizeForPrompt', () => {
     expect(out).not.toMatch(/<\/ mr_input>/);
     expect(out).toContain('text');
   });
+
+  it('neutralizes nested boundary tags inside attributes', () => {
+    const hostile = '<mr_input a="<mr_input>">payload</mr_input>';
+    const out = sanitizeForPrompt(hostile);
+    // no live boundary tag should survive anywhere in the output
+    expect(out).not.toContain('<mr_input');
+    expect(out).not.toContain('</mr_input');
+    expect(out).toContain('payload');
+  });
 });
