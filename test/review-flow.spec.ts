@@ -4,6 +4,7 @@ import { vi } from 'vitest';
 import { findExistingJobForHead, getJobForProcessing, insertJob, updateJobFileCount, updateJobStep } from '@server/db/jobs';
 import { getFileReviewsForJobs, upsertFileReview } from '@server/db/file-reviews';
 import { defaultRepoConfig } from '@shared/schema';
+import { planReviewers } from '@server/core/reviewer-plan';
 
 
 const sha = (char: string) => char.repeat(40);
@@ -463,7 +464,12 @@ dbDescribe('Review Flow Lifecycle', () => {
       });
 
       expect(result).toEqual({ action: 'ack' });
-      expect(maxActive).toBe(3);
+      // REVIEW_CHUNK_FILE_LIMIT caps concurrent FILES at 3; each file also fans
+      // out to every planned reviewer concurrently (trivial tier under
+      // defaultRepoConfig = security + correctness), so max concurrent
+      // reviewFile() calls is filesInFlight x reviewersPerFile.
+      const reviewersPerFile = planReviewers(3, 3, defaultRepoConfig.review).length;
+      expect(maxActive).toBe(3 * reviewersPerFile);
       expect((env.REVIEW_QUEUE as any).sent[0]).toMatchObject({ jobId: job.id, phase: 'finalize' });
     })();
 
@@ -472,6 +478,54 @@ dbDescribe('Review Flow Lifecycle', () => {
 
     reviewSpy.mockRestore();
     getDiffSpy.mockRestore();
+  }, REVIEW_FLOW_TIMEOUT_MS);
+
+  it('fans out to multiple specialized reviewers on a small PR and persists engine_used=native', async () => {
+    const repo = `test-repo-${Date.now()}-fanout`;
+    const headSha = sha('1');
+    const baseSha = sha('2');
+
+    await runAndDrain({
+      deliveryId: 'delivery-fanout',
+      eventName: 'pull_request',
+      payload: {
+        action: 'opened',
+        installation: { id: 123 },
+        repository: { owner: { login: 'test-owner' }, name: repo },
+        pull_request: {
+          number: 2,
+          head: { sha: headSha, ref: 'feature' },
+          base: { sha: baseSha, ref: 'main' },
+          title: 'Test PR',
+          user: { login: 'author' },
+          draft: false,
+        },
+      },
+    });
+
+    const finalJob = await findExistingJobForHead(env, {
+      owner: 'test-owner',
+      repo,
+      prNumber: 2,
+      commitSha: headSha,
+      trigger: 'auto',
+    });
+    expect(finalJob?.status).toBe('done');
+
+    // Default config, tiny diff -> trivial risk tier -> 2 reviewers (security +
+    // correctness). The shared mocked ModelService.reviewFile ignores its
+    // params and always returns 1 comment / 10 input / 5 output tokens, so the
+    // fanned-out aggregate for this file should be exactly double.
+    const reviewersPerFile = planReviewers(1, 1, defaultRepoConfig.review).length;
+    expect(reviewersPerFile).toBe(2);
+
+    const reviews = await getFileReviewsForJobs(env, [finalJob!.id]);
+    const fileReview = reviews.find((r) => r.file_path === 'src/app.ts');
+    expect(fileReview?.file_status).toBe('done');
+    expect(fileReview?.engine_used).toBe('native');
+    expect(fileReview?.input_tokens).toBe(10 * reviewersPerFile);
+    expect(fileReview?.output_tokens).toBe(5 * reviewersPerFile);
+    expect(fileReview?.parsed_comments).toHaveLength(reviewersPerFile);
   }, REVIEW_FLOW_TIMEOUT_MS);
 
   it('marks completed jobs with skipped files as partial reviews', async () => {

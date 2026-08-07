@@ -9,6 +9,10 @@ import { getResolvedModelConfig } from '@server/db/model-configs';
 import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, countAutoReviewsForPr, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, MAX_AUTO_REVIEWS_PER_PR, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
 import { parseFileReviewResponse } from './model-output';
 import { filterReviewableFiles, parseUnifiedDiff, renderFileDiff } from './diff';
+import { planReviewers } from '@server/core/reviewer-plan';
+import { REVIEWERS, buildReviewerSystemPrompt, type ReviewerId } from '@server/prompts/reviewers';
+import { buildSharedContext } from '@server/core/shared-context';
+import { aggregateReviewerResults, type ReviewerCallResult } from '@server/core/reviewer-aggregate';
 
 import { GitHubService } from '../services/github';
 import { GitHubClient } from './github';
@@ -615,6 +619,14 @@ async function runReviewPhase(
     return '';
   });
 
+  // Which specialized reviewers (security/bugs/performance/...) fan out per
+  // file, sized by PR risk tier. `sharedContext` is the PR-level context (title,
+  // description, custom rules, project context) built once so its cache
+  // breakpoint hits across every reviewer x file call instead of rebuilding it
+  // per call.
+  const plan = planReviewers(totalLineCount, files.length, config.review);
+  const sharedContext = buildSharedContext({ pr, config, projectContext });
+
   // Bail before spending model calls if a newer commit superseded this job
   // while standardization / diff-fetch was running.
   await checkSuperseded(env, job.id);
@@ -652,7 +664,10 @@ async function runReviewPhase(
     });
   }
 
-  if (await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount, projectContext })) {
+  // Multi-reviewer fan-out (see reviewAndPersistFile) isn't wired into the batch
+  // path yet — deferred. Only take the batch path when a single reviewer covers
+  // this PR, otherwise fall through to the synchronous per-file loop below.
+  if (plan.length <= 1 && await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount, projectContext })) {
     return;
   }
 
@@ -667,13 +682,13 @@ async function runReviewPhase(
     const inherited = parentReviews.get(file.path);
     const reviewTask = async () => {
       if (!inherited) {
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, resolveFailureModelProvider, existingReview);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, plan, resolveFailureModelProvider, existingReview);
         return;
       }
 
       if (!canInheritParentFileReview(config, inherited)) {
         logger.info(`Ignoring inherited review for ${file.path}; parent model ${inherited.model_used} is not in the current model strategy`);
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, resolveFailureModelProvider, existingReview);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, plan, resolveFailureModelProvider, existingReview);
       } else {
         const inheritedComments = inherited.parsed_comments as ParsedReviewComment[];
         const fileReviewId = await upsertFileReview(env, job.id, {
@@ -1007,42 +1022,124 @@ async function reviewAndPersistFile(
   model: ModelService,
   pricing: PricingSnapshot,
   projectContext: string,
+  sharedContext: string,
+  plan: ReviewerId[],
   resolveFailureModelProvider: () => Promise<string | null>,
   previousReview?: { transient_error_count: number },
 ) {
   const startedAt = Date.now();
   const compactPrompt = (previousReview?.transient_error_count ?? 0) > 0;
   try {
-    const response = await model.reviewFile({
-      file,
-      prTitle: pr.title ?? null,
-      prDescription: pr.body ?? null,
-      config,
-      totalLineCount,
-      compactPrompt,
-      projectContext,
-    });
+    let modelUsed: string;
+    let provider: string;
+    let rawText: string;
+    let comments: ParsedReviewComment[];
+    let verdict: 'approve' | 'comment';
+    let fileSummary: string | null | undefined;
+    let overallCorrectness: string | null | undefined;
+    let confidenceScore: number | null | undefined;
+    let inputTokens: number;
+    let outputTokens: number;
+    let cacheReadTokens: number | null;
+    let cacheWriteTokens: number | null;
+    let reviewerCallCount: number;
+
+    if (plan.length <= 1) {
+      // Legacy single-call path — behavior here is byte-identical to before the
+      // reviewer fan-out; only engineUsed/cache token bookkeeping is new.
+      const response = await model.reviewFile({
+        file,
+        prTitle: pr.title ?? null,
+        prDescription: pr.body ?? null,
+        config,
+        totalLineCount,
+        compactPrompt,
+        projectContext,
+      });
+      modelUsed = response.modelUsed;
+      provider = response.provider;
+      rawText = response.rawText;
+      comments = response.parsed.comments;
+      verdict = response.parsed.verdict;
+      fileSummary = response.parsed.fileSummary;
+      overallCorrectness = response.parsed.overallCorrectness;
+      confidenceScore = response.parsed.confidenceScore;
+      inputTokens = response.inputTokens;
+      outputTokens = response.outputTokens;
+      cacheReadTokens = response.cacheReadTokens ?? null;
+      cacheWriteTokens = response.cacheWriteTokens ?? null;
+      reviewerCallCount = 1;
+    } else {
+      // Fan out to the planned specialized reviewers (security/bugs/perf/...)
+      // and combine their findings into one file review record. sharedContext
+      // already carries the project context, so pass '' here to avoid
+      // duplicating it in every reviewer's prompt.
+      const results: ReviewerCallResult[] = await Promise.all(
+        plan.map(async (id): Promise<ReviewerCallResult> => {
+          const response = await model.reviewFile({
+            file,
+            prTitle: pr.title ?? null,
+            prDescription: pr.body ?? null,
+            config,
+            totalLineCount,
+            compactPrompt,
+            projectContext: '',
+            systemPromptOverride: buildReviewerSystemPrompt(REVIEWERS[id], config.review),
+            cacheSystem: true,
+            sharedContext,
+          });
+          return {
+            reviewer: id,
+            parsed: response.parsed,
+            modelUsed: response.modelUsed,
+            provider: response.provider,
+            rawText: response.rawText,
+            inputTokens: response.inputTokens,
+            outputTokens: response.outputTokens,
+            cacheReadTokens: response.cacheReadTokens,
+            cacheWriteTokens: response.cacheWriteTokens,
+          };
+        }),
+      );
+      const aggregate = aggregateReviewerResults(results);
+      modelUsed = aggregate.modelUsed;
+      provider = aggregate.provider;
+      rawText = aggregate.rawText;
+      comments = aggregate.comments;
+      verdict = aggregate.verdict;
+      fileSummary = aggregate.fileSummary;
+      overallCorrectness = aggregate.overallCorrectness;
+      confidenceScore = aggregate.confidenceScore;
+      inputTokens = aggregate.inputTokens;
+      outputTokens = aggregate.outputTokens;
+      cacheReadTokens = aggregate.cacheReadTokens;
+      cacheWriteTokens = aggregate.cacheWriteTokens;
+      reviewerCallCount = plan.length;
+    }
 
     const fileReviewId = await upsertFileReview(env, job.id, {
       filePath: file.path,
       fileStatus: 'done',
-      modelUsed: response.modelUsed,
-      modelProvider: response.provider,
+      modelUsed,
+      modelProvider: provider,
       diffLineCount: file.lineCount,
       diffInput: renderFileDiff(file),
-      rawAiOutput: response.rawText,
-      parsedComments: response.parsed.comments,
-      inputTokens: response.inputTokens,
-      outputTokens: response.outputTokens,
+      rawAiOutput: rawText,
+      parsedComments: comments,
+      inputTokens,
+      outputTokens,
       durationMs: Date.now() - startedAt,
-      verdict: response.parsed.verdict,
-      fileSummary: response.parsed.fileSummary,
-      overallCorrectness: response.parsed.overallCorrectness,
-      confidenceScore: response.parsed.confidenceScore,
+      verdict,
+      fileSummary: fileSummary ?? null,
+      overallCorrectness,
+      confidenceScore,
       errorMessage: null,
+      engineUsed: 'native',
+      cacheReadTokens,
+      cacheWriteTokens,
     });
 
-    const comments = response.parsed.comments ?? [];
+    comments = comments ?? [];
     let doRequests = 0;
     let doDurationGbs = 0;
     // Measure only the DO streaming loop — capturing the start before the
@@ -1067,24 +1164,26 @@ async function reviewAndPersistFile(
       doDurationGbs = msToGbSeconds(Date.now() - doStartedAt);
     }
 
-    // Metered per-file usage. AI tokens are exact; DO requests are the exact
-    // count of stream fetches with measured active duration; D1 rows are the
-    // rows this file's persistence writes/reads; subrequests = model call + DO
-    // fetches. ponytail: D1 rows are counted from the write shape (1 review row
-    // + N comment rows), not the D1 `meta` field — dollars here are rounding
-    // level; swap to result.meta.rows_read/written if precision ever matters.
+    // Metered per-file usage. AI tokens are exact (summed across every
+    // reviewer call when fanned out); DO requests are the exact count of
+    // stream fetches with measured active duration; D1 rows are the rows this
+    // file's persistence writes/reads; subrequests = one per reviewer model
+    // call + DO fetches. ponytail: D1 rows are counted from the write shape (1
+    // review row + N comment rows), not the D1 `meta` field — dollars here are
+    // rounding level; swap to result.meta.rows_read/written if precision ever
+    // matters.
     await recordFileCost(env, pricing, {
       fileReviewId,
       jobId: job.id,
-      modelUsed: response.modelUsed,
+      modelUsed,
       usage: {
-        aiInputTokens: response.inputTokens ?? 0,
-        aiOutputTokens: response.outputTokens ?? 0,
+        aiInputTokens: inputTokens ?? 0,
+        aiOutputTokens: outputTokens ?? 0,
         doRequests,
         doDurationGbs,
         d1RowsWritten: 1 + comments.length,
         d1RowsRead: 2,
-        subrequests: 1 + doRequests,
+        subrequests: reviewerCallCount + doRequests,
       },
     });
   } catch (error) {
