@@ -25,6 +25,9 @@ export const fileReviews = sqliteTable('file_reviews', {
   // Rollup of file_review_costs.total_cost for this file (USD). Snapshotted at
   // review time so historical cost reflects the price then, not current rates.
   total_cost_usd: real('total_cost_usd'),
+  engine_used: text('engine_used'),
+  cache_read_tokens: integer('cache_read_tokens'),
+  cache_write_tokens: integer('cache_write_tokens'),
 });
 
 // Per-usage-type cost breakdown for a single file review. One row per usage

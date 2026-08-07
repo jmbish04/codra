@@ -24,6 +24,9 @@ export async function insertFileReview(
     overallCorrectness?: string | null;
     confidenceScore?: number | null;
     errorMessage: string | null;
+    engineUsed?: string | null;
+    cacheReadTokens?: number | null;
+    cacheWriteTokens?: number | null;
   },
 ) {
   const db = getDb(env);
@@ -45,6 +48,9 @@ export async function insertFileReview(
     overall_correctness: input.overallCorrectness ?? null,
     confidence_score: input.confidenceScore ?? null,
     error_msg: input.errorMessage,
+    engine_used: input.engineUsed ?? null,
+    cache_read_tokens: input.cacheReadTokens ?? null,
+    cache_write_tokens: input.cacheWriteTokens ?? null,
   }).returning({ id: fileReviews.id });
 
   if (input.parsedComments.length > 0) {
@@ -83,6 +89,9 @@ export async function upsertFileReview(
     overallCorrectness?: string | null;
     confidenceScore?: number | null;
     errorMessage: string | null;
+    engineUsed?: string | null;
+    cacheReadTokens?: number | null;
+    cacheWriteTokens?: number | null;
   },
 ) {
   const db = getDb(env);
@@ -110,6 +119,9 @@ export async function upsertFileReview(
       confidence_score: input.confidenceScore ?? null,
       error_msg: input.errorMessage,
       transient_error_count: 0,
+      engine_used: input.engineUsed ?? null,
+      cache_read_tokens: input.cacheReadTokens ?? null,
+      cache_write_tokens: input.cacheWriteTokens ?? null,
     }).where(eq(fileReviews.id, reviewRow.id));
   } else {
     const [inserted] = await db.insert(fileReviews).values({
@@ -129,6 +141,9 @@ export async function upsertFileReview(
       overall_correctness: input.overallCorrectness ?? null,
       confidence_score: input.confidenceScore ?? null,
       error_msg: input.errorMessage,
+      engine_used: input.engineUsed ?? null,
+      cache_read_tokens: input.cacheReadTokens ?? null,
+      cache_write_tokens: input.cacheWriteTokens ?? null,
     }).returning({ id: fileReviews.id });
     reviewRow = inserted;
   }

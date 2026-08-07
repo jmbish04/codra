@@ -6,9 +6,15 @@ import { getPricingSnapshot, buildCostBreakdown, sumBreakdown, type PricingSnaps
 import { getProjectContext } from '@server/core/project-context';
 import { withTimeout } from '@server/core/timeout';
 import { getResolvedModelConfig } from '@server/db/model-configs';
-import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
+import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, countAutoReviewsForPr, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, MAX_AUTO_REVIEWS_PER_PR, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
 import { parseFileReviewResponse } from './model-output';
 import { filterReviewableFiles, parseUnifiedDiff, renderFileDiff } from './diff';
+import { planReviewers, selectFilePlanForBudget } from '@server/core/reviewer-plan';
+import { REVIEWERS, buildReviewerSystemPrompt, type ReviewerId } from '@server/prompts/reviewers';
+import { buildSharedContext } from '@server/core/shared-context';
+import { aggregateReviewerResults, type ReviewerCallResult } from '@server/core/reviewer-aggregate';
+import { coordinateFindings, parseCoordinatorKeep, windowSourceLines } from '@server/core/coordinator';
+import { COORDINATOR_SCHEMA } from '@server/models/schemas';
 
 import { GitHubService } from '../services/github';
 import { GitHubClient } from './github';
@@ -33,6 +39,7 @@ import { listSecretsStoreSecrets, ensureSecretBindings, type SecretBindingSpec }
 import { evaluateDocsGaps, buildJulesPrompt } from '@server/core/jules-docs-gap';
 import { stageJulesSession } from '@server/db/jules-sessions';
 import { ensureDeployWorkflow } from '@server/core/deploy-workflow';
+import { emitReviewDatapoint, logReviewStep } from '@server/core/review-telemetry';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
 
@@ -149,6 +156,22 @@ function shouldTriggerFromPullRequest(action: PullRequestWebhookPayload['action'
   return (config.on as string[]).includes(action);
 }
 
+/**
+ * True if the webhook sender is a bot (GitHub App, Dependabot, etc.), not a
+ * human user. Used to keep auto reviews from triggering/superseding on bot
+ * pushes — only a human pushing code should kick off an auto review.
+ */
+export function isBotSender(
+  sender: { login?: string; type?: string } | null | undefined,
+  botUsername: string,
+): boolean {
+  if (!sender) return false;
+  const login = (sender.login ?? '').toLowerCase();
+  return sender.type === 'Bot'
+    || /\[bot\]$/i.test(sender.login ?? '')
+    || (botUsername ? login === botUsername.toLowerCase() : false);
+}
+
 export type ReviewRequest = {
   installationId: string;
   owner: string;
@@ -176,6 +199,9 @@ export function extractReviewRequest(input: {
       return null;
     }
     if (!shouldTriggerFromPullRequest(payload.action, input.config.review)) {
+      return null;
+    }
+    if (isBotSender(payload.sender, input.botUsername)) {
       return null;
     }
 
@@ -406,6 +432,17 @@ async function resolveQueuedJob(
     return null;
   }
 
+  if (resolved.trigger === 'auto') {
+    const autoCount = await countAutoReviewsForPr(env, {
+      installationId: resolved.installationId,
+      owner: resolved.owner, repo: resolved.repo, prNumber: resolved.prNumber,
+    });
+    if (autoCount >= MAX_AUTO_REVIEWS_PER_PR) {
+      logger.info(`Auto-review cap reached for ${resolved.owner}/${resolved.repo} PR #${resolved.prNumber}; skipping.`);
+      return null;
+    }
+  }
+
   const job = await insertJob(env, {
     installationId: resolved.installationId,
     owner: resolved.owner,
@@ -585,6 +622,14 @@ async function runReviewPhase(
     return '';
   });
 
+  // Which specialized reviewers (security/bugs/performance/...) fan out per
+  // file, sized by PR risk tier. `sharedContext` is the PR-level context (title,
+  // description, custom rules, project context) built once so its cache
+  // breakpoint hits across every reviewer x file call instead of rebuilding it
+  // per call.
+  const plan = planReviewers(totalLineCount, files.length, config.review);
+  const sharedContext = buildSharedContext({ pr, config, projectContext });
+
   // Bail before spending model calls if a newer commit superseded this job
   // while standardization / diff-fetch was running.
   await checkSuperseded(env, job.id);
@@ -622,11 +667,53 @@ async function runReviewPhase(
     });
   }
 
-  if (await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount, projectContext })) {
+  // Multi-reviewer fan-out (see reviewAndPersistFile) isn't wired into the batch
+  // SUBMIT path yet — deferred; only single-reviewer PRs may submit a new
+  // batch. Always call runBatchReviewPhase though, even when plan.length > 1:
+  // it also owns draining (poll/persist/clear) an ALREADY-SUBMITTED batch from
+  // a prior invocation, and skipping the call entirely would leave that batch
+  // dangling forever (never polled, never cleared) if the job's plan grew
+  // past 1 reviewer between invocations (e.g. a config change or a diff
+  // update crossing a risk tier).
+  if (await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount, projectContext, allowNewBatch: plan.length <= 1 })) {
     return;
   }
 
   const reviewTasks: Array<Promise<void>> = [];
+  // Optional: the module-mocked ModelService used in some tests doesn't
+  // implement getTracker(), so this stays undefined there and the budget
+  // gate below simply no-ops (matches the tracker-less TokenTracker usage
+  // pattern already used elsewhere in this file, e.g. GitHubClient/model.ts).
+  const tracker = model.getTracker?.();
+
+  // 30s heartbeat for the (potentially minutes-long) reviewer fan-out below:
+  // extends the lease + nudges the check-run so a stalled check doesn't read
+  // as a hung job. `last` is shared across every concurrently-running
+  // file/reviewer task this chunk; whichever call crosses the 30s mark first
+  // fires it, which is fine for a UX heartbeat.
+  //
+  // Deliberately NOT heartbeatAndCheckSuperseded / checkSuperseded here: those
+  // throw JOB_SUPERSEDED to abort the job, but this heartbeat runs inside
+  // reviewAndPersistFile's per-file try/catch (and, in the fan-out path,
+  // inside a Promise.allSettled reviewer mapper) — a throw there either gets
+  // mis-persisted as a failed file review or silently swallowed by a sibling
+  // reviewer's success. The chunk-boundary heartbeatAndCheckSuperseded below
+  // (after Promise.allSettled(reviewTasks)) remains the sole supersession
+  // abort point for this loop; this heartbeat only ever refreshes the lease
+  // and pings the check-run, and never throws into the review path.
+  const heartbeatState = { last: Date.now() };
+  const maybeHeartbeat = async () => {
+    if (Date.now() - heartbeatState.last < 30_000) return;
+    heartbeatState.last = Date.now();
+    logReviewStep({ jobId: job.id, phase: 'review', model: 'heartbeat', durationMs: 0, findings: 0 });
+    await heartbeatJobLease(env, job.id, leaseOwner, JOB_LEASE_SECONDS).catch((err) => logger.warn('Heartbeat lease refresh failed (ignored)', err));
+    if (job.checkRunId) {
+      await github.updateCheckRun(job.owner, job.repo, job.checkRunId, {
+        title: 'Reviewing…',
+        summary: 'Reviewing… (model thinking)',
+      }).catch((err) => logger.warn('Heartbeat check-run update failed (ignored)', err));
+    }
+  };
 
   for (const file of files) {
     const existingReview = currentReviews.get(file.path);
@@ -635,15 +722,35 @@ async function runReviewPhase(
     }
 
     const inherited = parentReviews.get(file.path);
+    const willCallModel = !inherited || !canInheritParentFileReview(config, inherited);
+
+    // Budget-aware gate: stop starting new files' reviewer fan-out once this
+    // invocation's subrequest budget can't fit the next one, so a large PR
+    // spreads its model calls across invocations instead of risking
+    // Cloudflare's 50-subrequest cap. See selectFilePlanForBudget for the
+    // trivial-tier degrade-instead-of-stall fallback.
+    let filePlan = plan;
+    if (willCallModel && tracker) {
+      const decision = selectFilePlanForBudget(plan, processedThisChunk, (needed) => tracker.hasRemainingSubrequests(needed));
+      if (decision.action === 'defer') break;
+      filePlan = decision.plan;
+      if (filePlan !== plan) {
+        logger.warn(`Reviewer plan (${plan.length}) doesn't fit the subrequest budget for ${file.path}; using reduced set`, {
+          reduced: filePlan,
+          subrequestsUsed: tracker.getSubrequestCount(),
+        });
+      }
+    }
+
     const reviewTask = async () => {
       if (!inherited) {
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, resolveFailureModelProvider, existingReview);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, filePlan, resolveFailureModelProvider, maybeHeartbeat, existingReview);
         return;
       }
 
       if (!canInheritParentFileReview(config, inherited)) {
         logger.info(`Ignoring inherited review for ${file.path}; parent model ${inherited.model_used} is not in the current model strategy`);
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, resolveFailureModelProvider, existingReview);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, filePlan, resolveFailureModelProvider, maybeHeartbeat, existingReview);
       } else {
         const inheritedComments = inherited.parsed_comments as ParsedReviewComment[];
         const fileReviewId = await upsertFileReview(env, job.id, {
@@ -745,9 +852,14 @@ async function runBatchReviewPhase(
     pendingFiles: ReturnType<typeof parseUnifiedDiff>;
     totalLineCount: number;
     projectContext: string;
+    /** False when the current reviewer plan has >1 reviewer (fan-out isn't
+     *  wired into the batch SUBMIT path yet). An already-submitted batch from
+     *  a prior invocation is still polled/persisted/cleared below regardless —
+     *  only the "start a NEW batch" branch is gated on this. */
+    allowNewBatch: boolean;
   },
 ) {
-  const { pr, config, files, pendingFiles, totalLineCount, projectContext } = ctx;
+  const { pr, config, files, pendingFiles, totalLineCount, projectContext, allowNewBatch } = ctx;
 
   if (job.batchRequestId && job.batchModel) {
     let result: Awaited<ReturnType<ModelService['pollReviewBatch']>>;
@@ -787,6 +899,7 @@ async function runBatchReviewPhase(
     return true;
   }
 
+  if (!allowNewBatch) return false;
   if (pendingFiles.length === 0) return false;
 
   // Small/medium PRs review faster on the parallel sync path than on the async
@@ -977,87 +1090,228 @@ async function reviewAndPersistFile(
   model: ModelService,
   pricing: PricingSnapshot,
   projectContext: string,
+  sharedContext: string,
+  plan: ReviewerId[],
   resolveFailureModelProvider: () => Promise<string | null>,
+  onHeartbeat: () => Promise<void>,
   previousReview?: { transient_error_count: number },
 ) {
   const startedAt = Date.now();
   const compactPrompt = (previousReview?.transient_error_count ?? 0) > 0;
   try {
-    const response = await model.reviewFile({
-      file,
-      prTitle: pr.title ?? null,
-      prDescription: pr.body ?? null,
-      config,
-      totalLineCount,
-      compactPrompt,
-      projectContext,
-    });
+    let modelUsed: string;
+    let provider: string;
+    let rawText: string;
+    let comments: ParsedReviewComment[];
+    let verdict: 'approve' | 'comment';
+    let fileSummary: string | null | undefined;
+    let overallCorrectness: string | null | undefined;
+    let confidenceScore: number | null | undefined;
+    let inputTokens: number;
+    let outputTokens: number;
+    let cacheReadTokens: number | null;
+    let cacheWriteTokens: number | null;
+    let reviewerCallCount: number;
+
+    if (plan.length <= 1) {
+      // Legacy single-call path — behavior here is byte-identical to before the
+      // reviewer fan-out; only engineUsed/cache token bookkeeping is new.
+      const response = await model.reviewFile({
+        file,
+        prTitle: pr.title ?? null,
+        prDescription: pr.body ?? null,
+        config,
+        totalLineCount,
+        compactPrompt,
+        projectContext,
+      });
+      modelUsed = response.modelUsed;
+      provider = response.provider;
+      rawText = response.rawText;
+      comments = response.parsed.comments;
+      verdict = response.parsed.verdict;
+      fileSummary = response.parsed.fileSummary;
+      overallCorrectness = response.parsed.overallCorrectness;
+      confidenceScore = response.parsed.confidenceScore;
+      inputTokens = response.inputTokens;
+      outputTokens = response.outputTokens;
+      cacheReadTokens = response.cacheReadTokens ?? null;
+      cacheWriteTokens = response.cacheWriteTokens ?? null;
+      reviewerCallCount = 1;
+      logReviewStep({
+        jobId: job.id, phase: 'review', model: modelUsed,
+        durationMs: Date.now() - startedAt, findings: comments.length,
+        inputTokens, outputTokens, cacheReadTokens: cacheReadTokens ?? undefined, cacheWriteTokens: cacheWriteTokens ?? undefined,
+      });
+      await onHeartbeat();
+    } else {
+      // Fan out to the planned specialized reviewers (security/bugs/perf/...)
+      // and combine their findings into one file review record. sharedContext
+      // already carries the project context, so pass '' here to avoid
+      // duplicating it in every reviewer's prompt.
+      //
+      // allSettled (not all): one reviewer throwing shouldn't discard every
+      // OTHER reviewer's already-paid-for result and force a full re-run of
+      // all N reviewers on retry (up to Nx cost amplification on a single
+      // transient hiccup). Proceed with whichever reviewers succeeded; only
+      // fail the file if every reviewer failed.
+      const settled = await Promise.allSettled(
+        plan.map(async (id): Promise<ReviewerCallResult> => {
+          const callStartedAt = Date.now();
+          const response = await model.reviewFile({
+            file,
+            prTitle: pr.title ?? null,
+            prDescription: pr.body ?? null,
+            config,
+            totalLineCount,
+            compactPrompt,
+            projectContext: '',
+            systemPromptOverride: buildReviewerSystemPrompt(REVIEWERS[id], config.review),
+            cacheSystem: true,
+            sharedContext,
+          });
+          logReviewStep({
+            jobId: job.id, phase: 'review', reviewer: id, model: response.modelUsed,
+            durationMs: Date.now() - callStartedAt, findings: response.parsed.comments?.length ?? 0,
+            inputTokens: response.inputTokens, outputTokens: response.outputTokens,
+            cacheReadTokens: response.cacheReadTokens ?? undefined, cacheWriteTokens: response.cacheWriteTokens ?? undefined,
+          });
+          await onHeartbeat();
+          return {
+            reviewer: id,
+            parsed: response.parsed,
+            modelUsed: response.modelUsed,
+            provider: response.provider,
+            rawText: response.rawText,
+            inputTokens: response.inputTokens,
+            outputTokens: response.outputTokens,
+            cacheReadTokens: response.cacheReadTokens,
+            cacheWriteTokens: response.cacheWriteTokens,
+          };
+        }),
+      );
+
+      const results: ReviewerCallResult[] = [];
+      const failedReviewers: string[] = [];
+      settled.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          results.push(result.value);
+        } else {
+          failedReviewers.push(plan[index]);
+          logger.warn(`Reviewer ${plan[index]} failed for ${file.path}`, {
+            error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+          });
+        }
+      });
+
+      if (results.length === 0) {
+        // Every reviewer failed — surface the first failure so this file goes
+        // through the exact same retry/hard-limit handling as a single-call
+        // failure would (the outer try/catch below).
+        throw (settled.find((r): r is PromiseRejectedResult => r.status === 'rejected') as PromiseRejectedResult).reason;
+      }
+      if (failedReviewers.length > 0) {
+        logger.warn(`Proceeding with ${results.length}/${plan.length} reviewers for ${file.path}; ${failedReviewers.join(', ')} failed and will be missing from this pass`);
+      }
+
+      const aggregate = aggregateReviewerResults(results);
+      modelUsed = aggregate.modelUsed;
+      provider = aggregate.provider;
+      rawText = aggregate.rawText;
+      comments = aggregate.comments;
+      verdict = aggregate.verdict;
+      fileSummary = aggregate.fileSummary;
+      overallCorrectness = aggregate.overallCorrectness;
+      confidenceScore = aggregate.confidenceScore;
+      inputTokens = aggregate.inputTokens;
+      outputTokens = aggregate.outputTokens;
+      cacheReadTokens = aggregate.cacheReadTokens;
+      cacheWriteTokens = aggregate.cacheWriteTokens;
+      reviewerCallCount = plan.length;
+    }
 
     const fileReviewId = await upsertFileReview(env, job.id, {
       filePath: file.path,
       fileStatus: 'done',
-      modelUsed: response.modelUsed,
-      modelProvider: response.provider,
+      modelUsed,
+      modelProvider: provider,
       diffLineCount: file.lineCount,
       diffInput: renderFileDiff(file),
-      rawAiOutput: response.rawText,
-      parsedComments: response.parsed.comments,
-      inputTokens: response.inputTokens,
-      outputTokens: response.outputTokens,
+      rawAiOutput: rawText,
+      parsedComments: comments,
+      inputTokens,
+      outputTokens,
       durationMs: Date.now() - startedAt,
-      verdict: response.parsed.verdict,
-      fileSummary: response.parsed.fileSummary,
-      overallCorrectness: response.parsed.overallCorrectness,
-      confidenceScore: response.parsed.confidenceScore,
+      verdict,
+      fileSummary: fileSummary ?? null,
+      overallCorrectness,
+      confidenceScore,
       errorMessage: null,
+      engineUsed: 'native',
+      cacheReadTokens,
+      cacheWriteTokens,
     });
 
-    const comments = response.parsed.comments ?? [];
+    comments = comments ?? [];
     let doRequests = 0;
     let doDurationGbs = 0;
     // Measure only the DO streaming loop — capturing the start before the
     // zero-comment guard would bill downstream work (recordFileCost etc.) as
     // DO time even when the Durable Object is never contacted.
+    //
+    // Batched into ONE fetch carrying the whole file's comment array (the DO
+    // broadcasts them individually over the websocket internally — see
+    // pr-stream.ts) instead of one fetch per comment. A fan-out file can have
+    // up to max_comments x reviewer-count findings; one subrequest per file
+    // (not per comment) keeps this well under Cloudflare's 50-subrequest cap.
     if (comments.length > 0) {
       const doStartedAt = Date.now();
       try {
         const streamId = (env as any).PrReviewStream.idFromName(`${job.owner}/${job.repo}/${job.prNumber}`);
         const streamStub = (env as any).PrReviewStream.get(streamId);
-        for (const comment of comments) {
-          await streamStub.fetch(new Request('http://do/comment', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(comment),
-          }));
-          doRequests += 1;
-        }
+        await streamStub.fetch(new Request('http://do/comment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(comments),
+        }));
+        doRequests += 1;
       } catch (streamErr) {
-        logger.error('Failed to stream real-time comment to Durable Object', streamErr);
+        logger.error('Failed to stream real-time comments to Durable Object', streamErr);
       }
       doDurationGbs = msToGbSeconds(Date.now() - doStartedAt);
     }
 
-    // Metered per-file usage. AI tokens are exact; DO requests are the exact
-    // count of stream fetches with measured active duration; D1 rows are the
-    // rows this file's persistence writes/reads; subrequests = model call + DO
-    // fetches. ponytail: D1 rows are counted from the write shape (1 review row
-    // + N comment rows), not the D1 `meta` field — dollars here are rounding
-    // level; swap to result.meta.rows_read/written if precision ever matters.
+    // Metered per-file usage. AI tokens are exact (summed across every
+    // reviewer call when fanned out); DO requests are the exact count of
+    // stream fetches with measured active duration; D1 rows are the rows this
+    // file's persistence writes/reads; subrequests = one per reviewer model
+    // call + DO fetches. ponytail: D1 rows are counted from the write shape (1
+    // review row + N comment rows), not the D1 `meta` field — dollars here are
+    // rounding level; swap to result.meta.rows_read/written if precision ever
+    // matters.
     await recordFileCost(env, pricing, {
       fileReviewId,
       jobId: job.id,
-      modelUsed: response.modelUsed,
+      modelUsed,
       usage: {
-        aiInputTokens: response.inputTokens ?? 0,
-        aiOutputTokens: response.outputTokens ?? 0,
+        aiInputTokens: inputTokens ?? 0,
+        aiOutputTokens: outputTokens ?? 0,
         doRequests,
         doDurationGbs,
         d1RowsWritten: 1 + comments.length,
         d1RowsRead: 2,
-        subrequests: 1 + doRequests,
+        subrequests: reviewerCallCount + doRequests,
       },
     });
   } catch (error) {
+    // A supersede signal must never be downgraded to a 'failed' file review —
+    // rethrow so it propagates to runReviewPhase's caller the same way every
+    // other checkSuperseded/heartbeatAndCheckSuperseded call site already
+    // does. (Defensive: nothing in this function currently throws
+    // JOB_SUPERSEDED itself, but this guard makes that invariant hold even if
+    // that changes.)
+    if (error instanceof Error && error.message === 'JOB_SUPERSEDED') throw error;
+
     const errorMessage = error instanceof Error ? error.message : 'Unknown file review error';
     const modelId = config.model?.main ?? 'unconfigured';
     const modelProvider = await resolveFailureModelProvider();
@@ -1215,13 +1469,58 @@ async function runFinalizePhase(
 
   const hasFailures = fileSummaries.some((file) => file.verdict === 'failed');
   const failedFileCount = fileSummaries.filter((file) => file.verdict === 'failed').length;
+
+  // Coordinator pass: dedup + reasonableness + source-verify across all
+  // findings before the severity/max_comments cut. Best-effort — any failure
+  // here must never lose the review, so it falls back to the un-coordinated
+  // findings on any error.
+  let coordinatedComments = reviewedComments;
+  if (reviewedComments.length > 1) {
+    try {
+      const coordinatorTracker = new TokenTracker();
+      const model = new ModelService(env, coordinatorTracker, { jobId: job.id });
+      const projectContext = await withTimeout(
+        'project-context',
+        12000,
+        () => getProjectContext(env, github, job.owner, job.repo, pr.head.sha),
+      ).catch((err) => {
+        logger.warn('Project context unavailable; coordinating without it', err);
+        return '';
+      });
+      const sharedContext = buildSharedContext({ pr, config, projectContext });
+      const coordinatorModel = config.review.coordinator ?? config.model?.main ?? null;
+
+      const sourceCache = new Map<string, string | null>();
+      const fetchSource = async (path: string, line: number | null): Promise<string | null> => {
+        if (!sourceCache.has(path)) {
+          const result = await github.getRepoFileWithRefOrNull(job.owner, job.repo, path, pr.head.sha).catch(() => null);
+          sourceCache.set(path, result?.content ?? null);
+        }
+        const content = sourceCache.get(path) ?? null;
+        return content ? windowSourceLines(content, line) : null;
+      };
+
+      const runModel = coordinatorModel
+        ? async (system: string, user: string) => {
+            const resp = await model.callModel(coordinatorModel, { systemPrompt: system, userPrompt: user }, COORDINATOR_SCHEMA);
+            return parseCoordinatorKeep(resp.rawText);
+          }
+        : async () => { throw new Error('No coordinator model configured'); };
+
+      coordinatedComments = await coordinateFindings({ comments: reviewedComments, sharedContext, runModel, fetchSource });
+    } catch (err) {
+      logger.error('Coordinator pass failed; using un-coordinated findings', err);
+      coordinatedComments = reviewedComments;
+    }
+  }
+
   const severityRanks: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3, nit: 4 };
   const minRank = severityRanks[config.review.min_severity] ?? 4;
-  
-  let finalComments = reviewedComments.filter(c => (severityRanks[c.severity] ?? 4) <= minRank);
+
+  let finalComments = coordinatedComments.filter(c => (severityRanks[c.severity] ?? 4) <= minRank);
   finalComments.sort((a, b) => (severityRanks[a.severity] ?? 4) - (severityRanks[b.severity] ?? 4));
-  
-  const omittedCount = reviewedComments.length - Math.min(finalComments.length, config.review.max_comments);
+
+  const omittedCount = coordinatedComments.length - Math.min(finalComments.length, config.review.max_comments);
   if (finalComments.length > config.review.max_comments) {
     finalComments = finalComments.slice(0, config.review.max_comments);
   }
@@ -1324,6 +1623,39 @@ async function runFinalizePhase(
   const fileInputTokens = reviews.reduce((sum, review) => sum + (review.input_tokens ?? 0), 0);
   const fileOutputTokens = reviews.reduce((sum, review) => sum + (review.output_tokens ?? 0), 0);
   const fileCostTotal = reviews.reduce((sum, review) => sum + (review.total_cost_usd ?? 0), 0);
+
+  // Observability: one Analytics Engine datapoint per completed review. Never
+  // allowed to affect the review outcome — emitReviewDatapoint itself never
+  // throws, and the metrics computation is wrapped too since it's pure
+  // bookkeeping on data already validated above.
+  try {
+    const cacheReadTokens = reviews.reduce((sum, review) => sum + (review.cache_read_tokens ?? 0), 0);
+    const cacheWriteTokens = reviews.reduce((sum, review) => sum + (review.cache_write_tokens ?? 0), 0);
+    const cacheDenom = cacheReadTokens + fileInputTokens;
+    const totalLineCount = files.reduce((sum, file) => sum + file.lineCount, 0);
+    emitReviewDatapoint(env, {
+      repo: `${job.owner}/${job.repo}`,
+      engine: reviews.find((review) => review.engine_used)?.engine_used ?? 'native',
+      reviewers: planReviewers(totalLineCount, files.length, config.review).join(','),
+      verdict: verdictSummary.verdict,
+      // ponytail: circuit breaker isn't wired into engine-selector yet (Spec 1
+      // only has NativeEngine); pass '' rather than inventing a state.
+      breakerState: '',
+      findings: finalComments.length,
+      p0: finalComments.filter((c) => c.severity === 'P0').length,
+      p1: finalComments.filter((c) => c.severity === 'P1').length,
+      inputTokens: fileInputTokens,
+      outputTokens: fileOutputTokens,
+      cacheReadTokens,
+      cacheWriteTokens,
+      cacheHitRate: cacheDenom > 0 ? cacheReadTokens / cacheDenom : 0,
+      costUsd: fileCostTotal,
+      durationMs: job.startedAt ? Date.now() - Date.parse(job.startedAt) : 0,
+    });
+  } catch (err) {
+    logger.warn('Failed to compute review telemetry metrics (ignored)', err);
+  }
+
   const partialErrorMessage = hasFailures
     ? `Partial review: ${failedFileCount} of ${files.length} file${files.length === 1 ? '' : 's'} could not be reviewed after repeated model/provider outages.`
     : null;

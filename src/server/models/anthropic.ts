@@ -12,6 +12,8 @@ export interface AnthropicResponse {
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
   };
 }
 
@@ -21,9 +23,14 @@ export async function reviewWithAnthropic(
   input: { systemPrompt: string; userPrompt: string },
   tracker?: { incrementSubrequests(count?: number): void },
   schema: StructuredSchema = REVIEW_SCHEMA,
+  cachePrefixes?: { system?: boolean },
 ): Promise<ModelResponse> {
   logger.info(`Calling Anthropic model: ${model}`);
   const baseUrl = (config.baseUrl || DEFAULT_ANTHROPIC_BASE_URL).replace(/\/+$/, '');
+
+  const system = cachePrefixes?.system
+    ? [{ type: 'text', text: input.systemPrompt, cache_control: { type: 'ephemeral' } }]
+    : input.systemPrompt;
 
   if (tracker) tracker.incrementSubrequests(1);
   const response = await withTimeout('Anthropic API', ANTHROPIC_TIMEOUT_MS, (signal) =>
@@ -37,7 +44,7 @@ export async function reviewWithAnthropic(
       },
       body: JSON.stringify({
         model,
-        system: input.systemPrompt,
+        system,
         messages: [
           { role: 'user', content: `${input.userPrompt}\n\nUse the ${schema.name} tool to return your structured result.` },
         ],
@@ -83,6 +90,8 @@ export async function reviewWithAnthropic(
     rawText,
     inputTokens: data?.usage?.input_tokens ?? 0,
     outputTokens: data?.usage?.output_tokens ?? 0,
+    cacheReadTokens: data?.usage?.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: data?.usage?.cache_creation_input_tokens ?? 0,
     modelUsed: model,
     provider: config.providerName,
   };

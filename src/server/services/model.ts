@@ -113,6 +113,13 @@ export class ModelService {
     private options: { jobId?: string } = {},
   ) {}
 
+  /** Exposes the shared per-invocation subrequest tracker so callers can gate
+   *  work (e.g. reviewer fan-out) against Cloudflare's subrequest cap before
+   *  issuing more model calls. */
+  getTracker() {
+    return this.tracker;
+  }
+
   private providerUnavailableKey(providerId: string) {
     return this.options.jobId ? `jobs:${this.options.jobId}:provider-unavailable:${providerId}` : null;
   }
@@ -210,6 +217,7 @@ export class ModelService {
     config: ResolvedModelConfig,
     input: { systemPrompt: string; userPrompt: string },
     schema: StructuredSchema = REVIEW_SCHEMA,
+    cacheSystem?: boolean,
   ): Promise<ModelResponse> {
     if (config.apiFormat === 'cloudflare-workers-ai') {
       return reviewWithCloudflare(this.env, config.modelName, input, this.tracker, config.providerName, schema);
@@ -263,6 +271,7 @@ export class ModelService {
         input,
         this.tracker,
         schema,
+        { system: cacheSystem },
       );
     }
 
@@ -354,6 +363,9 @@ export class ModelService {
     totalLineCount: number;
     compactPrompt?: boolean;
     projectContext?: string;
+    systemPromptOverride?: string;
+    cacheSystem?: boolean;
+    sharedContext?: string;
   }) {
     const configuredLineCap = params.config.review.max_diff_lines_per_file;
     const modelLineCap = params.compactPrompt
@@ -384,7 +396,7 @@ Lesson #${idx + 1}:
 `);
     }
 
-    const { systemPrompt, userPrompt } = buildFileReviewPrompts({
+    const { systemPrompt: builtSystemPrompt, userPrompt: builtUserPrompt } = buildFileReviewPrompts({
       ...params,
       file: reviewFile,
       config: {
@@ -393,6 +405,9 @@ Lesson #${idx + 1}:
       },
       projectContext: params.projectContext,
     });
+
+    const systemPrompt = params.systemPromptOverride ?? builtSystemPrompt;
+    const userPrompt = params.sharedContext ? `${params.sharedContext}\n\n${builtUserPrompt}` : builtUserPrompt;
 
     return { systemPrompt, userPrompt, reviewFile };
   }
@@ -405,6 +420,9 @@ Lesson #${idx + 1}:
     totalLineCount: number;
     compactPrompt?: boolean;
     projectContext?: string;
+    systemPromptOverride?: string;
+    cacheSystem?: boolean;
+    sharedContext?: string;
   }) {
     const { systemPrompt, userPrompt, reviewFile } = await this.buildReviewPrompt(params);
 
@@ -439,7 +457,7 @@ Lesson #${idx + 1}:
 
       while (attempts < maxAttempts) {
         try {
-          const response = await this.callResolvedModel(resolved, { systemPrompt, userPrompt });
+          const response = await this.callResolvedModel(resolved, { systemPrompt, userPrompt }, REVIEW_SCHEMA, params.cacheSystem);
 
           if (this.tracker) {
             this.tracker.record(response.modelUsed, response.inputTokens, response.outputTokens);

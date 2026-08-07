@@ -461,6 +461,7 @@ export function parseFileReviewResponse(raw: string, file: FileDiff): {
         title: title || 'Code finding',
         body: withSuggestion(body + offDiffNote, finding.code_suggestion),
         codeSuggestion: finding.code_suggestion,
+        confidenceScore: finding.confidence_score,
       });
     })
     .filter((comment): comment is ParsedReviewComment => Boolean(comment));

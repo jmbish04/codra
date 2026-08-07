@@ -1,3 +1,5 @@
+import { sanitizeForPrompt } from '@server/core/prompt-safety';
+
 export const SUMMARY_SYSTEM_PROMPT = `You are an automated code review bot. Summarize the findings of a PR review.
 CRITICAL: Return ONLY a JSON object with a single "summary" key.
 
@@ -23,7 +25,7 @@ export function buildSummaryPrompt(input: {
   const failures = input.fileSummaries.filter((f) => f.summary.startsWith('Review failed'));
 
   const lines: string[] = [
-    `PR: "${input.prTitle ?? 'Untitled PR'}"`,
+    `PR: "${sanitizeForPrompt(input.prTitle) || 'Untitled PR'}"`,
     `Verdict: ${input.verdict}`,
     '',
   ];

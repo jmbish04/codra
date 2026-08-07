@@ -1,5 +1,6 @@
 import type { RepoConfig } from '@shared/schema';
 import type { FileDiff } from '@server/core/diff';
+import { sanitizeForPrompt } from '@server/core/prompt-safety';
 import { getLanguageForFile } from './languages';
 
 export const fileReviewSystemPromptBase = `You are a world-class software engineer performing a precise, security-focused code review.
@@ -38,7 +39,9 @@ export function buildFileReviewPrompts(input: {
   projectContext?: string;
 }) {
   const languageInfo = getLanguageForFile(input.file.path);
-  const rules = input.config.custom_rules.length > 0 ? input.config.custom_rules.map((rule) => `- ${rule}`).join('\n') : '- None';
+  const rules = input.config.custom_rules.length > 0
+    ? input.config.custom_rules.map((rule) => `- ${sanitizeForPrompt(rule)}`).join('\n')
+    : '- None';
   const systemPrompt = buildFileReviewSystemPrompt(input.config, languageInfo?.persona);
   const languageGuidelines = languageInfo
     ? `Language: ${languageInfo.language}\nSpecific Guidelines:\n${languageInfo.guidelines.map(g => `- ${g}`).join('\n')}`
@@ -63,7 +66,7 @@ export function buildFileReviewPrompts(input: {
 
   const userPrompt = [
     projectContextBlock,
-    `PR title: ${input.prTitle ?? 'Untitled PR'}`,
+    `PR title: ${sanitizeForPrompt(input.prTitle) || 'Untitled PR'}`,
     `File path: ${input.file.path}`,
     languageGuidelines,
     `Custom rules:\n${rules}`,

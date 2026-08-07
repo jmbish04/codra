@@ -32,6 +32,27 @@ const defaultSkipMatchers = ['**/*.lock', '**/package-lock.json', '**/pnpm-lock.
   picomatch(pattern, { dot: true }),
 );
 
+const migrationMatchers = ['**/migrations/**', 'db/migrations/**', '**/migrations/**/*.sql'].map((p) =>
+  picomatch(p, { dot: true }),
+);
+
+export function isMigrationPath(path: string): boolean {
+  return migrationMatchers.some((m) => m(path));
+}
+
+/** True when the diff's ADDED content carries a codegen marker in its first
+ *  lines. Migrations are never treated as generated (reviewed regardless). */
+export function isGeneratedFile(file: FileDiff): boolean {
+  if (isMigrationPath(file.path)) return false;
+  const addedHead = file.hunks
+    .flatMap((h) => h.lines)
+    .filter((l) => l.kind === 'add')
+    .slice(0, 5)
+    .map((l) => l.content)
+    .join('\n');
+  return /@generated|@codegen/.test(addedHead);
+}
+
 /** Serialize a parsed FileDiff back to a unified-diff patch string (for display). */
 export function renderFileDiff(file: FileDiff): string {
   const prefix: Record<DiffLineKind, string> = { context: ' ', add: '+', del: '-' };
@@ -251,6 +272,7 @@ export function filterReviewableFiles(files: FileDiff[], config: RepoConfig['rev
     .filter((file) => !file.isDeleted && !file.isBinary)
     .filter((file) => !defaultSkipMatchers.some((matcher) => matcher(file.path)))
     .filter((file) => !customMatchers.some((matcher) => matcher(file.path)))
+    .filter((file) => !isGeneratedFile(file))
     .sort((left, right) => Number(left.isNew) - Number(right.isNew) || left.path.localeCompare(right.path))
     .slice(0, config.max_files);
 }

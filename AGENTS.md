@@ -78,7 +78,10 @@ The deployed base URL lives in one place: `env.APP_URL` (a `vars` entry in
   on PR merge) and `deployWorkflow.enabled` (separate `codra/deploy-workflow-*`
   PR adding `.github/workflows/deploy.yml`). Both default to `true` — see
   `src/server/core/jules.ts`, `src/server/core/jules-docs-gap.ts`, and
-  `src/server/core/deploy-workflow.ts`.
+  `src/server/core/deploy-workflow.ts`. The native review engine coordinates
+  specialized reviewers (security, bugs, performance, correctness, quality, docs)
+  with risk-tier-based fan-out, prompt caching, and a coordinator dedup pass;
+  see `docs/architecture.md#review-engine` for the seam, engines, and config knobs.
 - Auto-setting the `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_TOKEN` Actions
   secrets (`src/server/core/github-secrets.ts`) requires the GitHub App's
   **Actions Secrets: write** permission; without it, Codra writes the secret
