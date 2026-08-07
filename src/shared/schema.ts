@@ -36,6 +36,7 @@ export const parsedReviewCommentSchema = z.object({
   title: z.string().min(1),
   body: z.string().min(1),
   codeSuggestion: z.string().min(1).nullable().optional(),
+  confidenceScore: z.number().min(0).max(1).optional(),
 });
 
 export const fileReviewModelOutputSchema = z.object({
