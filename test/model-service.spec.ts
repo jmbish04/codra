@@ -318,6 +318,9 @@ describe('ModelService', () => {
             },
             jules: { enabled: true },
             deployWorkflow: { enabled: true },
+            engine: 'auto',
+            coordinator: null,
+            risk_tiers: { trivial_max_lines: 10, lite_max_lines: 100 },
           },
           model: {
             main: '@cf/zai-org/glm-4.7-flash',

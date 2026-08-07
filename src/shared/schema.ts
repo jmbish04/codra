@@ -108,6 +108,12 @@ export const reviewConfigSchema = z.object({
     }),
   jules: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
   deployWorkflow: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
+  engine: z.enum(['auto', 'opencode', 'computer', 'native']).default('auto'),
+  coordinator: z.string().nullable().default(null),
+  risk_tiers: z.object({
+    trivial_max_lines: z.number().int().min(1).default(10),
+    lite_max_lines: z.number().int().min(1).default(100),
+  }).default({ trivial_max_lines: 10, lite_max_lines: 100 }),
 });
 
 export const repoConfigSchema = z.object({
@@ -136,6 +142,9 @@ export const repoConfigSchema = z.object({
     },
     jules: { enabled: true },
     deployWorkflow: { enabled: true },
+    engine: 'auto',
+    coordinator: null,
+    risk_tiers: { trivial_max_lines: 10, lite_max_lines: 100 },
   }),
   model: z
     .object({
