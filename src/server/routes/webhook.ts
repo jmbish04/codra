@@ -6,16 +6,11 @@ import { loadRepoConfig } from '@server/core/config';
 import { extractReviewRequest, cancelReviewsForClosedPr } from '@server/core/review';
 import { verifyGitHubWebhookSignature } from '@server/core/verify';
 import { jsonError } from '@server/core/http';
-import { countAutoReviewsForPr, findExistingJobForHead, insertJob, supersedeOlderJobs } from '@server/db/jobs';
+import { countAutoReviewsForPr, findExistingJobForHead, insertJob, MAX_AUTO_REVIEWS_PER_PR, supersedeOlderJobs } from '@server/db/jobs';
 import { recordWebhookDelivery, finalizeWebhookDelivery, type DeliveryOutcome } from '@server/db/webhook-deliveries';
 import { getWorkerApiKey } from '@server/utils/secrets';
 import { notifyJobsChanged } from '@server/core/jobs-feed';
 import { GitHubClient } from '@server/core/github';
-
-// Auto (non-mention, non-retry) reviews are capped per PR so a chatty push
-// history can't burn review budget forever; @mention and manual retry always
-// bypass this cap.
-const MAX_AUTO_REVIEWS_PER_PR = 3;
 
 /**
  * handleGitHubWebhook

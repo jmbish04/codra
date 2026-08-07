@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { getDb } from '@server/db/client';
 import { jobs, repositories } from '@server/db/schemas';
 import { extractReviewRequest, isBotSender } from '@server/core/review';
-import { countAutoReviewsForPr } from '@server/db/jobs';
+import { countAutoReviewsForPr, MAX_AUTO_REVIEWS_PER_PR } from '@server/db/jobs';
 import { defaultRepoConfig } from '@shared/schema';
 import { createTestEnv } from './helpers';
 
@@ -92,6 +92,10 @@ describe('countAutoReviewsForPr', () => {
   let env: Env;
   beforeEach(() => { env = createTestEnv(); });
 
+  it('MAX_AUTO_REVIEWS_PER_PR is 3', () => {
+    expect(MAX_AUTO_REVIEWS_PER_PR).toBe(3);
+  });
+
   it('counts only auto-triggered jobs for the PR', async () => {
     const repo = await seedRepo(env);
     await seedJob(env, repo, 1, 'auto');
@@ -103,6 +107,28 @@ describe('countAutoReviewsForPr', () => {
       installationId: '123', owner: 'test-owner', repo: 'app', prNumber: 1,
     });
     expect(count).toBe(3);
+    // The cap check in webhook.ts / resolveQueuedJob is `autoCount >= MAX_AUTO_REVIEWS_PER_PR`.
+    // At exactly 3 existing auto jobs, a 4th auto trigger must be blocked.
+    expect(count >= MAX_AUTO_REVIEWS_PER_PR).toBe(true);
+  });
+
+  it('boundary: one below the cap does not block, at the cap blocks', async () => {
+    const repo = await seedRepo(env);
+    await seedJob(env, repo, 5, 'auto');
+    await seedJob(env, repo, 5, 'auto');
+
+    const belowCap = await countAutoReviewsForPr(env, {
+      installationId: '123', owner: 'test-owner', repo: 'app', prNumber: 5,
+    });
+    expect(belowCap).toBe(2);
+    expect(belowCap >= MAX_AUTO_REVIEWS_PER_PR).toBe(false);
+
+    await seedJob(env, repo, 5, 'auto');
+    const atCap = await countAutoReviewsForPr(env, {
+      installationId: '123', owner: 'test-owner', repo: 'app', prNumber: 5,
+    });
+    expect(atCap).toBe(3);
+    expect(atCap >= MAX_AUTO_REVIEWS_PER_PR).toBe(true);
   });
 
   it('does not count auto jobs from a different PR', async () => {

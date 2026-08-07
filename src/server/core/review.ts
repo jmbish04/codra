@@ -6,7 +6,7 @@ import { getPricingSnapshot, buildCostBreakdown, sumBreakdown, type PricingSnaps
 import { getProjectContext } from '@server/core/project-context';
 import { withTimeout } from '@server/core/timeout';
 import { getResolvedModelConfig } from '@server/db/model-configs';
-import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
+import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, countAutoReviewsForPr, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, MAX_AUTO_REVIEWS_PER_PR, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
 import { parseFileReviewResponse } from './model-output';
 import { filterReviewableFiles, parseUnifiedDiff, renderFileDiff } from './diff';
 
@@ -423,6 +423,17 @@ async function resolveQueuedJob(
 
     logger.info(`Duplicate terminal job found for ${resolved.owner}/${resolved.repo} PR #${resolved.prNumber}, skipping.`);
     return null;
+  }
+
+  if (resolved.trigger === 'auto') {
+    const autoCount = await countAutoReviewsForPr(env, {
+      installationId: resolved.installationId,
+      owner: resolved.owner, repo: resolved.repo, prNumber: resolved.prNumber,
+    });
+    if (autoCount >= MAX_AUTO_REVIEWS_PER_PR) {
+      logger.info(`Auto-review cap reached for ${resolved.owner}/${resolved.repo} PR #${resolved.prNumber}; skipping.`);
+      return null;
+    }
   }
 
   const job = await insertJob(env, {

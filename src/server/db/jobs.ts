@@ -1045,6 +1045,12 @@ export async function supersedeOlderJobs(
   return rows.length;
 }
 
+// Auto (non-mention, non-retry) reviews are capped per PR so a chatty push
+// history can't burn review budget forever; @mention and manual retry always
+// bypass this cap. Shared by every job-creation path (webhook.ts direct
+// insert, resolveQueuedJob) so none of them can silently bypass it.
+export const MAX_AUTO_REVIEWS_PER_PR = 3;
+
 /** Number of AUTO-triggered review jobs ever created for a PR (any status),
  *  used to cap automatic re-reviews. Mention/retry/sync are excluded. */
 export async function countAutoReviewsForPr(
