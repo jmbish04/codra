@@ -160,3 +160,27 @@ Binary files a/image.png and b/image.png differ
     });
   });
 });
+
+describe('filterReviewableFiles generated/migration handling', () => {
+  const cfg = defaultRepoConfig.review;
+
+  function diffFor(path: string, added: string[]): string {
+    const body = added.map((l) => `+${l}`).join('\n');
+    return `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,${added.length} @@\n${body}\n`;
+  }
+
+  it('drops a @generated source file', () => {
+    const files = parseUnifiedDiff(diffFor('src/gen/types.ts', ['// @generated', 'export type X = 1;']));
+    expect(filterReviewableFiles(files, cfg).map((f) => f.path)).not.toContain('src/gen/types.ts');
+  });
+
+  it('keeps a @generated file under a migrations dir', () => {
+    const files = parseUnifiedDiff(diffFor('db/migrations/d1/0001_init.sql', ['-- @generated', 'CREATE TABLE t (id INTEGER);']));
+    expect(filterReviewableFiles(files, cfg).map((f) => f.path)).toContain('db/migrations/d1/0001_init.sql');
+  });
+
+  it('keeps an ordinary source file', () => {
+    const files = parseUnifiedDiff(diffFor('src/app.ts', ['export const a = 1;']));
+    expect(filterReviewableFiles(files, cfg).map((f) => f.path)).toContain('src/app.ts');
+  });
+});
