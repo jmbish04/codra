@@ -1045,6 +1045,31 @@ export async function supersedeOlderJobs(
   return rows.length;
 }
 
+/** Number of AUTO-triggered review jobs ever created for a PR (any status),
+ *  used to cap automatic re-reviews. Mention/retry/sync are excluded. */
+export async function countAutoReviewsForPr(
+  env: Pick<Env, 'DB'>,
+  input: { installationId: string; owner: string; repo: string; prNumber: number },
+): Promise<number> {
+  const db = getDb(env);
+  const repo = await getOrCreateRepository(env, {
+    installationId: input.installationId,
+    owner: input.owner,
+    repo: input.repo,
+  });
+
+  const row = await db.select({ count: sql<number>`count(*)` })
+    .from(jobs)
+    .where(and(
+      eq(jobs.repository_id, repo),
+      eq(jobs.pr_number, input.prNumber),
+      eq(jobs.trigger, 'auto'),
+    ))
+    .get();
+
+  return row?.count ?? 0;
+}
+
 export async function forceRestartJob(
   env: Pick<Env, 'DB'>,
   jobId: string,

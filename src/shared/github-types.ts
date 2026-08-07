@@ -19,6 +19,8 @@ export interface GitHubUser {
   id: number;
   avatar_url: string;
   html_url: string;
+  /** GitHub sends "User" or "Bot" (also "Organization" in some contexts). */
+  type?: string;
 }
 
 export interface GitHubRepository {

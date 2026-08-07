@@ -15,6 +15,7 @@ export type DeliveryOutcome =
   | 'ignored_no_repository'      // payload had no repository
   | 'ignored_no_installation'    // no installation id
   | 'ignored_repo_disabled'      // repo config disabled
+  | 'ignored_auto_cap'           // auto-review cap reached for this PR
   | 'kb_updated'                 // star/watch/fork updated the knowledge base
   | 'job_created'                // a review job was created
   | 'review_cancelled'           // PR closed/merged → an active review was cancelled

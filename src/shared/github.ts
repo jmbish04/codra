@@ -13,6 +13,8 @@ export type PullRequestWebhookPayload = {
     owner: { login: string };
     name: string;
   };
+  /** Who triggered this delivery (PR author on 'opened', pusher on 'synchronize', etc.) — GitHub sends "User" or "Bot" for `type`. */
+  sender?: { login: string; type?: string };
   pull_request: {
     number: number;
     title: string;

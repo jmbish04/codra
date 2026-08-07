@@ -6,11 +6,16 @@ import { loadRepoConfig } from '@server/core/config';
 import { extractReviewRequest, cancelReviewsForClosedPr } from '@server/core/review';
 import { verifyGitHubWebhookSignature } from '@server/core/verify';
 import { jsonError } from '@server/core/http';
-import { findExistingJobForHead, insertJob, supersedeOlderJobs } from '@server/db/jobs';
+import { countAutoReviewsForPr, findExistingJobForHead, insertJob, supersedeOlderJobs } from '@server/db/jobs';
 import { recordWebhookDelivery, finalizeWebhookDelivery, type DeliveryOutcome } from '@server/db/webhook-deliveries';
 import { getWorkerApiKey } from '@server/utils/secrets';
 import { notifyJobsChanged } from '@server/core/jobs-feed';
 import { GitHubClient } from '@server/core/github';
+
+// Auto (non-mention, non-retry) reviews are capped per PR so a chatty push
+// history can't burn review budget forever; @mention and manual retry always
+// bypass this cap.
+const MAX_AUTO_REVIEWS_PER_PR = 3;
 
 /**
  * handleGitHubWebhook
@@ -239,6 +244,19 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
             message: existingJob.status === 'queued' ? 'queued' : 'duplicate',
             job: existingJob,
           }, 'job_created', { action: 'review', prNumber: extracted.prNumber, jobId: existingJob.id });
+        }
+
+        if (extracted.trigger === 'auto') {
+          const autoCount = await countAutoReviewsForPr(c.env, {
+            installationId: extracted.installationId,
+            owner: extracted.owner, repo: extracted.repo, prNumber: extracted.prNumber,
+          });
+          if (autoCount >= MAX_AUTO_REVIEWS_PER_PR) {
+            return finish(202, {
+              ok: true, ignored: true, reason: 'auto_review_cap_reached',
+              message: `Automatic review cap (${MAX_AUTO_REVIEWS_PER_PR}) reached for PR #${extracted.prNumber}. Comment ${c.env.BOT_USERNAME ? '@' + c.env.BOT_USERNAME + ' review' : 'the review trigger'} to run another.`,
+            }, 'ignored_auto_cap', { prNumber: extracted.prNumber });
+          }
         }
 
         const job = await insertJob(c.env, {

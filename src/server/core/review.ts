@@ -149,6 +149,22 @@ function shouldTriggerFromPullRequest(action: PullRequestWebhookPayload['action'
   return (config.on as string[]).includes(action);
 }
 
+/**
+ * True if the webhook sender is a bot (GitHub App, Dependabot, etc.), not a
+ * human user. Used to keep auto reviews from triggering/superseding on bot
+ * pushes — only a human pushing code should kick off an auto review.
+ */
+export function isBotSender(
+  sender: { login?: string; type?: string } | null | undefined,
+  botUsername: string,
+): boolean {
+  if (!sender) return false;
+  const login = (sender.login ?? '').toLowerCase();
+  return sender.type === 'Bot'
+    || /\[bot\]$/i.test(sender.login ?? '')
+    || (botUsername ? login === botUsername.toLowerCase() : false);
+}
+
 export type ReviewRequest = {
   installationId: string;
   owner: string;
@@ -176,6 +192,9 @@ export function extractReviewRequest(input: {
       return null;
     }
     if (!shouldTriggerFromPullRequest(payload.action, input.config.review)) {
+      return null;
+    }
+    if (isBotSender(payload.sender, input.botUsername)) {
       return null;
     }
 
