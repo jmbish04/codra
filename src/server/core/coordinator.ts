@@ -5,6 +5,30 @@ import { logger } from '@server/core/logger';
 export type CoordinatorRun = (system: string, user: string) => Promise<{ keep: number[] }>;
 export type SourceFetcher = (path: string, line: number | null) => Promise<string | null>;
 
+/** Half-window (lines) fetched on each side of a finding's line for source verification. */
+const SOURCE_WINDOW = 20;
+
+/**
+ * Slices `content` to a window of lines centered on `line` (1-based), or the
+ * file head when `line` is null. Extracted for isolated unit testing.
+ */
+export function windowSourceLines(content: string, line: number | null, halfWindow = SOURCE_WINDOW): string {
+  const lines = content.split('\n');
+  if (line == null) return lines.slice(0, halfWindow * 2).join('\n');
+  const start = Math.max(0, line - 1 - halfWindow);
+  const end = Math.min(lines.length, line + halfWindow);
+  return lines.slice(start, end).join('\n');
+}
+
+/**
+ * Parses a coordinator model's raw JSON text into `{ keep }`, tolerant of a
+ * missing/non-array field. Extracted for isolated unit testing.
+ */
+export function parseCoordinatorKeep(rawText: string): { keep: number[] } {
+  const parsed = JSON.parse(rawText);
+  return { keep: Array.isArray(parsed.keep) ? parsed.keep.map(Number) : [] };
+}
+
 const SYSTEM = [
   'You are the coordinator in Codra multi-agent review.',
   'Given findings from specialized reviewers, decide which to KEEP.',

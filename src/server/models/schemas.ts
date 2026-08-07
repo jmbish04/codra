@@ -197,6 +197,18 @@ export const CHANGELOG_SCHEMA = {
   schema: CHANGELOG_RESPONSE_SCHEMA,
 };
 
+/** Structured-output contract for the coordinator pass (dedup/reasonableness/source-verify). */
+export const COORDINATOR_SCHEMA = {
+  name: 'codra_coordinator',
+  description: 'Return the 0-based indices of findings to KEEP after dedup + reasonableness + source verification.',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { keep: { type: 'array', items: { type: 'integer' } } },
+    required: ['keep'],
+  },
+};
+
 /**
  * Structured output for judging whether AGENTS.md/README.md/frontend docs are
  * reflective and up-to-date relative to the PR's changes. Heuristics decide

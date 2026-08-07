@@ -13,6 +13,8 @@ import { planReviewers, selectFilePlanForBudget } from '@server/core/reviewer-pl
 import { REVIEWERS, buildReviewerSystemPrompt, type ReviewerId } from '@server/prompts/reviewers';
 import { buildSharedContext } from '@server/core/shared-context';
 import { aggregateReviewerResults, type ReviewerCallResult } from '@server/core/reviewer-aggregate';
+import { coordinateFindings, parseCoordinatorKeep, windowSourceLines } from '@server/core/coordinator';
+import { COORDINATOR_SCHEMA } from '@server/models/schemas';
 
 import { GitHubService } from '../services/github';
 import { GitHubClient } from './github';
@@ -1414,13 +1416,58 @@ async function runFinalizePhase(
 
   const hasFailures = fileSummaries.some((file) => file.verdict === 'failed');
   const failedFileCount = fileSummaries.filter((file) => file.verdict === 'failed').length;
+
+  // Coordinator pass: dedup + reasonableness + source-verify across all
+  // findings before the severity/max_comments cut. Best-effort — any failure
+  // here must never lose the review, so it falls back to the un-coordinated
+  // findings on any error.
+  let coordinatedComments = reviewedComments;
+  if (reviewedComments.length > 1) {
+    try {
+      const coordinatorTracker = new TokenTracker();
+      const model = new ModelService(env, coordinatorTracker, { jobId: job.id });
+      const projectContext = await withTimeout(
+        'project-context',
+        12000,
+        () => getProjectContext(env, github, job.owner, job.repo, pr.head.sha),
+      ).catch((err) => {
+        logger.warn('Project context unavailable; coordinating without it', err);
+        return '';
+      });
+      const sharedContext = buildSharedContext({ pr, config, projectContext });
+      const coordinatorModel = config.review.coordinator ?? config.model?.main ?? null;
+
+      const sourceCache = new Map<string, string | null>();
+      const fetchSource = async (path: string, line: number | null): Promise<string | null> => {
+        if (!sourceCache.has(path)) {
+          const result = await github.getRepoFileWithRefOrNull(job.owner, job.repo, path).catch(() => null);
+          sourceCache.set(path, result?.content ?? null);
+        }
+        const content = sourceCache.get(path) ?? null;
+        return content ? windowSourceLines(content, line) : null;
+      };
+
+      const runModel = coordinatorModel
+        ? async (system: string, user: string) => {
+            const resp = await model.callModel(coordinatorModel, { systemPrompt: system, userPrompt: user }, COORDINATOR_SCHEMA);
+            return parseCoordinatorKeep(resp.rawText);
+          }
+        : async () => { throw new Error('No coordinator model configured'); };
+
+      coordinatedComments = await coordinateFindings({ comments: reviewedComments, sharedContext, runModel, fetchSource });
+    } catch (err) {
+      logger.error('Coordinator pass failed; using un-coordinated findings', err);
+      coordinatedComments = reviewedComments;
+    }
+  }
+
   const severityRanks: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3, nit: 4 };
   const minRank = severityRanks[config.review.min_severity] ?? 4;
-  
-  let finalComments = reviewedComments.filter(c => (severityRanks[c.severity] ?? 4) <= minRank);
+
+  let finalComments = coordinatedComments.filter(c => (severityRanks[c.severity] ?? 4) <= minRank);
   finalComments.sort((a, b) => (severityRanks[a.severity] ?? 4) - (severityRanks[b.severity] ?? 4));
-  
-  const omittedCount = reviewedComments.length - Math.min(finalComments.length, config.review.max_comments);
+
+  const omittedCount = coordinatedComments.length - Math.min(finalComments.length, config.review.max_comments);
   if (finalComments.length > config.review.max_comments) {
     finalComments = finalComments.slice(0, config.review.max_comments);
   }
