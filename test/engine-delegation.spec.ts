@@ -1,7 +1,7 @@
 import { runReviewJob } from '@server/core/review';
 import { createTestEnv, generateMockDiff, hasConfiguredTestDatabaseUrl } from './helpers';
 import { vi } from 'vitest';
-import { findExistingJobForHead } from '@server/db/jobs';
+import { findExistingJobForHead, recordJobBatch } from '@server/db/jobs';
 import { getFileReviewsForJobs } from '@server/db/file-reviews';
 import { resolveEngine } from '@server/core/engine-selector';
 import type { ReviewEngine } from '@server/core/review-engine';
@@ -54,6 +54,12 @@ vi.mock('@server/services/model', () => {
     }
     async callModel() {
       return { modelUsed: 'test-model', provider: 'test-provider', rawText: '{"keep":[0,1]}', inputTokens: 1, outputTokens: 1, userPrompt: '' };
+    }
+    async pollReviewBatch(_model: string, _requestId: string) {
+      return {
+        status: 'complete' as const,
+        responses: [{ index: 0, rawText: '{"findings":[],"file_verdict":"approve","file_summary":"ok"}', error: null }],
+      };
     }
   }
   return {
@@ -254,5 +260,65 @@ dbDescribe('Engine delegation in runReviewPhase', () => {
 
     diffSpy.mockRestore();
     delete (env as any).PrReviewStream;
+  }, TIMEOUT_MS);
+
+  it('skips engine delegation while a native batch is already in flight (job.batchRequestId set)', async () => {
+    const { ModelService } = await import('@server/services/model');
+    const pollSpy = vi.spyOn(ModelService.prototype, 'pollReviewBatch');
+
+    const reviewPullRequest = vi.fn();
+    const engine = stubEngine(reviewPullRequest);
+    (resolveEngine as any).mockResolvedValue(engine);
+
+    const repo = `test-repo-${Date.now()}-batch-inflight`;
+    const headSha = sha('7');
+    const baseSha = sha('6');
+    const queue = env.REVIEW_QUEUE as any;
+    queue.sent.length = 0;
+
+    // Drive only the 'prepare' phase so the job exists with its 'review' phase
+    // continuation queued but not yet processed.
+    await runReviewJob(env, {
+      deliveryId: 'delivery-batch-inflight',
+      eventName: 'pull_request',
+      payload: {
+        action: 'opened',
+        installation: { id: 123 },
+        repository: { owner: { login: 'test-owner' }, name: repo },
+        pull_request: {
+          number: 13,
+          head: { sha: headSha, ref: 'feature' },
+          base: { sha: baseSha, ref: 'main' },
+          title: 'Test PR',
+          user: { login: 'author' },
+          draft: false,
+        },
+      },
+    });
+
+    const preparedJob = await findExistingJobForHead(env, { owner: 'test-owner', repo, prNumber: 13, commitSha: headSha, trigger: 'auto' });
+    expect(preparedJob).toBeTruthy();
+
+    // Simulate a native Workers AI batch already submitted on a prior invocation.
+    await recordJobBatch(env, preparedJob!.id, {
+      requestId: 'batch-inflight-1',
+      model: 'test-batch-model',
+      filePaths: ['src/app.ts'],
+    });
+
+    expect(queue.sent.length).toBeGreaterThan(0);
+    const reviewMessage = queue.sent.shift();
+    await runReviewJob(env, reviewMessage);
+
+    // The healthy engine must NOT be invoked while the batch is in flight —
+    // taking it over would orphan the already-submitted batch.
+    expect(reviewPullRequest).not.toHaveBeenCalled();
+    // Instead the existing native batch path drained it.
+    expect(pollSpy).toHaveBeenCalledWith('test-batch-model', 'batch-inflight-1');
+
+    const reviews = await getFileReviewsForJobs(env, [preparedJob!.id]);
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0].model_used).toBe('test-batch-model');
+    expect(reviews[0].file_status).toBe('done');
   }, TIMEOUT_MS);
 });

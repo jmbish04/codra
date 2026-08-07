@@ -7,6 +7,9 @@
 
 const VPC_ORIGIN = 'https://opencode.internal';
 const HEALTH_TIMEOUT_MS = 2000;
+/** Generous bound for a whole-PR review call so a hung OpenCode server can't
+ *  stall the Worker invocation until the platform kills it. */
+export const REVIEW_TIMEOUT_MS = 120_000;
 
 type OpenCodeBindings = {
   OPENCODE_VPC?: { fetch: (req: Request) => Promise<Response> };
@@ -57,13 +60,15 @@ export class OpenCodeClient {
     }
   }
 
-  /** POST /review; yields each JSONL line of the response body. */
-  async *review(payload: unknown, signal?: AbortSignal): AsyncIterable<string> {
+  /** POST /review; yields each JSONL line of the response body. `timeoutMs`
+   *  defaults to REVIEW_TIMEOUT_MS — overridable so tests don't have to wait
+   *  out the real 2-minute bound. */
+  async *review(payload: unknown, signal?: AbortSignal, timeoutMs: number = REVIEW_TIMEOUT_MS): AsyncIterable<string> {
     const res = await this.send('/review', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
-    }, signal);
+    }, signal, timeoutMs);
     const body = await res.text();
     for (const line of body.split('\n')) {
       const trimmed = line.trim();

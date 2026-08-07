@@ -179,6 +179,11 @@ export class ComputerEngine implements ReviewEngine {
     const comments: ParsedReviewComment[] = [];
     const perReviewer: ReviewerUsage[] = [];
 
+    // ponytail: when the real reviewerRunner replaces notConfiguredRunner,
+    // this files x reviewers loop needs a subrequest-budget gate (like
+    // native's selectFilePlanForBudget in review.ts) or it can exceed
+    // Cloudflare's 50-subrequest cap on a large PR. Not implemented now —
+    // this whole path is unreachable until the real runner lands.
     for (const file of ctx.files) {
       for (const id of plan) {
         const reviewer = REVIEWERS[id];

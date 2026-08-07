@@ -653,7 +653,11 @@ async function runReviewPhase(
   // native loop's subrequest-budget gate below. Falls through to the
   // unchanged native loop on native resolution OR any delegation failure.
   const engine = await resolveEngine(env, config, Date.now());
-  if (await delegateToEngine(env, engine, job, pr, config, files, totalLineCount, sharedContext, model, pricing)) {
+  // Skip delegation while a native batch is already in flight (job.batchRequestId
+  // set from a prior invocation) — a newly-healthy engine taking over here would
+  // orphan that batch (never polled/cleared). Let runBatchReviewPhase below drain
+  // it as usual; delegation resumes on a later invocation once it clears.
+  if (!job.batchRequestId && await delegateToEngine(env, engine, job, pr, config, files, totalLineCount, sharedContext, model, pricing)) {
     return;
   }
 

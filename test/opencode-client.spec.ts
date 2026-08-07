@@ -101,6 +101,28 @@ describe('OpenCodeClient', () => {
     expect(seen).toEqual(lines);
   });
 
+  it('review() times out (retryable) instead of hanging when the server never responds', async () => {
+    // Never resolves on its own; only rejects when its AbortSignal fires, so
+    // this proves review() itself imposes the bound rather than the fetch call.
+    const hungFetch = vi.fn((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+    }));
+    vi.stubGlobal('fetch', hungFetch);
+
+    const env = { OPENCODE_TUNNEL_URL: 'https://opencode.example.com' } as unknown as Env;
+    const client = new OpenCodeClient(env);
+
+    // Small override of REVIEW_TIMEOUT_MS's default so the test doesn't wait
+    // out the real 2-minute production bound.
+    const caughtPromise = (async () => {
+      for await (const _line of client.review({ job: 'x' }, undefined, 25)) {
+        // no-op
+      }
+    })();
+
+    await expect(caughtPromise).rejects.toSatisfy((err: unknown) => isRetryableOpenCodeError(err));
+  }, 5000);
+
   it('no transport configured: health() false, review() throws', async () => {
     const client = new OpenCodeClient({} as unknown as Env);
     expect(await client.health()).toBe(false);
