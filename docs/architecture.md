@@ -50,7 +50,7 @@ Each reviewer has an explicit IGNORE list to avoid overlap. Reviewer set scales 
 - **Lite tier** (up to `lite_max_lines`, default 100): add bugs + performance
 - **Full tier** (above lite): add quality + docs
 
-The active reviewer set is intersected with `config.review.focus` (which categories to check). The `docs` reviewer is always allowed through the focus filter even when mapped to the `quality` category.
+The active reviewer set is intersected with `config.review.focus` (which categories to check). The `docs` reviewer maps to the `quality` category, so it passes the focus filter whenever `focus` includes `quality` (which it does by default).
 
 ### Coordinator pass
 
