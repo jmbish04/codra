@@ -57,13 +57,18 @@ export async function coordinateFindings(input: {
 
   const threshold = input.lowConfidence ?? 0.6;
   const sourceBlocks: string[] = [];
-  const fetchedPaths = new Set<string>();
+  const sourceCache = new Map<string, string | null>();
   for (let i = 0; i < comments.length; i++) {
     const cm = comments[i];
     if ((cm.confidenceScore ?? 1) < threshold) {
-      if (!fetchedPaths.has(cm.path) && fetchedPaths.size >= MAX_SOURCE_FETCHES) continue;
-      fetchedPaths.add(cm.path);
-      const src = await fetchSource(cm.path, cm.line ?? null);
+      let src: string | null;
+      if (sourceCache.has(cm.path)) {
+        src = sourceCache.get(cm.path)!;
+      } else {
+        if (sourceCache.size >= MAX_SOURCE_FETCHES) continue;
+        src = await fetchSource(cm.path, cm.line ?? null);
+        sourceCache.set(cm.path, src);
+      }
       if (src) sourceBlocks.push(`[#${i} ${cm.path}:${cm.line}]\n${sanitizeForPrompt(src)}`);
     }
   }

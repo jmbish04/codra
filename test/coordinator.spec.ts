@@ -33,6 +33,14 @@ describe('coordinateFindings', () => {
     await coordinateFindings({ comments, sharedContext: 'S', runModel, fetchSource });
     expect(fetchSource).toHaveBeenCalledTimes(8);
   });
+
+  it('caches fetchSource per path — repeated paths cost one fetch each', async () => {
+    const comments = Array.from({ length: 10 }, (_, i) => c({ path: `file${i % 2}.ts`, confidenceScore: 0.1 }));
+    const fetchSource = vi.fn(async () => 'source content');
+    const runModel = vi.fn(async () => ({ keep: comments.map((_, i) => i) }));
+    await coordinateFindings({ comments, sharedContext: 'S', runModel, fetchSource });
+    expect(fetchSource).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('windowSourceLines', () => {
