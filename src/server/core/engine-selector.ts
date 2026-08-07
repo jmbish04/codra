@@ -55,13 +55,23 @@ export async function resolveEngine(
   for (const name of candidates) {
     if (name === 'native') return engines.native();
 
+    // Cheap, synchronous, no I/O — skip an unconfigured (unprovisioned)
+    // candidate entirely before touching KV/breaker or calling healthCheck.
+    // Without this, the default 'auto' config does a breaker isOpen read +
+    // recordFailure read/write per non-native candidate on EVERY review job,
+    // even though nothing is ever actually provisioned.
+    const engine = engines[name]();
+    if (!engine.isConfigured(env)) {
+      logger.info(`Engine '${name}' not configured; skipping.`);
+      continue;
+    }
+
     const breaker = new CircuitBreaker(env.APP_KV, name);
     if (await breaker.isOpen(nowMs)) {
       logger.info(`Engine '${name}' breaker open; skipping.`);
       continue;
     }
 
-    const engine = engines[name]();
     try {
       const healthy = await healthCheckWithHardTimeout(engine, HEALTHCHECK_TIMEOUT_MS);
       if (healthy) return engine;

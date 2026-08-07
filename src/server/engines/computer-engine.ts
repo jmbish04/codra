@@ -132,6 +132,10 @@ export class ComputerEngine implements ReviewEngine {
     private readonly reviewerRunner: ComputerReviewerRunner = notConfiguredRunner,
   ) {}
 
+  isConfigured(env: Env): boolean {
+    return this.factory.isAvailable(env);
+  }
+
   async healthCheck(_signal?: AbortSignal): Promise<boolean> {
     try {
       if (!this.factory.isAvailable(this.env)) return false;

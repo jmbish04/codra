@@ -71,7 +71,7 @@ vi.mock('@server/core/engine-selector', async (importOriginal) => {
 });
 
 function stubEngine(reviewPullRequest: ReviewEngine['reviewPullRequest']): ReviewEngine {
-  return { name: 'opencode', healthCheck: vi.fn(async () => true), reviewPullRequest };
+  return { name: 'opencode', isConfigured: () => true, healthCheck: vi.fn(async () => true), reviewPullRequest };
 }
 
 const dbDescribe = hasConfiguredTestDatabaseUrl() ? describe : describe.skip;
@@ -95,7 +95,7 @@ dbDescribe('Engine delegation in runReviewPhase', () => {
     const reviewFileSpy = vi.spyOn(ModelService.prototype, 'reviewFile');
 
     const engine = stubEngine(async () => ({
-      comments: [{ path: 'src/app.ts', line: 2, position: 2, severity: 'P1', category: 'bug', title: 'Engine finding', body: 'from opencode' }],
+      comments: [{ path: 'src/app.ts', line: 2, position: 2, severity: 'P1', category: 'bugs', title: 'Engine finding', body: 'from opencode' }],
       perReviewer: [{ reviewer: 'bugs', file: 'src/app.ts', inputTokens: 7, outputTokens: 3, cacheReadTokens: 1, cacheWriteTokens: 0, findings: 1 }],
     }));
     (resolveEngine as any).mockResolvedValue(engine);

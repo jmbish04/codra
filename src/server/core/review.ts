@@ -1119,6 +1119,38 @@ async function persistEngineResult(
   engineName: string,
   pricing: PricingSnapshot,
 ): Promise<void> {
+  // ONE batched fetch for every comment across every file, not one fetch per
+  // file (reviewAndPersistFile's native-loop pattern) — delegation already
+  // has the whole PR's findings in memory from the single engine call, and a
+  // per-file fetch would blow Cloudflare's 50-subrequest cap on a large PR
+  // (the native loop avoids this the same way it avoids per-file model calls
+  // exceeding budget: REVIEW_CHUNK_FILE_LIMIT). This keeps the delegation
+  // path's subrequests at ~1 (reviewPullRequest) + 1 (DO) regardless of PR size.
+  let doRequests = 0;
+  let doDurationGbs = 0;
+  if (result.comments.length > 0) {
+    const doStartedAt = Date.now();
+    try {
+      const streamId = (env as any).PrReviewStream.idFromName(`${job.owner}/${job.repo}/${job.prNumber}`);
+      const streamStub = (env as any).PrReviewStream.get(streamId);
+      await streamStub.fetch(new Request('http://do/comment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(result.comments),
+      }));
+      doRequests = 1;
+    } catch (streamErr) {
+      logger.error('Failed to stream real-time comments to Durable Object', streamErr);
+    }
+    doDurationGbs = msToGbSeconds(Date.now() - doStartedAt);
+  }
+
+  // recordFileCost only has a fileReviewId to hang cost rows off (there's no
+  // job-level cost row), so the single batched DO fetch above is charged to
+  // whichever file review is written first — every other file gets 0 DO
+  // subrequests recorded — instead of double/triple-counting it per file.
+  let doCostAttributed = false;
+
   for (const file of files) {
     const fileComments = result.comments.filter((c) => c.path === file.path);
     const usage = result.perReviewer
@@ -1133,6 +1165,11 @@ async function persistEngineResult(
         { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
       );
 
+    // A mid-loop D1 failure here (upsertFileReview/recordFileCost throwing)
+    // leaves this and later files unpersisted with earlier files already
+    // done — self-healing: countsAsHandledFileReview only skips files that
+    // already succeeded, so a retry/requeue re-delegates or falls to native
+    // for whatever's left, same as any other partial-chunk failure in this file.
     const fileReviewId = await upsertFileReview(env, job.id, {
       filePath: file.path,
       fileStatus: 'done',
@@ -1155,27 +1192,6 @@ async function persistEngineResult(
       errorMessage: null,
     });
 
-    // Batched into ONE fetch carrying the whole file's comment array — same
-    // shape/reasoning as reviewAndPersistFile's DO stream call.
-    let doRequests = 0;
-    let doDurationGbs = 0;
-    if (fileComments.length > 0) {
-      const doStartedAt = Date.now();
-      try {
-        const streamId = (env as any).PrReviewStream.idFromName(`${job.owner}/${job.repo}/${job.prNumber}`);
-        const streamStub = (env as any).PrReviewStream.get(streamId);
-        await streamStub.fetch(new Request('http://do/comment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(fileComments),
-        }));
-        doRequests += 1;
-      } catch (streamErr) {
-        logger.error('Failed to stream real-time comments to Durable Object', streamErr);
-      }
-      doDurationGbs = msToGbSeconds(Date.now() - doStartedAt);
-    }
-
     await recordFileCost(env, pricing, {
       fileReviewId,
       jobId: job.id,
@@ -1183,13 +1199,14 @@ async function persistEngineResult(
       usage: {
         aiInputTokens: usage.inputTokens,
         aiOutputTokens: usage.outputTokens,
-        doRequests,
-        doDurationGbs,
+        doRequests: doCostAttributed ? 0 : doRequests,
+        doDurationGbs: doCostAttributed ? 0 : doDurationGbs,
         d1RowsWritten: 1 + fileComments.length,
         d1RowsRead: 2,
-        subrequests: doRequests, // one logical engine call already paid for above this loop; only the DO fetch is per-file here
+        subrequests: doCostAttributed ? 0 : doRequests,
       },
     });
+    doCostAttributed = true;
   }
 }
 

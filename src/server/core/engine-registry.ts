@@ -7,6 +7,7 @@ import { NativeEngine } from '@server/engines/native-engine';
 class UnprovisionedEngine implements ReviewEngine {
   constructor(readonly name: 'opencode' | 'computer') {}
   async healthCheck(_signal?: AbortSignal) { return false; }
+  isConfigured(_env: Env) { return false; }
   async reviewPullRequest(_ctx: ReviewContext): Promise<EngineReviewResult> {
     throw new Error('engine not provisioned');
   }

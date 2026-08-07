@@ -13,9 +13,10 @@ function fakeKv() {
   } as any;
 }
 
-function stubEngine(name: 'opencode' | 'computer' | 'native', healthy: boolean): ReviewEngine {
+function stubEngine(name: 'opencode' | 'computer' | 'native', healthy: boolean, configured = true): ReviewEngine {
   return {
     name,
+    isConfigured: vi.fn(() => configured),
     healthCheck: vi.fn(async () => healthy),
     reviewPullRequest: vi.fn(async () => ({ comments: [], perReviewer: [] })),
   };
@@ -88,6 +89,7 @@ describe('resolveEngine', () => {
     const kv = fakeKv();
     const opencode: ReviewEngine = {
       name: 'opencode',
+      isConfigured: () => true,
       healthCheck: vi.fn(() => new Promise<boolean>(() => {})), // never settles, ignores signal
       reviewPullRequest: vi.fn(),
     };
@@ -134,6 +136,7 @@ describe('resolveEngine', () => {
     const kv = fakeKv();
     const opencode: ReviewEngine = {
       name: 'opencode',
+      isConfigured: () => true,
       healthCheck: vi.fn(async () => { throw new Error('boom'); }),
       reviewPullRequest: vi.fn(),
     };
@@ -146,5 +149,25 @@ describe('resolveEngine', () => {
 
     const raw = await kv.get('breaker:opencode');
     expect(JSON.parse(raw!).failures).toBe(1);
+  });
+
+  it('unconfigured candidates (isConfigured=false) never touch the breaker/KV or healthCheck -> native, zero KV I/O', async () => {
+    const kv = fakeKv();
+    const getSpy = vi.spyOn(kv, 'get');
+    const putSpy = vi.spyOn(kv, 'put');
+
+    const opencode = stubEngine('opencode', true, false); // healthy but unconfigured
+    const computer = stubEngine('computer', true, false);
+    const native = stubEngine('native', true);
+    const engines = { opencode: () => opencode, computer: () => computer, native: () => native };
+
+    const result = await resolveEngine(env(kv), config('auto'), 1000, engines);
+    expect(result).toBe(native);
+    expect(opencode.isConfigured).toHaveBeenCalled();
+    expect(opencode.healthCheck).not.toHaveBeenCalled();
+    expect(computer.healthCheck).not.toHaveBeenCalled();
+    // The default 'auto' config with nothing provisioned must do ZERO KV I/O.
+    expect(getSpy).not.toHaveBeenCalled();
+    expect(putSpy).not.toHaveBeenCalled();
   });
 });

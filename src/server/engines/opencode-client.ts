@@ -33,6 +33,13 @@ function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** No I/O — just checks whether either transport binding is present. Shared by
+ *  OpenCodeClient's own send() gate and OpenCodeEngine.isConfigured(). */
+export function hasOpenCodeTransport(env: Env): boolean {
+  const bindings = env as unknown as OpenCodeBindings;
+  return Boolean(bindings.OPENCODE_VPC || bindings.OPENCODE_TUNNEL_URL);
+}
+
 export class OpenCodeClient {
   private readonly bindings: OpenCodeBindings;
 

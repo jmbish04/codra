@@ -4,7 +4,7 @@ import { parsedReviewCommentSchema } from '@shared/schema';
 import { renderFileDiff } from '@server/core/diff';
 import { sanitizeForPrompt } from '@server/core/prompt-safety';
 import { logger } from '@server/core/logger';
-import { OpenCodeClient } from '@server/engines/opencode-client';
+import { OpenCodeClient, hasOpenCodeTransport } from '@server/engines/opencode-client';
 
 /**
  * JSONL line contract for `client.review()`'s output stream:
@@ -25,6 +25,10 @@ export class OpenCodeEngine implements ReviewEngine {
 
   constructor(env: Env, client?: OpenCodeClient) {
     this.client = client ?? new OpenCodeClient(env);
+  }
+
+  isConfigured(env: Env): boolean {
+    return hasOpenCodeTransport(env);
   }
 
   async healthCheck(signal?: AbortSignal): Promise<boolean> {
