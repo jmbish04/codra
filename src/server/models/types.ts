@@ -4,6 +4,8 @@ export type ModelResponse = {
   outputTokens: number;
   modelUsed: string;
   provider: string;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
 };
 
 export class ProviderRequestError extends Error {

@@ -13,6 +13,8 @@ export interface ModelUsage extends TokenUsage {
 export class TokenTracker {
   private usage: Map<string, ModelUsage> = new Map();
   private subrequests = 0;
+  private cacheRead = 0;
+  private cacheWrite = 0;
   private readonly MAX_SUBREQUESTS = 50;
   private readonly SAFE_MARGIN = 22; // Increased even further to handle finalization overhead
 
@@ -37,7 +39,7 @@ export class TokenTracker {
    */
   record(model: string, input: number, output: number) {
     const existing = this.usage.get(model) || { model, input: 0, output: 0, calls: 0 };
-    
+
     this.usage.set(model, {
       model,
       input: existing.input + input,
@@ -45,12 +47,27 @@ export class TokenTracker {
       calls: existing.calls + 1,
     });
 
-    logger.debug(`Token usage recorded for ${model}`, { 
-      input, 
-      output, 
+    logger.debug(`Token usage recorded for ${model}`, {
+      input,
+      output,
       totalInput: existing.input + input,
       totalOutput: existing.output + output
     });
+  }
+
+  /**
+   * Records cache token usage.
+   */
+  recordCache(read: number, write: number) {
+    this.cacheRead += read;
+    this.cacheWrite += write;
+  }
+
+  /**
+   * Returns the accumulated cache token usage.
+   */
+  getCacheUsage(): { read: number; write: number } {
+    return { read: this.cacheRead, write: this.cacheWrite };
   }
 
   /**
@@ -81,6 +98,8 @@ export class TokenTracker {
     for (const usage of other.getBreakdown()) {
       this.record(usage.model, usage.input, usage.output);
     }
+    const cacheUsage = other.getCacheUsage();
+    this.recordCache(cacheUsage.read, cacheUsage.write);
   }
 
   /**
@@ -88,5 +107,7 @@ export class TokenTracker {
    */
   reset() {
     this.usage.clear();
+    this.cacheRead = 0;
+    this.cacheWrite = 0;
   }
 }
