@@ -687,22 +687,32 @@ async function runReviewPhase(
   const tracker = model.getTracker?.();
 
   // 30s heartbeat for the (potentially minutes-long) reviewer fan-out below:
-  // extends the existing lease heartbeat + nudges the check-run so a stalled
-  // check doesn't read as a hung job. `last` is shared across every
-  // concurrently-running file/reviewer task this chunk; whichever call
-  // crosses the 30s mark first fires it, which is fine for a UX heartbeat.
+  // extends the lease + nudges the check-run so a stalled check doesn't read
+  // as a hung job. `last` is shared across every concurrently-running
+  // file/reviewer task this chunk; whichever call crosses the 30s mark first
+  // fires it, which is fine for a UX heartbeat.
+  //
+  // Deliberately NOT heartbeatAndCheckSuperseded / checkSuperseded here: those
+  // throw JOB_SUPERSEDED to abort the job, but this heartbeat runs inside
+  // reviewAndPersistFile's per-file try/catch (and, in the fan-out path,
+  // inside a Promise.allSettled reviewer mapper) — a throw there either gets
+  // mis-persisted as a failed file review or silently swallowed by a sibling
+  // reviewer's success. The chunk-boundary heartbeatAndCheckSuperseded below
+  // (after Promise.allSettled(reviewTasks)) remains the sole supersession
+  // abort point for this loop; this heartbeat only ever refreshes the lease
+  // and pings the check-run, and never throws into the review path.
   const heartbeatState = { last: Date.now() };
   const maybeHeartbeat = async () => {
     if (Date.now() - heartbeatState.last < 30_000) return;
     heartbeatState.last = Date.now();
     logReviewStep({ jobId: job.id, phase: 'review', model: 'heartbeat', durationMs: 0, findings: 0 });
+    await heartbeatJobLease(env, job.id, leaseOwner, JOB_LEASE_SECONDS).catch((err) => logger.warn('Heartbeat lease refresh failed (ignored)', err));
     if (job.checkRunId) {
       await github.updateCheckRun(job.owner, job.repo, job.checkRunId, {
         title: 'Reviewing…',
         summary: 'Reviewing… (model thinking)',
       }).catch((err) => logger.warn('Heartbeat check-run update failed (ignored)', err));
     }
-    await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
   };
 
   for (const file of files) {
@@ -1294,6 +1304,14 @@ async function reviewAndPersistFile(
       },
     });
   } catch (error) {
+    // A supersede signal must never be downgraded to a 'failed' file review —
+    // rethrow so it propagates to runReviewPhase's caller the same way every
+    // other checkSuperseded/heartbeatAndCheckSuperseded call site already
+    // does. (Defensive: nothing in this function currently throws
+    // JOB_SUPERSEDED itself, but this guard makes that invariant hold even if
+    // that changes.)
+    if (error instanceof Error && error.message === 'JOB_SUPERSEDED') throw error;
+
     const errorMessage = error instanceof Error ? error.message : 'Unknown file review error';
     const modelId = config.model?.main ?? 'unconfigured';
     const modelProvider = await resolveFailureModelProvider();
