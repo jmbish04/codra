@@ -51,10 +51,18 @@ type ComputerBindings = {
   COMPUTER_WORKSPACE?: unknown;
 };
 
-// ponytail: real Workspace wiring (DO class extending `withWorkspace`,
-// `getWorkspace(stub)`, tarball extraction into `ws.fs`) lands once
-// COMPUTER_WORKSPACE is actually provisioned in wrangler.jsonc — until
-// then isAvailable is always false, so `create` is unreachable in prod.
+// ponytail: `@cloudflare/computer` is intentionally NOT a dependency here —
+// nothing imports it (this whole file is adapter-typed), and it's an
+// `unreleased`-tagged preview package that drags native transitive deps
+// (@mongodb-js/zstd, node-liblzma via just-bash). When COMPUTER_WORKSPACE
+// is actually provisioned in wrangler.jsonc, wire `create()` with a
+// DYNAMIC `import('@cloudflare/computer')` INSIDE this method (already
+// gated behind the isAvailable() check above, so it only ever loads when
+// the binding is real) and add `@cloudflare/computer` to
+// `optionalDependencies` at that point — so its resolution/native-build
+// can never break `npm install`/CI for everyone else. Real wiring: a DO
+// class extending `withWorkspace`, `getWorkspace(stub)`, tarball
+// extraction into `ws.fs`. Until then `create` is unreachable in prod.
 export class RealComputerWorkspaceFactory implements ComputerWorkspaceFactory {
   isAvailable(env: Env): boolean {
     return !!(env as unknown as ComputerBindings).COMPUTER_WORKSPACE;
