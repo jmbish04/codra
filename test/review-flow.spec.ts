@@ -528,6 +528,89 @@ dbDescribe('Review Flow Lifecycle', () => {
     expect(fileReview?.parsed_comments).toHaveLength(reviewersPerFile);
   }, REVIEW_FLOW_TIMEOUT_MS);
 
+  it('bounds subrequests for a large multi-file PR and batches DO comment streaming per file', async () => {
+    const { GitHubService } = await import('@server/services/github');
+    const { ModelService } = await import('@server/services/model');
+    const repo = `test-repo-${Date.now()}-budget`;
+    const headSha = sha('3');
+    const baseSha = sha('4');
+
+    // >100 total added lines across 5 files -> full risk tier (6 reviewers)
+    // under defaultRepoConfig's risk_tiers (lite_max_lines: 100).
+    const files = Array.from({ length: 5 }, (_, i) => ({
+      path: `src/file${i}.ts`,
+      content: Array.from({ length: 25 }, (_, j) => `console.log(${i}, ${j});`).join('\n'),
+    }));
+    const getDiffSpy = vi.spyOn(GitHubService.prototype, 'getPullRequestDiff').mockResolvedValue(generateMockDiff(files));
+    const reviewSpy = vi.spyOn(ModelService.prototype as any, 'reviewFile');
+
+    // No PrReviewStream binding is provided by createTestEnv (see helpers.ts),
+    // so wire up a stub that records every DO fetch's body — this is what
+    // proves comments are batched into ONE array per file instead of one
+    // fetch per comment (the CRITICAL fix: up to 6 reviewers x max_comments
+    // findings per file previously meant up to ~60 DO fetches PER FILE).
+    const doFetchBodies: unknown[] = [];
+    (env as any).PrReviewStream = {
+      idFromName: () => 'stream-id',
+      get: () => ({
+        fetch: async (req: Request) => {
+          doFetchBodies.push(await req.clone().json());
+          return new Response('OK');
+        },
+      }),
+    };
+
+    const job = await insertJob(env, {
+      installationId: '123',
+      owner: 'test-owner',
+      repo,
+      prNumber: 9,
+      prTitle: 'Budget Test',
+      prAuthor: 'author',
+      commitSha: headSha,
+      baseSha,
+      trigger: 'auto',
+      headRef: 'feature',
+      baseRef: 'main',
+      configSnapshot: defaultRepoConfig,
+    });
+    await updateJobFileCount(env, job.id, files.length);
+    await updateJobStep(env, job.id, 'Preparation', { status: 'done' });
+
+    const reviewersPerFile = planReviewers(200, files.length, defaultRepoConfig.review).length;
+    expect(reviewersPerFile).toBe(6);
+
+    (env.REVIEW_QUEUE as any).sent.length = 0;
+    // A single invocation, not drained: proves what ONE queue message does,
+    // which is exactly the unit Cloudflare's 50-subrequest cap applies to.
+    const result = await runReviewJob(env, { jobId: job.id, deliveryId: 'delivery-budget', phase: 'review' });
+    expect(result).toEqual({ action: 'ack' });
+
+    // REVIEW_CHUNK_FILE_LIMIT (3) x reviewersPerFile (6) = 18 model calls max
+    // for this invocation — nowhere near the 50-subrequest cap, and NOT
+    // files.length(5) x reviewersPerFile(6) = 30 all fired in one shot.
+    expect(reviewSpy.mock.calls.length).toBeGreaterThan(0);
+    expect(reviewSpy.mock.calls.length).toBeLessThanOrEqual(3 * reviewersPerFile);
+    expect(reviewSpy.mock.calls.length).toBeLessThan(50);
+
+    // One DO fetch per file processed (not per comment), and each one carries
+    // an array of that file's aggregated comments.
+    expect(doFetchBodies.length).toBeGreaterThan(0);
+    expect(doFetchBodies.length).toBeLessThanOrEqual(3);
+    for (const body of doFetchBodies) {
+      expect(Array.isArray(body)).toBe(true);
+    }
+
+    // Not every file fit in this invocation's chunk, so the job re-enqueued
+    // 'review' to continue the rest next invocation instead of exceeding the
+    // budget trying to do it all at once.
+    expect((env.REVIEW_QUEUE as any).sent.some((m: any) => m.jobId === job.id && m.phase === 'review')).toBe(true);
+
+    reviewSpy.mockRestore();
+    getDiffSpy.mockRestore();
+    delete (env as any).PrReviewStream;
+  }, REVIEW_FLOW_TIMEOUT_MS);
+
   it('marks completed jobs with skipped files as partial reviews', async () => {
     const { GitHubService } = await import('@server/services/github');
     const { ModelService } = await import('@server/services/model');

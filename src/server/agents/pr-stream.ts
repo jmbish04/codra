@@ -44,10 +44,17 @@ export class PrReviewStream extends DurableObject {
       return new Response(null, { status: 101, webSocket: client });
     }
 
-    // Handle HTTP POST to add a new comment to be broadcasted
+    // Handle HTTP POST to add new comment(s) to be broadcasted. Accepts either
+    // a single comment object (legacy) or an array of comments — the caller
+    // batches a whole file's aggregated comments into one array so streaming
+    // N comments costs 1 subrequest instead of N (Cloudflare's 50-subrequest
+    // per-invocation cap otherwise gets blown by a multi-reviewer fan-out).
     if (url.pathname === "/comment" && request.method === "POST") {
       const body = await request.json<any>();
-      this.broadcast(JSON.stringify({ type: "comment", data: body }));
+      const comments = Array.isArray(body) ? body : [body];
+      for (const comment of comments) {
+        this.broadcast(JSON.stringify({ type: "comment", data: comment }));
+      }
       return new Response("OK");
     }
 

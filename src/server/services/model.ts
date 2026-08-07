@@ -113,6 +113,13 @@ export class ModelService {
     private options: { jobId?: string } = {},
   ) {}
 
+  /** Exposes the shared per-invocation subrequest tracker so callers can gate
+   *  work (e.g. reviewer fan-out) against Cloudflare's subrequest cap before
+   *  issuing more model calls. */
+  getTracker() {
+    return this.tracker;
+  }
+
   private providerUnavailableKey(providerId: string) {
     return this.options.jobId ? `jobs:${this.options.jobId}:provider-unavailable:${providerId}` : null;
   }

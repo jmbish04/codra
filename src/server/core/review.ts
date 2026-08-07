@@ -9,7 +9,7 @@ import { getResolvedModelConfig } from '@server/db/model-configs';
 import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, countAutoReviewsForPr, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, MAX_AUTO_REVIEWS_PER_PR, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
 import { parseFileReviewResponse } from './model-output';
 import { filterReviewableFiles, parseUnifiedDiff, renderFileDiff } from './diff';
-import { planReviewers } from '@server/core/reviewer-plan';
+import { planReviewers, selectFilePlanForBudget } from '@server/core/reviewer-plan';
 import { REVIEWERS, buildReviewerSystemPrompt, type ReviewerId } from '@server/prompts/reviewers';
 import { buildSharedContext } from '@server/core/shared-context';
 import { aggregateReviewerResults, type ReviewerCallResult } from '@server/core/reviewer-aggregate';
@@ -665,13 +665,23 @@ async function runReviewPhase(
   }
 
   // Multi-reviewer fan-out (see reviewAndPersistFile) isn't wired into the batch
-  // path yet — deferred. Only take the batch path when a single reviewer covers
-  // this PR, otherwise fall through to the synchronous per-file loop below.
-  if (plan.length <= 1 && await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount, projectContext })) {
+  // SUBMIT path yet — deferred; only single-reviewer PRs may submit a new
+  // batch. Always call runBatchReviewPhase though, even when plan.length > 1:
+  // it also owns draining (poll/persist/clear) an ALREADY-SUBMITTED batch from
+  // a prior invocation, and skipping the call entirely would leave that batch
+  // dangling forever (never polled, never cleared) if the job's plan grew
+  // past 1 reviewer between invocations (e.g. a config change or a diff
+  // update crossing a risk tier).
+  if (await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount, projectContext, allowNewBatch: plan.length <= 1 })) {
     return;
   }
 
   const reviewTasks: Array<Promise<void>> = [];
+  // Optional: the module-mocked ModelService used in some tests doesn't
+  // implement getTracker(), so this stays undefined there and the budget
+  // gate below simply no-ops (matches the tracker-less TokenTracker usage
+  // pattern already used elsewhere in this file, e.g. GitHubClient/model.ts).
+  const tracker = model.getTracker?.();
 
   for (const file of files) {
     const existingReview = currentReviews.get(file.path);
@@ -680,15 +690,35 @@ async function runReviewPhase(
     }
 
     const inherited = parentReviews.get(file.path);
+    const willCallModel = !inherited || !canInheritParentFileReview(config, inherited);
+
+    // Budget-aware gate: stop starting new files' reviewer fan-out once this
+    // invocation's subrequest budget can't fit the next one, so a large PR
+    // spreads its model calls across invocations instead of risking
+    // Cloudflare's 50-subrequest cap. See selectFilePlanForBudget for the
+    // trivial-tier degrade-instead-of-stall fallback.
+    let filePlan = plan;
+    if (willCallModel && tracker) {
+      const decision = selectFilePlanForBudget(plan, processedThisChunk, (needed) => tracker.hasRemainingSubrequests(needed));
+      if (decision.action === 'defer') break;
+      filePlan = decision.plan;
+      if (filePlan !== plan) {
+        logger.warn(`Reviewer plan (${plan.length}) doesn't fit the subrequest budget for ${file.path}; using reduced set`, {
+          reduced: filePlan,
+          subrequestsUsed: tracker.getSubrequestCount(),
+        });
+      }
+    }
+
     const reviewTask = async () => {
       if (!inherited) {
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, plan, resolveFailureModelProvider, existingReview);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, filePlan, resolveFailureModelProvider, existingReview);
         return;
       }
 
       if (!canInheritParentFileReview(config, inherited)) {
         logger.info(`Ignoring inherited review for ${file.path}; parent model ${inherited.model_used} is not in the current model strategy`);
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, plan, resolveFailureModelProvider, existingReview);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, filePlan, resolveFailureModelProvider, existingReview);
       } else {
         const inheritedComments = inherited.parsed_comments as ParsedReviewComment[];
         const fileReviewId = await upsertFileReview(env, job.id, {
@@ -790,9 +820,14 @@ async function runBatchReviewPhase(
     pendingFiles: ReturnType<typeof parseUnifiedDiff>;
     totalLineCount: number;
     projectContext: string;
+    /** False when the current reviewer plan has >1 reviewer (fan-out isn't
+     *  wired into the batch SUBMIT path yet). An already-submitted batch from
+     *  a prior invocation is still polled/persisted/cleared below regardless —
+     *  only the "start a NEW batch" branch is gated on this. */
+    allowNewBatch: boolean;
   },
 ) {
-  const { pr, config, files, pendingFiles, totalLineCount, projectContext } = ctx;
+  const { pr, config, files, pendingFiles, totalLineCount, projectContext, allowNewBatch } = ctx;
 
   if (job.batchRequestId && job.batchModel) {
     let result: Awaited<ReturnType<ModelService['pollReviewBatch']>>;
@@ -832,6 +867,7 @@ async function runBatchReviewPhase(
     return true;
   }
 
+  if (!allowNewBatch) return false;
   if (pendingFiles.length === 0) return false;
 
   // Small/medium PRs review faster on the parallel sync path than on the async
@@ -1074,7 +1110,13 @@ async function reviewAndPersistFile(
       // and combine their findings into one file review record. sharedContext
       // already carries the project context, so pass '' here to avoid
       // duplicating it in every reviewer's prompt.
-      const results: ReviewerCallResult[] = await Promise.all(
+      //
+      // allSettled (not all): one reviewer throwing shouldn't discard every
+      // OTHER reviewer's already-paid-for result and force a full re-run of
+      // all N reviewers on retry (up to Nx cost amplification on a single
+      // transient hiccup). Proceed with whichever reviewers succeeded; only
+      // fail the file if every reviewer failed.
+      const settled = await Promise.allSettled(
         plan.map(async (id): Promise<ReviewerCallResult> => {
           const response = await model.reviewFile({
             file,
@@ -1101,6 +1143,30 @@ async function reviewAndPersistFile(
           };
         }),
       );
+
+      const results: ReviewerCallResult[] = [];
+      const failedReviewers: string[] = [];
+      settled.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          results.push(result.value);
+        } else {
+          failedReviewers.push(plan[index]);
+          logger.warn(`Reviewer ${plan[index]} failed for ${file.path}`, {
+            error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+          });
+        }
+      });
+
+      if (results.length === 0) {
+        // Every reviewer failed — surface the first failure so this file goes
+        // through the exact same retry/hard-limit handling as a single-call
+        // failure would (the outer try/catch below).
+        throw (settled.find((r): r is PromiseRejectedResult => r.status === 'rejected') as PromiseRejectedResult).reason;
+      }
+      if (failedReviewers.length > 0) {
+        logger.warn(`Proceeding with ${results.length}/${plan.length} reviewers for ${file.path}; ${failedReviewers.join(', ')} failed and will be missing from this pass`);
+      }
+
       const aggregate = aggregateReviewerResults(results);
       modelUsed = aggregate.modelUsed;
       provider = aggregate.provider;
@@ -1145,21 +1211,25 @@ async function reviewAndPersistFile(
     // Measure only the DO streaming loop — capturing the start before the
     // zero-comment guard would bill downstream work (recordFileCost etc.) as
     // DO time even when the Durable Object is never contacted.
+    //
+    // Batched into ONE fetch carrying the whole file's comment array (the DO
+    // broadcasts them individually over the websocket internally — see
+    // pr-stream.ts) instead of one fetch per comment. A fan-out file can have
+    // up to max_comments x reviewer-count findings; one subrequest per file
+    // (not per comment) keeps this well under Cloudflare's 50-subrequest cap.
     if (comments.length > 0) {
       const doStartedAt = Date.now();
       try {
         const streamId = (env as any).PrReviewStream.idFromName(`${job.owner}/${job.repo}/${job.prNumber}`);
         const streamStub = (env as any).PrReviewStream.get(streamId);
-        for (const comment of comments) {
-          await streamStub.fetch(new Request('http://do/comment', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(comment),
-          }));
-          doRequests += 1;
-        }
+        await streamStub.fetch(new Request('http://do/comment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(comments),
+        }));
+        doRequests += 1;
       } catch (streamErr) {
-        logger.error('Failed to stream real-time comment to Durable Object', streamErr);
+        logger.error('Failed to stream real-time comments to Durable Object', streamErr);
       }
       doDurationGbs = msToGbSeconds(Date.now() - doStartedAt);
     }

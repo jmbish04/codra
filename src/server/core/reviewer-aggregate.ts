@@ -30,9 +30,17 @@ export type AggregatedReview = {
   rawText: string;
   inputTokens: number;
   outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
 };
+
+/** Sums a token field across results, but stays `null` (matching the
+ *  single-reviewer path) when NO reviewer reported one, instead of a
+ *  misleading `0`. */
+function sumOrNull(results: ReviewerCallResult[], pick: (r: ReviewerCallResult) => number | undefined): number | null {
+  const values = results.map(pick).filter((v): v is number => typeof v === 'number');
+  return values.length > 0 ? values.reduce((sum, v) => sum + v, 0) : null;
+}
 
 /**
  * Combines N specialized-reviewer calls for the same file into one review
@@ -40,7 +48,10 @@ export type AggregatedReview = {
  * reviewer flagged something, fileSummary joins the non-empty summaries.
  * modelUsed/provider are taken from the first result — every reviewer call
  * for a file goes through the same model selection, so they're identical in
- * practice; "first" is just a deterministic pick.
+ * practice; "first" is just a deterministic pick. overallCorrectness prefers
+ * a reviewer that actually flagged something ('comment' verdict) over an
+ * approving one, since that's the more actionable ("worst") assessment;
+ * confidenceScore takes the lowest (least confident) reported value.
  */
 export function aggregateReviewerResults(results: ReviewerCallResult[]): AggregatedReview {
   if (results.length === 0) {
@@ -48,25 +59,29 @@ export function aggregateReviewerResults(results: ReviewerCallResult[]): Aggrega
   }
 
   const first = results[0];
+  const worst = results.find((r) => r.parsed.verdict === 'comment') ?? first;
   const comments = results.flatMap((r) => r.parsed.comments ?? []);
   const verdict = results.some((r) => r.parsed.verdict === 'comment') ? 'comment' : 'approve';
   const fileSummary = results
     .map((r) => r.parsed.fileSummary)
     .filter((s): s is string => Boolean(s && s.trim().length > 0))
     .join(' ') || null;
+  const confidenceScores = results
+    .map((r) => r.parsed.confidenceScore)
+    .filter((v): v is number => typeof v === 'number');
 
   return {
     comments,
     verdict,
     fileSummary,
-    overallCorrectness: first.parsed.overallCorrectness ?? null,
-    confidenceScore: first.parsed.confidenceScore ?? null,
+    overallCorrectness: worst.parsed.overallCorrectness ?? first.parsed.overallCorrectness ?? null,
+    confidenceScore: confidenceScores.length > 0 ? Math.min(...confidenceScores) : null,
     modelUsed: first.modelUsed,
     provider: first.provider,
     rawText: results.map((r) => `[${r.reviewer}]\n${r.rawText}`).join('\n\n---\n\n'),
     inputTokens: results.reduce((sum, r) => sum + (r.inputTokens ?? 0), 0),
     outputTokens: results.reduce((sum, r) => sum + (r.outputTokens ?? 0), 0),
-    cacheReadTokens: results.reduce((sum, r) => sum + (r.cacheReadTokens ?? 0), 0),
-    cacheWriteTokens: results.reduce((sum, r) => sum + (r.cacheWriteTokens ?? 0), 0),
+    cacheReadTokens: sumOrNull(results, (r) => r.cacheReadTokens),
+    cacheWriteTokens: sumOrNull(results, (r) => r.cacheWriteTokens),
   };
 }
