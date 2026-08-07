@@ -39,6 +39,7 @@ import { listSecretsStoreSecrets, ensureSecretBindings, type SecretBindingSpec }
 import { evaluateDocsGaps, buildJulesPrompt } from '@server/core/jules-docs-gap';
 import { stageJulesSession } from '@server/db/jules-sessions';
 import { ensureDeployWorkflow } from '@server/core/deploy-workflow';
+import { emitReviewDatapoint, logReviewStep } from '@server/core/review-telemetry';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
 
@@ -685,6 +686,25 @@ async function runReviewPhase(
   // pattern already used elsewhere in this file, e.g. GitHubClient/model.ts).
   const tracker = model.getTracker?.();
 
+  // 30s heartbeat for the (potentially minutes-long) reviewer fan-out below:
+  // extends the existing lease heartbeat + nudges the check-run so a stalled
+  // check doesn't read as a hung job. `last` is shared across every
+  // concurrently-running file/reviewer task this chunk; whichever call
+  // crosses the 30s mark first fires it, which is fine for a UX heartbeat.
+  const heartbeatState = { last: Date.now() };
+  const maybeHeartbeat = async () => {
+    if (Date.now() - heartbeatState.last < 30_000) return;
+    heartbeatState.last = Date.now();
+    logReviewStep({ jobId: job.id, phase: 'review', model: 'heartbeat', durationMs: 0, findings: 0 });
+    if (job.checkRunId) {
+      await github.updateCheckRun(job.owner, job.repo, job.checkRunId, {
+        title: 'Reviewing…',
+        summary: 'Reviewing… (model thinking)',
+      }).catch((err) => logger.warn('Heartbeat check-run update failed (ignored)', err));
+    }
+    await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
+  };
+
   for (const file of files) {
     const existingReview = currentReviews.get(file.path);
     if (existingReview && countsAsHandledFileReview(existingReview)) {
@@ -714,13 +734,13 @@ async function runReviewPhase(
 
     const reviewTask = async () => {
       if (!inherited) {
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, filePlan, resolveFailureModelProvider, existingReview);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, filePlan, resolveFailureModelProvider, maybeHeartbeat, existingReview);
         return;
       }
 
       if (!canInheritParentFileReview(config, inherited)) {
         logger.info(`Ignoring inherited review for ${file.path}; parent model ${inherited.model_used} is not in the current model strategy`);
-        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, filePlan, resolveFailureModelProvider, existingReview);
+        await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, filePlan, resolveFailureModelProvider, maybeHeartbeat, existingReview);
       } else {
         const inheritedComments = inherited.parsed_comments as ParsedReviewComment[];
         const fileReviewId = await upsertFileReview(env, job.id, {
@@ -1063,6 +1083,7 @@ async function reviewAndPersistFile(
   sharedContext: string,
   plan: ReviewerId[],
   resolveFailureModelProvider: () => Promise<string | null>,
+  onHeartbeat: () => Promise<void>,
   previousReview?: { transient_error_count: number },
 ) {
   const startedAt = Date.now();
@@ -1107,6 +1128,12 @@ async function reviewAndPersistFile(
       cacheReadTokens = response.cacheReadTokens ?? null;
       cacheWriteTokens = response.cacheWriteTokens ?? null;
       reviewerCallCount = 1;
+      logReviewStep({
+        jobId: job.id, phase: 'review', model: modelUsed,
+        durationMs: Date.now() - startedAt, findings: comments.length,
+        inputTokens, outputTokens, cacheReadTokens: cacheReadTokens ?? undefined, cacheWriteTokens: cacheWriteTokens ?? undefined,
+      });
+      await onHeartbeat();
     } else {
       // Fan out to the planned specialized reviewers (security/bugs/perf/...)
       // and combine their findings into one file review record. sharedContext
@@ -1120,6 +1147,7 @@ async function reviewAndPersistFile(
       // fail the file if every reviewer failed.
       const settled = await Promise.allSettled(
         plan.map(async (id): Promise<ReviewerCallResult> => {
+          const callStartedAt = Date.now();
           const response = await model.reviewFile({
             file,
             prTitle: pr.title ?? null,
@@ -1132,6 +1160,13 @@ async function reviewAndPersistFile(
             cacheSystem: true,
             sharedContext,
           });
+          logReviewStep({
+            jobId: job.id, phase: 'review', reviewer: id, model: response.modelUsed,
+            durationMs: Date.now() - callStartedAt, findings: response.parsed.comments?.length ?? 0,
+            inputTokens: response.inputTokens, outputTokens: response.outputTokens,
+            cacheReadTokens: response.cacheReadTokens ?? undefined, cacheWriteTokens: response.cacheWriteTokens ?? undefined,
+          });
+          await onHeartbeat();
           return {
             reviewer: id,
             parsed: response.parsed,
@@ -1570,6 +1605,39 @@ async function runFinalizePhase(
   const fileInputTokens = reviews.reduce((sum, review) => sum + (review.input_tokens ?? 0), 0);
   const fileOutputTokens = reviews.reduce((sum, review) => sum + (review.output_tokens ?? 0), 0);
   const fileCostTotal = reviews.reduce((sum, review) => sum + (review.total_cost_usd ?? 0), 0);
+
+  // Observability: one Analytics Engine datapoint per completed review. Never
+  // allowed to affect the review outcome — emitReviewDatapoint itself never
+  // throws, and the metrics computation is wrapped too since it's pure
+  // bookkeeping on data already validated above.
+  try {
+    const cacheReadTokens = reviews.reduce((sum, review) => sum + (review.cache_read_tokens ?? 0), 0);
+    const cacheWriteTokens = reviews.reduce((sum, review) => sum + (review.cache_write_tokens ?? 0), 0);
+    const cacheDenom = cacheReadTokens + fileInputTokens;
+    const totalLineCount = files.reduce((sum, file) => sum + file.lineCount, 0);
+    emitReviewDatapoint(env, {
+      repo: `${job.owner}/${job.repo}`,
+      engine: reviews.find((review) => review.engine_used)?.engine_used ?? 'native',
+      reviewers: planReviewers(totalLineCount, files.length, config.review).join(','),
+      verdict: verdictSummary.verdict,
+      // ponytail: circuit breaker isn't wired into engine-selector yet (Spec 1
+      // only has NativeEngine); pass '' rather than inventing a state.
+      breakerState: '',
+      findings: finalComments.length,
+      p0: finalComments.filter((c) => c.severity === 'P0').length,
+      p1: finalComments.filter((c) => c.severity === 'P1').length,
+      inputTokens: fileInputTokens,
+      outputTokens: fileOutputTokens,
+      cacheReadTokens,
+      cacheWriteTokens,
+      cacheHitRate: cacheDenom > 0 ? cacheReadTokens / cacheDenom : 0,
+      costUsd: fileCostTotal,
+      durationMs: job.startedAt ? Date.now() - Date.parse(job.startedAt) : 0,
+    });
+  } catch (err) {
+    logger.warn('Failed to compute review telemetry metrics (ignored)', err);
+  }
+
   const partialErrorMessage = hasFailures
     ? `Partial review: ${failedFileCount} of ${files.length} file${files.length === 1 ? '' : 's'} could not be reviewed after repeated model/provider outages.`
     : null;

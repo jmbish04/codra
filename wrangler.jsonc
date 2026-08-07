@@ -252,6 +252,12 @@
 			"migrations_dir": "./db/migrations/d1",
 		},
 	],
+	"analytics_engine_datasets": [
+		{
+			"binding": "REVIEW_ANALYTICS",
+			"dataset": "codra_reviews",
+		},
+	],
 	"r2_buckets": [
 		{
 			"binding": "PLANNING_ARTIFACTS",
