@@ -79,7 +79,7 @@ Codra listens to GitHub pull request events, runs AI-powered review jobs, posts 
 
 ## Docs Suite
 
-The internal documentation suite lives in the `docs/` directory. It includes documents like `ROADMAP.md`, `REBUILD-PLAN.md`, and other guides used during development.
+The internal documentation suite lives in the `docs/` directory. It includes documents like `ROADMAP.md`, `REBUILD-PLAN.md`, and other guides used during development. For the source-aware review engines (OpenCode on your Mac via Workers VPC/Tunnel, or the all-Cloudflare Computer engine), see [docs/opencode-setup.md](docs/opencode-setup.md).
 
 ## Docs-gap Jules tasks & deploy workflow
 

@@ -82,6 +82,10 @@ The deployed base URL lives in one place: `env.APP_URL` (a `vars` entry in
   specialized reviewers (security, bugs, performance, correctness, quality, docs)
   with risk-tier-based fan-out, prompt caching, and a coordinator dedup pass;
   see `docs/architecture.md#review-engine` for the seam, engines, and config knobs.
+  `review.engine` can also delegate a whole PR to `OpenCodeEngine` (Mac +
+  Workers VPC/Tunnel) or `ComputerEngine` (all-Cloudflare, experimental) —
+  see [docs/opencode-setup.md](docs/opencode-setup.md) for the operator
+  runbook; both degrade to native automatically until provisioned.
 - Auto-setting the `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_TOKEN` Actions
   secrets (`src/server/core/github-secrets.ts`) requires the GitHub App's
   **Actions Secrets: write** permission; without it, Codra writes the secret

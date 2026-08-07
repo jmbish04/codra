@@ -1,0 +1,93 @@
+// Template — run by the operator, not by CI/agents.
+//
+// codra-review OpenCode config (docs/opencode-setup.md, Section A). Defines
+// the specialized-reviewer sessions + coordinator that back Codra's
+// OpenCodeEngine, and documents the HTTP contract the OpenCode server must
+// expose for the Worker to call. Adjust session/model syntax to match your
+// installed OpenCode version's actual config schema — the shape below is
+// illustrative of what each session needs to do, not a guaranteed-verbatim
+// OpenCode schema.
+//
+// Install: copy to ~/.codra/opencode/codra-review.opencode.jsonc and point
+// the launchd plist's --config at it (see com.codra.opencode.plist).
+{
+  "server": {
+    "port": 4096, // must match com.codra.opencode.plist and the tunnel config
+    // Two routes only — Codra's Worker (OpenCodeClient/OpenCodeEngine) never
+    // calls anything else on this server.
+    "routes": {
+      // GET /health — cheap liveness probe. Must respond 200 within ~2s;
+      // the Worker's healthCheck() gives it a 2.5s hard timeout including
+      // transport RTT. No auth required on the local server itself — auth
+      // happens at the cloudflared Access layer in front of it (Section B).
+      "health": "GET /health -> 200 ok",
+
+      // POST /review — the whole-PR delegation call. Request body:
+      //   {
+      //     job: { id, owner, repo, prNumber },
+      //     pr: { title, body, headSha },
+      //     config: RepoConfig["review"],          // same shape as native's config.review
+      //     sharedContext: string,                  // repo-level context native builds too
+      //     files: [{ path: string, patch: string }] // unified diff per file
+      //   }
+      // (see src/server/engines/opencode-engine.ts:reviewPullRequest for the
+      // exact payload the Worker sends).
+      //
+      // Response: JSONL (one JSON object per line, `\n`-terminated):
+      //   - zero or more finding lines, each matching parsedReviewCommentSchema:
+      //       { path, line?, position?, severity, category, title, body,
+      //         codeSuggestion?, confidenceScore? }
+      //   - exactly one terminal summary line:
+      //       { "type": "summary", "perReviewer": [
+      //           { reviewer, file, inputTokens, outputTokens,
+      //             cacheReadTokens, cacheWriteTokens, findings }, ...
+      //       ] }
+      // A line that isn't valid JSON, or matches neither shape, is skipped
+      // by OpenCodeEngine rather than failing the whole review — prefer
+      // emitting a slightly-incomplete summary over emitting nothing.
+      "review": "POST /review -> jsonl(reviewers[] + coordinator, contract above)"
+    }
+  },
+
+  // One session per specialized reviewer. Ids match
+  // src/server/prompts/reviewers.ts's REVIEWERS exactly — the Worker doesn't
+  // care what you name these internally, but keeping them aligned makes the
+  // native-vs-opencode diff easy to reason about, and coordinator dedup
+  // downstream expects the same `category` values reviewers emit.
+  "sessions": {
+    "security": {
+      "category": "security",
+      "prompt": "Review the given file's patch for security issues: injection, auth/authz gaps, secrets, unsafe deserialization, SSRF, path traversal. Use read/exec/git tools to check real usage across the repo before flagging — don't guess from the diff hunk alone. Emit parsedReviewCommentSchema-shaped findings only."
+    },
+    "bugs": {
+      "category": "bugs",
+      "prompt": "Review the given file's patch for correctness bugs: null/undefined handling, off-by-one, race conditions, unhandled errors. Read surrounding code and tests for context before flagging."
+    },
+    "performance": {
+      "category": "performance",
+      "prompt": "Review the given file's patch for performance regressions: N+1 queries, unbounded loops/allocations, missing indexes, blocking I/O on hot paths."
+    },
+    "correctness": {
+      "category": "correctness",
+      "prompt": "Review the given file's patch for logical correctness against the PR's stated intent (title/body) and the surrounding code's existing contracts/tests."
+    },
+    "quality": {
+      "category": "quality",
+      "prompt": "Review the given file's patch for maintainability: naming, duplication, dead code, missing error handling, API design."
+    },
+    "docs": {
+      "category": "quality",
+      "prompt": "Review the given file's patch for documentation gaps: missing/incorrect comments, README/API doc drift introduced by this change."
+    }
+  },
+
+  // Runs after all reviewer sessions finish for a file/PR: dedups
+  // overlapping findings, ranks by severity, and is responsible for
+  // emitting the terminal `{"type":"summary",...}` JSONL line with each
+  // reviewer's token usage. Mirrors src/server/core/reviewer-aggregate.ts's
+  // native dedup pass so downstream GitHub posting behaves the same
+  // regardless of which engine produced the findings.
+  "coordinator": {
+    "prompt": "Given all reviewer findings for this PR, drop duplicates/near-duplicates (same file+line+issue), keep the highest-confidence version of each, and order by severity. Then emit the final JSONL stream: one finding line per surviving comment, followed by exactly one summary line with perReviewer usage totals."
+  }
+}

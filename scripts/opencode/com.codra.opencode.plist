@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Template — run by the operator, not by CI/agents.
+
+  launchd service for the OpenCode server backing Codra's OpenCodeEngine
+  (docs/opencode-setup.md, Section A). Mirrors the existing
+  ~/codra-jules-watcher launchd daemon: a per-user LaunchAgent, kept alive,
+  logging to ~/Library/Logs.
+
+  Before loading, fill in every <FILL_ME_*> placeholder below, then:
+
+    cp scripts/opencode/com.codra.opencode.plist \
+       ~/Library/LaunchAgents/com.codra.opencode.plist
+    launchctl load ~/Library/LaunchAgents/com.codra.opencode.plist
+
+  No secrets belong in this file — the OpenCode server itself doesn't need
+  Cloudflare credentials; only the Worker side (Section D) does.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.codra.opencode</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<!-- Path to the opencode binary, e.g. /opt/homebrew/bin/opencode or
+		     wherever `which opencode` points after install. -->
+		<string><FILL_ME_OPENCODE_BINARY_PATH></string>
+		<string>serve</string>
+		<string>--port</string>
+		<!-- Must match the port used in cloudflared-config.template.yml's
+		     ingress rule and the Worker's OPENCODE_TUNNEL_URL. -->
+		<string>4096</string>
+		<string>--config</string>
+		<string><FILL_ME_HOME_DIR>/.codra/opencode/codra-review.opencode.jsonc</string>
+	</array>
+
+	<key>RunAtLoad</key>
+	<true/>
+
+	<key>KeepAlive</key>
+	<true/>
+
+	<key>StandardOutPath</key>
+	<string><FILL_ME_HOME_DIR>/Library/Logs/codra-opencode.log</string>
+
+	<key>StandardErrorPath</key>
+	<string><FILL_ME_HOME_DIR>/Library/Logs/codra-opencode.err.log</string>
+
+	<key>WorkingDirectory</key>
+	<string><FILL_ME_HOME_DIR></string>
+</dict>
+</plist>
