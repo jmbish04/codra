@@ -1440,7 +1440,7 @@ async function runFinalizePhase(
       const sourceCache = new Map<string, string | null>();
       const fetchSource = async (path: string, line: number | null): Promise<string | null> => {
         if (!sourceCache.has(path)) {
-          const result = await github.getRepoFileWithRefOrNull(job.owner, job.repo, path).catch(() => null);
+          const result = await github.getRepoFileWithRefOrNull(job.owner, job.repo, path, pr.head.sha).catch(() => null);
           sourceCache.set(path, result?.content ?? null);
         }
         const content = sourceCache.get(path) ?? null;

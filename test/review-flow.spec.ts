@@ -31,6 +31,7 @@ vi.mock('@server/services/github', () => {
         async addIssueLabels() { return {}; }
         async removeIssueLabelsIfPresent() { return {}; }
         async removeIssueLabel() { return {}; }
+        async getRepoFileWithRefOrNull() { return { content: Array.from({ length: 50 }, (_, i) => `line${i + 1}`).join('\n'), sha: 'filesha' }; }
     }
     return { GitHubService: MockGitHubService };
 });
@@ -69,6 +70,16 @@ vi.mock('@server/services/model', () => {
                 rawText: '{"summary": "test"}',
                 inputTokens: 3,
                 outputTokens: 2,
+            };
+        }
+        async callModel() {
+            return {
+                modelUsed: 'test-model',
+                provider: 'test-provider',
+                rawText: '{"keep":[0,1]}',
+                inputTokens: 1,
+                outputTokens: 1,
+                userPrompt: '',
             };
         }
     }
@@ -694,6 +705,89 @@ dbDescribe('Review Flow Lifecycle', () => {
     expect(finalJob?.summary_model).toBeNull();
     expect(summarySpy).not.toHaveBeenCalled();
     summarySpy.mockRestore();
+    getDiffSpy.mockRestore();
+  }, REVIEW_FLOW_TIMEOUT_MS);
+
+  it('coordinator source-verification reads the PR head SHA, not the default branch', async () => {
+    const { GitHubService } = await import('@server/services/github');
+    const repo = `test-repo-${Date.now()}-coordinator`;
+    const headSha = sha('c');
+    const baseSha = sha('d');
+    const getDiffSpy = vi.spyOn(GitHubService.prototype, 'getPullRequestDiff').mockResolvedValue(
+      generateMockDiff([
+        { path: 'src/app.ts', content: 'console.log(1);' },
+        { path: 'src/other.ts', content: 'console.log(2);' },
+      ]),
+    );
+    const getFileSpy = vi.spyOn(GitHubService.prototype as any, 'getRepoFileWithRefOrNull');
+
+    const job = await insertJob(env, {
+      installationId: '123',
+      owner: 'test-owner',
+      repo,
+      prNumber: 8,
+      prTitle: 'Coordinator Test',
+      prAuthor: 'author',
+      commitSha: headSha,
+      baseSha,
+      trigger: 'auto',
+      headRef: 'feature',
+      baseRef: 'main',
+      configSnapshot: { ...defaultRepoConfig, review: { ...defaultRepoConfig.review, coordinator: 'test-model' } },
+    });
+    await updateJobFileCount(env, job.id, 2);
+    await updateJobStep(env, job.id, 'Preparation', { status: 'done' });
+    await updateJobStep(env, job.id, 'Reviewing Files', { status: 'done' });
+    const lowConfidenceComment = {
+      path: 'src/app.ts', line: 1, position: 1, severity: 'P2' as const, category: 'quality' as const,
+      title: 'Maybe an issue', body: 'Not sure', confidenceScore: 0.3,
+    };
+    await upsertFileReview(env, job.id, {
+      filePath: 'src/app.ts',
+      fileStatus: 'done',
+      modelUsed: 'test-model',
+      modelProvider: 'test-provider',
+      diffLineCount: 1,
+      diffInput: 'diff',
+      rawAiOutput: '{}',
+      parsedComments: [lowConfidenceComment],
+      inputTokens: 1,
+      outputTokens: 1,
+      durationMs: 1,
+      verdict: 'comment',
+      fileSummary: 'ok',
+      errorMessage: null,
+    });
+    await upsertFileReview(env, job.id, {
+      filePath: 'src/other.ts',
+      fileStatus: 'done',
+      modelUsed: 'test-model',
+      modelProvider: 'test-provider',
+      diffLineCount: 1,
+      diffInput: 'diff',
+      rawAiOutput: '{}',
+      parsedComments: [{ ...lowConfidenceComment, path: 'src/other.ts', title: 'Another maybe' }],
+      inputTokens: 1,
+      outputTokens: 1,
+      durationMs: 1,
+      verdict: 'comment',
+      fileSummary: 'ok',
+      errorMessage: null,
+    });
+
+    const result = await runReviewJob(env, { jobId: job.id, deliveryId: 'delivery-coordinator', phase: 'finalize' });
+    expect(result).toEqual({ action: 'ack' });
+
+    // The mocked GitHubService.getPullRequest() always returns head.sha: 'headsha'
+    // regardless of the job's own commitSha — asserting against that literal
+    // (not the job's headSha) is what proves fetchSource threads pr.head.sha
+    // rather than defaulting to no ref (the default branch).
+    expect(getFileSpy).toHaveBeenCalled();
+    for (const call of getFileSpy.mock.calls) {
+      expect(call[3]).toBe('headsha'); // ref must be the PR head, not the default branch
+    }
+
+    getFileSpy.mockRestore();
     getDiffSpy.mockRestore();
   }, REVIEW_FLOW_TIMEOUT_MS);
 });
