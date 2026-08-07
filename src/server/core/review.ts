@@ -40,6 +40,11 @@ import { evaluateDocsGaps, buildJulesPrompt } from '@server/core/jules-docs-gap'
 import { stageJulesSession } from '@server/db/jules-sessions';
 import { ensureDeployWorkflow } from '@server/core/deploy-workflow';
 import { emitReviewDatapoint, logReviewStep } from '@server/core/review-telemetry';
+import { resolveEngine } from '@server/core/engine-selector';
+import { CircuitBreaker } from '@server/core/circuit-breaker';
+import type { EngineReviewResult, ReviewContext, ReviewEngine } from '@server/core/review-engine';
+import { isRetryableOpenCodeError } from '@server/engines/opencode-client';
+import { isRetryableComputerEngineError } from '@server/engines/computer-engine';
 
 type PersistedReviewJob = ReturnType<typeof mapJob>;
 
@@ -67,6 +72,13 @@ const BATCH_POLL_DELAY_SECONDS = 20;
 const BATCH_MIN_PENDING_FILES = 12;
 
 const MAX_RETRYABLE_FILE_REVIEW_FAILURES = 3;
+
+/** Mirrors each engine's own retryable classifier (connectivity/5xx/timeout
+ *  trips the breaker + falls back to native; a non-retryable failure — e.g.
+ *  auth/config — falls back too but leaves the breaker alone). */
+function isRetryableEngineError(err: unknown): boolean {
+  return isRetryableOpenCodeError(err) || isRetryableComputerEngineError(err);
+}
 
 function isRetryableFileReviewErrorMessage(message: string | null | undefined) {
   if (!message) return false;
@@ -634,6 +646,17 @@ async function runReviewPhase(
   // while standardization / diff-fetch was running.
   await checkSuperseded(env, job.id);
 
+  // Spec 2: delegate the whole-PR review to a healthy non-native engine
+  // (opencode/computer) when one resolves. This is ONE logical call — the
+  // engine does its own review remotely/in-DO, so it does NOT fan out
+  // per-file model calls in this Worker invocation and doesn't need the
+  // native loop's subrequest-budget gate below. Falls through to the
+  // unchanged native loop on native resolution OR any delegation failure.
+  const engine = await resolveEngine(env, config, Date.now());
+  if (await delegateToEngine(env, engine, job, pr, config, files, totalLineCount, sharedContext, model, pricing)) {
+    return;
+  }
+
   const jobIdsToQuery = [job.id];
   if (job.retryOfJobId) jobIdsToQuery.push(job.retryOfJobId);
   const allExistingReviews = await getFileReviewsForJobs(env, jobIdsToQuery);
@@ -1077,6 +1100,146 @@ async function recordFileCost(
     });
   } catch (err) {
     logger.warn(`Failed to record cost for file review ${args.fileReviewId}`, err);
+  }
+}
+
+/**
+ * Persists a delegated engine's whole-PR result as one file review row per
+ * file (mirrors reviewAndPersistFile's persistence tail: upsertFileReview →
+ * batched single-fetch DO stream → recordFileCost), grouping `result.comments`
+ * and `result.perReviewer` usage by path. Only ever called after
+ * `engine.reviewPullRequest` has fully succeeded, so a failed delegation never
+ * leaves half-persisted rows behind for the native fallback to skip over.
+ */
+async function persistEngineResult(
+  env: Env,
+  job: PersistedReviewJob,
+  files: ReturnType<typeof parseUnifiedDiff>,
+  result: EngineReviewResult,
+  engineName: string,
+  pricing: PricingSnapshot,
+): Promise<void> {
+  for (const file of files) {
+    const fileComments = result.comments.filter((c) => c.path === file.path);
+    const usage = result.perReviewer
+      .filter((u) => u.file === file.path)
+      .reduce(
+        (acc, u) => ({
+          inputTokens: acc.inputTokens + u.inputTokens,
+          outputTokens: acc.outputTokens + u.outputTokens,
+          cacheReadTokens: acc.cacheReadTokens + u.cacheReadTokens,
+          cacheWriteTokens: acc.cacheWriteTokens + u.cacheWriteTokens,
+        }),
+        { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      );
+
+    const fileReviewId = await upsertFileReview(env, job.id, {
+      filePath: file.path,
+      fileStatus: 'done',
+      modelUsed: engineName,
+      modelProvider: engineName,
+      engineUsed: engineName,
+      diffLineCount: file.lineCount,
+      diffInput: renderFileDiff(file),
+      rawAiOutput: null,
+      parsedComments: fileComments,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
+      durationMs: null,
+      verdict: fileComments.length ? 'comment' : 'approve',
+      fileSummary: null,
+      overallCorrectness: null,
+      confidenceScore: null,
+      errorMessage: null,
+    });
+
+    // Batched into ONE fetch carrying the whole file's comment array — same
+    // shape/reasoning as reviewAndPersistFile's DO stream call.
+    let doRequests = 0;
+    let doDurationGbs = 0;
+    if (fileComments.length > 0) {
+      const doStartedAt = Date.now();
+      try {
+        const streamId = (env as any).PrReviewStream.idFromName(`${job.owner}/${job.repo}/${job.prNumber}`);
+        const streamStub = (env as any).PrReviewStream.get(streamId);
+        await streamStub.fetch(new Request('http://do/comment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fileComments),
+        }));
+        doRequests += 1;
+      } catch (streamErr) {
+        logger.error('Failed to stream real-time comments to Durable Object', streamErr);
+      }
+      doDurationGbs = msToGbSeconds(Date.now() - doStartedAt);
+    }
+
+    await recordFileCost(env, pricing, {
+      fileReviewId,
+      jobId: job.id,
+      modelUsed: engineName,
+      usage: {
+        aiInputTokens: usage.inputTokens,
+        aiOutputTokens: usage.outputTokens,
+        doRequests,
+        doDurationGbs,
+        d1RowsWritten: 1 + fileComments.length,
+        d1RowsRead: 2,
+        subrequests: doRequests, // one logical engine call already paid for above this loop; only the DO fetch is per-file here
+      },
+    });
+  }
+}
+
+/**
+ * Spec 2 delegation branch: hands the whole PR to a resolved non-native
+ * engine in one call. Returns true when the engine succeeded and the review
+ * is fully persisted (caller should return without running the native loop);
+ * false when `engine` resolved to native, or the engine call failed and the
+ * caller must fall through to the native per-file loop unchanged.
+ *
+ * Breaker semantics mirror resolveEngine's own convention: only a retryable
+ * (connectivity/5xx/timeout) failure trips the breaker; a non-retryable one
+ * (e.g. bad config) still falls back to native but leaves the breaker alone.
+ */
+async function delegateToEngine(
+  env: Env,
+  engine: ReviewEngine,
+  job: PersistedReviewJob,
+  pr: Awaited<ReturnType<GitHubService['getPullRequest']>>,
+  config: RepoConfig,
+  files: ReturnType<typeof parseUnifiedDiff>,
+  totalLineCount: number,
+  sharedContext: string,
+  model: ModelService,
+  pricing: PricingSnapshot,
+): Promise<boolean> {
+  if (engine.name === 'native') return false;
+
+  const breaker = new CircuitBreaker(env.APP_KV, engine.name);
+  try {
+    const ctx: ReviewContext = {
+      env,
+      job: { id: job.id, owner: job.owner, repo: job.repo, prNumber: job.prNumber },
+      pr: { title: pr.title ?? null, body: pr.body ?? null, head: { sha: pr.head.sha } },
+      config,
+      files,
+      totalLineCount,
+      sharedContext,
+      model,
+    };
+    const result = await engine.reviewPullRequest(ctx);
+    await persistEngineResult(env, job, files, result, engine.name, pricing);
+    await breaker.recordSuccess();
+    await updateJobStep(env, job.id, 'Reviewing Files', { status: 'done' });
+    await enqueueJobPhase(env, job.id, 'finalize');
+    return true;
+  } catch (err) {
+    if (isRetryableEngineError(err)) await breaker.recordFailure(Date.now());
+    logger.error(`Engine '${engine.name}' review failed; falling back to native`, err);
+    return false;
   }
 }
 
