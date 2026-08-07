@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ChevronRight, ExternalLink, RotateCcw, Terminal } from 'lucide-react';
+import { ChevronRight, CircleStop, ExternalLink, RotateCcw, Terminal } from 'lucide-react';
 import { Button } from '@client/components/ui/button';
 import { UpdatesEmailPrompt } from '@client/components/features/dashboard/updates-email-prompt';
 import type { JobDetail } from '@shared/schema';
@@ -10,9 +10,12 @@ interface JobHeaderProps {
   onRetry: () => void;
   isForceRestarting: boolean;
   onForceRestart: () => void;
+  isCancelling: boolean;
+  onCancel: () => void;
 }
 
-export function JobHeader({ job, isRetrying, onRetry, isForceRestarting, onForceRestart }: JobHeaderProps) {
+export function JobHeader({ job, isRetrying, onRetry, isForceRestarting, onForceRestart, isCancelling, onCancel }: JobHeaderProps) {
+  const isActive = job.status === 'running' || job.status === 'queued';
   return (
     <>
       <header className="flex flex-col sm:flex-row items-start justify-between gap-4">
@@ -52,16 +55,27 @@ export function JobHeader({ job, isRetrying, onRetry, isForceRestarting, onForce
             Raw Logs
           </Link>
         </Button>
-        {(job.status === 'running' || job.status === 'queued') ? (
-          <Button
-            variant="destructive"
-            disabled={isForceRestarting}
-            onClick={onForceRestart}
-            className={`shrink-0 gap-2 w-full sm:w-auto ${isForceRestarting ? 'animate-pulse' : ''}`}
-          >
-            <RotateCcw size={14} />
-            {isForceRestarting ? 'Restarting…' : 'Force Restart'}
-          </Button>
+        {isActive ? (
+          <>
+            <Button
+              variant="outline"
+              disabled={isCancelling}
+              onClick={onCancel}
+              className={`shrink-0 gap-2 w-full sm:w-auto ${isCancelling ? 'animate-pulse' : ''}`}
+            >
+              <CircleStop size={14} />
+              {isCancelling ? 'Stopping…' : 'Stop Review'}
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={isForceRestarting}
+              onClick={onForceRestart}
+              className={`shrink-0 gap-2 w-full sm:w-auto ${isForceRestarting ? 'animate-pulse' : ''}`}
+            >
+              <RotateCcw size={14} />
+              {isForceRestarting ? 'Restarting…' : 'Force Restart'}
+            </Button>
+          </>
         ) : (
           <Button
             variant={job.status === 'failed' ? 'destructive' : 'default'}

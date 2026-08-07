@@ -9,6 +9,7 @@ export function useJobDetail(id: string) {
   const [error, setError] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
   const [isForceRestarting, setIsForceRestarting] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const pollTimeout = useRef<number | null>(null);
   const etag = useRef<string | null>(null);
   const latestJob = useRef<JobDetail | null>(null);
@@ -102,13 +103,30 @@ export function useJobDetail(id: string) {
     }
   };
 
+  const handleCancel = async () => {
+    if (!job) return;
+    setIsCancelling(true);
+    try {
+      await api.cancelJob(job.id);
+      // The running loop halts at its next superseded check; refetch to reflect
+      // the new terminal status.
+      await fetchJob();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to stop review.');
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
   return {
     job,
     error,
     isRetrying,
     isForceRestarting,
+    isCancelling,
     handleRetry,
     handleForceRestart,
+    handleCancel,
     fetchJob
   };
 }
