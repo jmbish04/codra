@@ -3,10 +3,27 @@ import type { ReviewEngine } from '@server/core/review-engine';
 import { NativeEngine } from '@server/engines/native-engine';
 import { logger } from '@server/core/logger';
 import { CircuitBreaker } from '@server/core/circuit-breaker';
-import { withTimeout } from '@server/core/timeout';
 import { engineRegistry, type EngineFactory, type EngineName } from '@server/core/engine-registry';
 
 const HEALTHCHECK_TIMEOUT_MS = 2500;
+
+/** Bounds a healthCheck() call to `ms` even if the implementation ignores
+ *  the abort signal (e.g. a hung network call). withTimeout (timeout.ts)
+ *  only aborts the signal — it doesn't reject on its own unless the callee
+ *  honors the signal — so a genuinely hung promise needs an explicit race
+ *  against a timer here. The signal is still passed through so well-behaved
+ *  (fetch-based) engines can cancel early. */
+function healthCheckWithHardTimeout(engine: ReviewEngine, ms: number): Promise<boolean> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`${engine.name} healthCheck timed out after ${ms}ms`));
+    }, ms);
+  });
+  return Promise.race([engine.healthCheck(controller.signal), timeout]).finally(() => clearTimeout(timer));
+}
 
 /** Spec 1: only NativeEngine exists. opencode/computer requests degrade to
  *  native with a log line; Spec 2 swaps in the real engines + breaker demotion. */
@@ -46,7 +63,7 @@ export async function resolveEngine(
 
     const engine = engines[name]();
     try {
-      const healthy = await withTimeout(`${name} healthCheck`, HEALTHCHECK_TIMEOUT_MS, () => engine.healthCheck());
+      const healthy = await healthCheckWithHardTimeout(engine, HEALTHCHECK_TIMEOUT_MS);
       if (healthy) return engine;
       await breaker.recordFailure(nowMs);
       logger.info(`Engine '${name}' unhealthy; demoting.`);

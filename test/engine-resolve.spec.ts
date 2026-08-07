@@ -84,6 +84,52 @@ describe('resolveEngine', () => {
     expect(opencode.healthCheck).not.toHaveBeenCalled();
   });
 
+  it('a hanging healthCheck (never resolves, ignores signal) does not hang resolveEngine', async () => {
+    const kv = fakeKv();
+    const opencode: ReviewEngine = {
+      name: 'opencode',
+      healthCheck: vi.fn(() => new Promise<boolean>(() => {})), // never settles, ignores signal
+      reviewPullRequest: vi.fn(),
+    };
+    const computer = stubEngine('computer', false);
+    const native = stubEngine('native', true);
+    const engines = { opencode: () => opencode, computer: () => computer, native: () => native };
+
+    const result = await resolveEngine(env(kv), config('auto'), 1000, engines);
+    expect(result).toBe(native);
+
+    const raw = await kv.get('breaker:opencode');
+    expect(JSON.parse(raw!).failures).toBe(1);
+  }, 5000);
+
+  it('healthCheck === false (no throw) records a breaker failure', async () => {
+    const kv = fakeKv();
+    const opencode = stubEngine('opencode', false);
+    const native = stubEngine('native', true);
+    const engines = { opencode: () => opencode, computer: () => stubEngine('computer', false), native: () => native };
+
+    await resolveEngine(env(kv), config('opencode'), 1000, engines);
+
+    const raw = await kv.get('breaker:opencode');
+    expect(JSON.parse(raw!).failures).toBe(1);
+  });
+
+  it("pinned engine='native' -> candidate order is exactly ['native'], no breaker constructed", async () => {
+    const kv = fakeKv();
+    const native = stubEngine('native', true);
+    const opencode = stubEngine('opencode', true);
+    const computer = stubEngine('computer', true);
+    const engines = { opencode: () => opencode, computer: () => computer, native: () => native };
+
+    const result = await resolveEngine(env(kv), config('native'), 1000, engines);
+    expect(result).toBe(native);
+    expect(opencode.healthCheck).not.toHaveBeenCalled();
+    expect(computer.healthCheck).not.toHaveBeenCalled();
+    // no breaker key written for opencode/computer since they were never candidates
+    expect(await kv.get('breaker:opencode')).toBeNull();
+    expect(await kv.get('breaker:computer')).toBeNull();
+  });
+
   it('healthCheck throw records a breaker failure and falls through to next candidate', async () => {
     const kv = fakeKv();
     const opencode: ReviewEngine = {

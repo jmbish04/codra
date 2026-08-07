@@ -25,5 +25,7 @@ export type EngineReviewResult = { comments: ParsedReviewComment[]; perReviewer:
 export interface ReviewEngine {
   readonly name: 'opencode' | 'computer' | 'native';
   reviewPullRequest(ctx: ReviewContext): Promise<EngineReviewResult>;
-  healthCheck(): Promise<boolean>;
+  /** signal is aborted if the caller's timeout fires — real engines should
+   *  forward it into their fetch so a stalled probe cancels promptly. */
+  healthCheck(signal?: AbortSignal): Promise<boolean>;
 }
