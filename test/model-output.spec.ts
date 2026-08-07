@@ -217,4 +217,34 @@ export function nextOwner(owner: string) {
     expect(result.comments).toHaveLength(0);
     expect(result.verdict).toBe('approve');
   });
+
+  it('forwards per-finding confidence_score into ParsedReviewComment', () => {
+    const rawOutput = `
+{
+  "findings": [
+    {
+      "title": "Low confidence finding",
+      "body": "This has low confidence",
+      "confidence_score": 0.3,
+      "priority": 2,
+      "code_location": { "absolute_file_path": "test.ts", "line": 2 }
+    },
+    {
+      "title": "No confidence score",
+      "body": "This lacks confidence_score",
+      "priority": 2,
+      "code_location": { "absolute_file_path": "test.ts", "line": 2 }
+    }
+  ],
+  "overall_correctness": "issues found",
+  "overall_explanation": "explanation"
+}`;
+
+    const result = parseFileReviewResponse(rawOutput, mockFile);
+    expect(result.comments).toHaveLength(2);
+    // First finding should have confidence_score forwarded
+    expect(result.comments[0].confidenceScore).toBe(0.3);
+    // Second finding without confidence_score should be undefined
+    expect(result.comments[1].confidenceScore).toBeUndefined();
+  });
 });
