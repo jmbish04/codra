@@ -53,14 +53,14 @@ export async function resolveEngine(
   const candidates = candidateOrder(config.review.engine);
 
   for (const name of candidates) {
-    if (name === 'native') return engines.native();
+    if (name === 'native') return engines.native(env);
 
     // Cheap, synchronous, no I/O — skip an unconfigured (unprovisioned)
     // candidate entirely before touching KV/breaker or calling healthCheck.
     // Without this, the default 'auto' config does a breaker isOpen read +
     // recordFailure read/write per non-native candidate on EVERY review job,
     // even though nothing is ever actually provisioned.
-    const engine = engines[name]();
+    const engine = engines[name](env);
     if (!engine.isConfigured(env)) {
       logger.info(`Engine '${name}' not configured; skipping.`);
       continue;
@@ -84,5 +84,5 @@ export async function resolveEngine(
   }
 
   // Should be unreachable — native is always the last candidate and always healthy.
-  return engines.native();
+  return engines.native(env);
 }

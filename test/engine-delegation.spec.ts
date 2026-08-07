@@ -181,4 +181,78 @@ dbDescribe('Engine delegation in runReviewPhase', () => {
     expect(breakerRaw).not.toBeNull();
     expect(JSON.parse(breakerRaw!).failures).toBe(1);
   }, TIMEOUT_MS);
+
+  it('a multi-file delegated PR streams to PrReviewStream in exactly ONE DO fetch carrying all files\' comments', async () => {
+    const { GitHubService } = await import('@server/services/github');
+    const diffSpy = vi.spyOn(GitHubService.prototype, 'getPullRequestDiff').mockResolvedValue(
+      generateMockDiff([
+        { path: 'src/app.ts', content: 'console.log(1);' },
+        { path: 'src/other.ts', content: 'console.log(2);' },
+      ]),
+    );
+
+    const engine = stubEngine(async () => ({
+      comments: [
+        { path: 'src/app.ts', line: 1, position: 1, severity: 'P1', category: 'bugs', title: 'Finding A', body: 'from opencode' },
+        { path: 'src/other.ts', line: 1, position: 1, severity: 'P2', category: 'quality', title: 'Finding B', body: 'from opencode' },
+      ],
+      perReviewer: [
+        { reviewer: 'bugs', file: 'src/app.ts', inputTokens: 5, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, findings: 1 },
+        { reviewer: 'quality', file: 'src/other.ts', inputTokens: 4, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, findings: 1 },
+      ],
+    }));
+    (resolveEngine as any).mockResolvedValue(engine);
+
+    // Mirrors review-flow.spec.ts's DO-stream stub pattern: no PrReviewStream
+    // binding is provided by createTestEnv, so wire one up here and count fetches.
+    const doFetchBodies: unknown[] = [];
+    (env as any).PrReviewStream = {
+      idFromName: () => 'stream-id',
+      get: () => ({
+        fetch: async (req: Request) => {
+          doFetchBodies.push(await req.clone().json());
+          return new Response('OK');
+        },
+      }),
+    };
+
+    const repo = `test-repo-${Date.now()}-engine-multifile`;
+    const headSha = sha('9');
+    const baseSha = sha('8');
+
+    await runAndDrain({
+      deliveryId: 'delivery-engine-multifile',
+      eventName: 'pull_request',
+      payload: {
+        action: 'opened',
+        installation: { id: 123 },
+        repository: { owner: { login: 'test-owner' }, name: repo },
+        pull_request: {
+          number: 12,
+          head: { sha: headSha, ref: 'feature' },
+          base: { sha: baseSha, ref: 'main' },
+          title: 'Test PR',
+          user: { login: 'author' },
+          draft: false,
+        },
+      },
+    });
+
+    const finalJob = await findExistingJobForHead(env, { owner: 'test-owner', repo, prNumber: 12, commitSha: headSha, trigger: 'auto' });
+    expect(finalJob?.status).toBe('done');
+
+    const reviews = await getFileReviewsForJobs(env, [finalJob!.id]);
+    expect(reviews).toHaveLength(2);
+    expect(reviews.every((r) => r.engine_used === 'opencode')).toBe(true);
+
+    // Exactly ONE DO fetch for the whole delegated result, not one per file.
+    expect(doFetchBodies).toHaveLength(1);
+    const body = doFetchBodies[0] as unknown[];
+    expect(Array.isArray(body)).toBe(true);
+    expect(body).toHaveLength(2);
+    expect((body as any[]).map((c) => c.title).sort()).toEqual(['Finding A', 'Finding B']);
+
+    diffSpy.mockRestore();
+    delete (env as any).PrReviewStream;
+  }, TIMEOUT_MS);
 });

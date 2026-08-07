@@ -27,3 +27,15 @@ ENVIRONMENT="development"
 # Codra stores all data in Cloudflare D1 (the `DB` binding in wrangler.jsonc).
 # There is no Postgres/Hyperdrive connection string to configure. Apply
 # migrations with `npm run migrate:local` / `npm run migrate:remote`.
+
+# --- Spec 2 source-aware engines: OpenCode (optional, unconfigured by default) ---
+# Leave unset for local dev — OpenCodeEngine.isConfigured(env) is false without
+# these, and resolveEngine skips it and uses native. Only set once the Mac's
+# OpenCode server + cloudflared Tunnel + Cloudflare Access app are provisioned
+# (see docs/opencode-setup.md, Task 7 runbook).
+# Public URL of the cloudflared Tunnel fronting the Mac's OpenCode server.
+# OPENCODE_TUNNEL_URL="https://codra-opencode.example.trycloudflare.com"
+# Cloudflare Access service-token credentials the Worker presents to reach
+# the Tunnel (production: these live in Secrets Store, not here).
+# OPENCODE_ACCESS_CLIENT_ID="REPLACE_WITH_ACCESS_SERVICE_TOKEN_CLIENT_ID"
+# OPENCODE_ACCESS_CLIENT_SECRET="REPLACE_WITH_ACCESS_SERVICE_TOKEN_CLIENT_SECRET"

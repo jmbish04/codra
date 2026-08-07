@@ -1,25 +1,21 @@
-import type { EngineReviewResult, ReviewContext, ReviewEngine } from '@server/core/review-engine';
+import type { ReviewEngine } from '@server/core/review-engine';
 import { NativeEngine } from '@server/engines/native-engine';
-
-/** Placeholder for Tasks 2-4: opencode/computer aren't provisioned yet.
- *  healthCheck=false keeps resolveEngine falling to native until the real
- *  engines land. */
-class UnprovisionedEngine implements ReviewEngine {
-  constructor(readonly name: 'opencode' | 'computer') {}
-  async healthCheck(_signal?: AbortSignal) { return false; }
-  isConfigured(_env: Env) { return false; }
-  async reviewPullRequest(_ctx: ReviewContext): Promise<EngineReviewResult> {
-    throw new Error('engine not provisioned');
-  }
-}
+import { OpenCodeEngine } from '@server/engines/opencode-engine';
+import { ComputerEngine } from '@server/engines/computer-engine';
 
 export type EngineName = 'native' | 'opencode' | 'computer';
-export type EngineFactory = () => ReviewEngine;
+export type EngineFactory = (env: Env) => ReviewEngine;
 
+/** The real engines, always constructed. Each self-gates via isConfigured(env)
+ *  (checked by resolveEngine BEFORE any KV/healthCheck I/O) — OpenCodeEngine
+ *  needs OPENCODE_VPC/OPENCODE_TUNNEL_URL, ComputerEngine needs
+ *  COMPUTER_WORKSPACE. With no bindings provisioned, isConfigured is false,
+ *  so both are skipped and resolveEngine falls straight to native: zero
+ *  behavior/production change until the infra is actually bound. */
 export const engineRegistry: Record<EngineName, EngineFactory> = {
   native: () => new NativeEngine(),
-  opencode: () => new UnprovisionedEngine('opencode'),
-  computer: () => new UnprovisionedEngine('computer'),
+  opencode: (env) => new OpenCodeEngine(env),
+  computer: (env) => new ComputerEngine(env),
 };
 
 export function getEngineFactory(name: EngineName): EngineFactory {

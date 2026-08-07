@@ -1813,14 +1813,19 @@ async function runFinalizePhase(
     const cacheWriteTokens = reviews.reduce((sum, review) => sum + (review.cache_write_tokens ?? 0), 0);
     const cacheDenom = cacheReadTokens + fileInputTokens;
     const totalLineCount = files.reduce((sum, file) => sum + file.lineCount, 0);
+    const engineUsed = reviews.find((review) => review.engine_used)?.engine_used ?? 'native';
     emitReviewDatapoint(env, {
       repo: `${job.owner}/${job.repo}`,
-      engine: reviews.find((review) => review.engine_used)?.engine_used ?? 'native',
+      engine: engineUsed,
       reviewers: planReviewers(totalLineCount, files.length, config.review).join(','),
       verdict: verdictSummary.verdict,
-      // ponytail: circuit breaker isn't wired into engine-selector yet (Spec 1
-      // only has NativeEngine); pass '' rather than inventing a state.
-      breakerState: '',
+      // ponytail: breaker state isn't threaded through per-review yet — the
+      // persisted engine_used already tells us which engine served this PR
+      // (and native means no breaker was ever touched), so reuse it rather
+      // than plumbing open/closed through resolveEngine -> runReviewPhase ->
+      // here for a datapoint field. Upgrade if a future job wants the exact
+      // breaker open/closed bit at emit time.
+      breakerState: engineUsed,
       findings: finalComments.length,
       p0: finalComments.filter((c) => c.severity === 'P0').length,
       p1: finalComments.filter((c) => c.severity === 'P1').length,
