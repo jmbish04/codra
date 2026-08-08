@@ -187,6 +187,9 @@ export type ReviewRequest = {
   trigger: 'auto' | 'mention';
 };
 
+/**
+ * Extracts the review request details from a GitHub webhook event payload.
+ */
 export function extractReviewRequest(input: {
   eventName: GitHubWebhookEventName;
   payload: GitHubWebhookPayload;
@@ -252,6 +255,9 @@ export function extractReviewRequest(input: {
   return null;
 }
 
+/**
+ * Executes a review job from the queue.
+ */
 export async function runReviewJob(env: Env, message: ReviewJobMessage): Promise<ReviewJobRunResult> {
   const resolved = await resolveQueuedJob(env, message);
   if (!resolved) {
@@ -326,6 +332,9 @@ export async function runReviewJob(env: Env, message: ReviewJobMessage): Promise
   }
 }
 
+/**
+ * Resolves a queued review job from a message.
+ */
 async function resolveQueuedJob(
   env: Env,
   message: ReviewJobMessage,
@@ -469,6 +478,9 @@ async function resolveQueuedJob(
   return { job, phase: 'prepare' };
 }
 
+/**
+ * Runs the preparation phase for a review job.
+ */
 async function runPreparePhase(
   env: Env,
   job: PersistedReviewJob,
@@ -535,6 +547,9 @@ async function runPreparePhase(
   await enqueueJobPhase(env, job.id, 'review');
 }
 
+/**
+ * Runs the core review phase where files are analyzed.
+ */
 async function runReviewPhase(
   env: Env,
   job: PersistedReviewJob,
@@ -595,6 +610,9 @@ async function runReviewPhase(
   const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
   const failureModelId = config.model?.main ?? 'unconfigured';
   let failureModelProviderPromise: Promise<string | null> | null = null;
+  /**
+   * Resolves the model provider name for failure reporting.
+   */
   const resolveFailureModelProvider = () => {
     failureModelProviderPromise ??= resolveModelProviderName(env, failureModelId);
     return failureModelProviderPromise;
@@ -702,6 +720,9 @@ async function runReviewPhase(
   // abort point for this loop; this heartbeat only ever refreshes the lease
   // and pings the check-run, and never throws into the review path.
   const heartbeatState = { last: Date.now() };
+  /**
+   * Periodically sends a heartbeat to keep the job lease alive and update the check run.
+   */
   const maybeHeartbeat = async () => {
     if (Date.now() - heartbeatState.last < 30_000) return;
     heartbeatState.last = Date.now();
@@ -742,6 +763,9 @@ async function runReviewPhase(
       }
     }
 
+    /**
+     * Executes the review for a single file or reuses an inherited review.
+     */
     const reviewTask = async () => {
       if (!inherited) {
         await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, filePlan, resolveFailureModelProvider, maybeHeartbeat, existingReview);
@@ -1080,6 +1104,9 @@ async function recordFileCost(
   }
 }
 
+/**
+ * Reviews a single file and persists the results.
+ */
 async function reviewAndPersistFile(
   env: Env,
   job: PersistedReviewJob,
@@ -1431,6 +1458,9 @@ async function reviewAndPersistFile(
   }
 }
 
+/**
+ * Runs the finalization phase, generating the PR summary and concluding the check run.
+ */
 async function runFinalizePhase(
   env: Env,
   job: PersistedReviewJob,
@@ -1714,6 +1744,9 @@ async function runFinalizePhase(
 // Throws JOB_SUPERSEDED if a newer commit/job has taken over this PR, or the PR
 // was merged/closed, so the current invocation stops before spending more model
 // calls on stale code.
+/**
+ * Checks if the current job has been superseded by a newer one.
+ */
 async function checkSuperseded(env: Env, jobId: string) {
   const currentJob = await getJobForProcessing(env, jobId);
   if (currentJob && ['superseded', 'merged', 'closed'].includes(currentJob.status)) {
@@ -1885,11 +1918,17 @@ async function runChangelogPhase(
   await github.updateIssueComment(job.owner, job.repo, job.statusCommentId, body);
 }
 
+/**
+ * Heartbeats the lease and checks if the job was superseded.
+ */
 async function heartbeatAndCheckSuperseded(env: Env, jobId: string, leaseOwner: string) {
   await heartbeatJobLease(env, jobId, leaseOwner, JOB_LEASE_SECONDS);
   await checkSuperseded(env, jobId);
 }
 
+/**
+ * Enqueues the next phase of the job.
+ */
 async function enqueueJobPhase(
   env: Env,
   jobId: string,
@@ -1907,10 +1946,16 @@ async function enqueueJobPhase(
   );
 }
 
+/**
+ * Checks if a specific job step has already been completed.
+ */
 function hasCompletedStep(job: PersistedReviewJob, stepName: string) {
   return job.steps.some((step) => step.name === stepName && step.status === 'done');
 }
 
+/**
+ * Fails the job and updates the GitHub check run accordingly.
+ */
 async function failJobAndCheckRun(
   env: Env,
   job: PersistedReviewJob,
@@ -1987,6 +2032,9 @@ type HousekeepingChange = {
   existingSha?: string;
 };
 
+/**
+ * Evaluates doc gaps and stages a Jules task to address them.
+ */
 async function evaluateAndStageJulesDocsTask(
   env: Env, job: PersistedReviewJob, github: GitHubService, model: ModelService, config: RepoConfig,
 ) {
@@ -2017,6 +2065,9 @@ async function evaluateAndStageJulesDocsTask(
   });
 }
 
+/**
+ * Standardizes the repository based on configured rules and AGENTS.md.
+ */
 async function standardizeRepository(
   env: Env,
   job: PersistedReviewJob,

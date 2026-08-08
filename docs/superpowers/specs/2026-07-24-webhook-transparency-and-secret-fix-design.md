@@ -1,5 +1,7 @@
 # Webhook auth fix, delivery transparency, and open-PR sync
 
+[Return to Index](../../README.md)
+
 Date: 2026-07-24
 Status: Approved (design)
 

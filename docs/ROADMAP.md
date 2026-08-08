@@ -1,5 +1,7 @@
 # Codra Roadmap & Feature Spec
 
+[Return to Index](./README.md)
+
 Status legend: ✅ done · 🟡 partial (skeleton exists, gaps noted) · ⬜ not built · 🔴 broken/dead
 
 This is the source of truth for where Codra is and where it's going. Every item

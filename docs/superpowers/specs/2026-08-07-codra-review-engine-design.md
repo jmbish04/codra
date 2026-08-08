@@ -1,5 +1,7 @@
 # Codra Review Engine Upgrade — Design
 
+[Return to Index](../../README.md)
+
 **Date:** 2026-08-07
 **Status:** Approved for Spec 1 implementation
 **Source material:**

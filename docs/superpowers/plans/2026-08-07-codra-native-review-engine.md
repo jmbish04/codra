@@ -1,5 +1,7 @@
 # Codra Native Review Engine (Spec 1) Implementation Plan
 
+[Return to Index](../../README.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Bring Cloudflare's AI-code-review methodology (specialized reviewers with IGNORE lists, a dedup/verify coordinator, prompt caching, injection defense, a circuit breaker, and review telemetry) into Codra's existing Workers/D1 pipeline behind a `ReviewEngine` seam, with zero behavior change until an operator opts in.

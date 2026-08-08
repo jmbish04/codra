@@ -1,5 +1,7 @@
 # Design: Codra docs-gap Jules tasks + deployment GitHub Action
 
+[Return to Index](../../README.md)
+
 Date: 2026-07-29
 Status: Approved design → implementation planning
 

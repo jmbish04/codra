@@ -1,5 +1,7 @@
 # Codra docs-gap Jules tasks + deployment GitHub Action — Implementation Plan
 
+[Return to Index](../../README.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Teach Codra to (a) stage a Jules coding-agent task when a reviewed repo's docs are lacking and launch it once the PR merges, and (b) open a separate PR adding a Cloudflare deploy GitHub Action while setting the repo's deploy secrets.

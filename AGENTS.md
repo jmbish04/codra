@@ -53,7 +53,7 @@ driver** anywhere in the runtime.
 - **Build/Install**: `pnpm install`
 - **Development Server**: `npm run dev`
 - **Tests**: `npm test`
-- **Linting**: (If applicable, generally part of standard npm checks). Follow the existing code style.
+- **Linting & Type Checking**: `npm run typecheck`
 
 ## Stack summary
 
@@ -93,3 +93,10 @@ Known hard-won gotchas live in [data/gotchas/](data/gotchas/) as
 detection-signal + decisive-directive JSON (e.g. the D1 100-bound-param cap and
 the FK-to-unseeded-parent 500). Add an entry when a non-obvious bug bites; seed
 into the DB with `node scripts/ops/seed-gotchas.mjs`.
+
+## Documentation Suite
+
+The internal documentation suite lives in the `docs/` directory. All changes to the project must be reflected in the relevant docs.
+- **`docs/README.md`**: The index/table-of-contents page. Always link new subpages here.
+- **Routing**: Client-side routes are in `docs/frontend/routing.md`.
+- **No orphan pages**: Every documentation page must link back to the index and forward to its children.

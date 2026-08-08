@@ -1,5 +1,7 @@
 # Webhook Secret Fix, Delivery Transparency & Open-PR Sync — Implementation Plan
 
+[Return to Index](../../README.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Fix the broken GitHub webhook signature check, record every delivery with a definite outcome, surface it on a dashboard page, and add a one-click "Sync open PRs" action that recovers PRs missed while webhooks were failing.
