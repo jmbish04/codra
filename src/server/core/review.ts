@@ -147,6 +147,9 @@ function countsAsHandledFileReview(review: { file_status: string; error_msg: str
  */
 function configuredModelSet(config: RepoConfig) {
   const models = new Set<string>();
+  /**
+   * Helper to normalize and add a model name to the set.
+   */
   const addModel = (model: string | null | undefined) => {
     if (model) models.add(normalizeModelId(model));
   };
@@ -652,6 +655,9 @@ async function runReviewPhase(
   const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
   const failureModelId = config.model?.main ?? 'unconfigured';
   let failureModelProviderPromise: Promise<string | null> | null = null;
+  /**
+   * Resolves the provider of the model that failed the previous attempt, lazily and caching the result.
+   */
   const resolveFailureModelProvider = () => {
     failureModelProviderPromise ??= resolveModelProviderName(env, failureModelId);
     return failureModelProviderPromise;
@@ -778,9 +784,13 @@ async function runReviewPhase(
   // abort point for this loop; this heartbeat only ever refreshes the lease
   // and pings the check-run, and never throws into the review path.
   const heartbeatState = { last: Date.now() };
+  /**
+   * Sends a heartbeat for the current job lease, if the last one was longer than the required threshold.
+   */
   const maybeHeartbeat = async () => {
-    if (Date.now() - heartbeatState.last < 30_000) return;
-    heartbeatState.last = Date.now();
+    const currently = Date.now();
+    if (currently - heartbeatState.last < 30_000) return;
+    heartbeatState.last = currently;
     logReviewStep({ jobId: job.id, phase: 'review', model: 'heartbeat', durationMs: 0, findings: 0 });
     await heartbeatJobLease(env, job.id, leaseOwner, JOB_LEASE_SECONDS).catch((err) => logger.warn('Heartbeat lease refresh failed (ignored)', err));
     if (job.checkRunId) {
@@ -823,6 +833,9 @@ async function runReviewPhase(
       }
     }
 
+    /**
+     * Re-evaluates or re-uses the review plan for a single file, invoking `reviewAndPersistFile` if needed.
+     */
     const reviewTask = async () => {
       if (!inherited) {
         await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, filePlan, resolveFailureModelProvider, maybeHeartbeat, existingReview);
