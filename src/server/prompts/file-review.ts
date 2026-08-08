@@ -58,7 +58,7 @@ export function buildFileReviewPrompts(input: {
         '- Follow any conventions, constraints, and preferences stated in AGENTS.md / CLAUDE.md.',
         '- Configured wrangler bindings are the source of truth for available infrastructure.',
         '',
-        input.projectContext.trim(),
+        sanitizeForPrompt(input.projectContext.trim()),
         '=== END PROJECT CONTEXT ===',
         '',
       ].join('\n')
