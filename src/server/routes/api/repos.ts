@@ -1,21 +1,28 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '@server/env';
-import { getRepoConfigRecord, listRepoConfigs, upsertRepoConfig, syncRepoConfig, updateRepoConfigEnabled } from '@server/db/repo-configs';
+import { getRepoConfigRecord, listRepoConfigs, upsertRepoConfig, syncRepoConfig, updateRepoConfigFlags, resetAllRepoConfigs } from '@server/db/repo-configs';
 import { jsonError } from '@server/core/http';
 import { GitHubClient, type GitHubRepository } from '@server/core/github';
-import { invalidateRepoConfigCache } from '@server/core/config';
+import { invalidateRepoConfigCache, invalidateAllRepoConfigCache } from '@server/core/config';
 import { repoConfigSchema } from '@shared/schema';
 
 const repoConfigPatchSchema = z
   .object({
     enabled: z.boolean().optional(),
+    docstringEnabled: z.boolean().optional(),
+    toolboxEnabled: z.boolean().optional(),
     review: repoConfigSchema.shape.review.optional(),
     model: repoConfigSchema.shape.model.optional(),
   })
   .strict()
   .refine(
-    (patch) => patch.enabled !== undefined || patch.review !== undefined || patch.model !== undefined,
+    (patch) =>
+      patch.enabled !== undefined ||
+      patch.docstringEnabled !== undefined ||
+      patch.toolboxEnabled !== undefined ||
+      patch.review !== undefined ||
+      patch.model !== undefined,
     'Repository config patch cannot be empty.',
   );
 
@@ -95,6 +102,17 @@ export function createReposRouter() {
     }
   });
 
+  app.post('/reset', async (c) => {
+    try {
+      const count = await resetAllRepoConfigs(c.env);
+      await invalidateAllRepoConfigCache(c.env);
+      return c.json({ ok: true, count });
+    } catch (error) {
+      console.error('Repository reset failed:', error);
+      return jsonError(`Reset failed: ${error instanceof Error ? error.message : String(error)}`, 500);
+    }
+  });
+
   app.get('/:owner/:repo/config', async (c) => {
     const repo = await getRepoConfigRecord(c.env, c.req.param('owner'), c.req.param('repo'));
     if (!repo) {
@@ -120,12 +138,18 @@ export function createReposRouter() {
 
     const patch = parsedPatch.data;
     const hasConfigPatch = patch.review !== undefined || patch.model !== undefined;
+    const hasFlagPatch =
+      patch.enabled !== undefined ||
+      patch.docstringEnabled !== undefined ||
+      patch.toolboxEnabled !== undefined;
 
-    if (!hasConfigPatch && patch.enabled !== undefined) {
-      await updateRepoConfigEnabled(c.env, {
+    if (!hasConfigPatch && hasFlagPatch) {
+      await updateRepoConfigFlags(c.env, {
         owner,
         repo,
         enabled: patch.enabled,
+        docstringEnabled: patch.docstringEnabled,
+        toolboxEnabled: patch.toolboxEnabled,
       });
       await invalidateRepoConfigCache(c.env, owner, repo);
       return c.json({ ok: true });

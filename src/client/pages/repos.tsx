@@ -15,6 +15,7 @@ import {
   ArrowUpRight,
   RotateCcw,
   Settings2,
+  AlertTriangle,
   X,
 } from 'lucide-react';
 import { cn } from '@client/lib/utils';
@@ -114,12 +115,21 @@ function formatLastActivity(value: string | Date | null) {
   return new Date(value).toLocaleDateString();
 }
 
+/** The three independent per-repo auto-toggles. */
+type RepoFlag = 'enabled' | 'docstringEnabled' | 'toolboxEnabled';
+
+const REPO_FLAGS: Array<{ key: RepoFlag; label: string; title: string }> = [
+  { key: 'enabled', label: 'Code Review', title: 'Automatically review pull requests' },
+  { key: 'docstringEnabled', label: 'DocString', title: 'Issue a Jules task when docstrings are missing or poor' },
+  { key: 'toolboxEnabled', label: 'Toolbox', title: 'Open a PR to install missing standard files for the repo type' },
+];
+
 interface RepoRowProps {
   repo: RepoConfigRecord;
   globalConfig: GlobalModelConfig | ModelRouteConfig | null;
   modelOptions: ModelOption[];
-  togglePending: boolean;
-  onToggleEnabled: (repo: RepoConfigRecord, enabled: boolean) => void;
+  pendingFlags: Set<RepoFlag>;
+  onToggleFlag: (repo: RepoConfigRecord, flag: RepoFlag, value: boolean) => void;
   onEdit: (repo: RepoConfigRecord) => void;
 }
 
@@ -127,22 +137,23 @@ function RepoRow({
   repo,
   globalConfig,
   modelOptions,
-  togglePending,
-  onToggleEnabled,
+  pendingFlags,
+  onToggleFlag,
   onEdit,
 }: RepoRowProps) {
   const route = getRepoRoute(repo, globalConfig);
   const custom = hasMeaningfulCustomStrategy(repo, globalConfig);
   const lastActivity = formatLastActivity(repo.lastJobCreatedAt);
+  const anyOn = repo.enabled || repo.docstringEnabled || repo.toolboxEnabled;
 
   return (
     <article className="surface surface-static-shadow min-w-0 px-3 py-3 sm:px-4">
-      <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(180px,1.1fr)_minmax(220px,1.4fr)_auto] lg:items-center">
+      <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(180px,1fr)_auto] lg:items-center">
         <div className="flex min-w-0 items-center gap-3">
           <span
             className={cn(
               'h-2.5 w-2.5 shrink-0 rounded-full',
-              repo.enabled ? 'bg-success' : 'bg-muted-foreground/35',
+              anyOn ? 'bg-success' : 'bg-muted-foreground/35',
             )}
           />
           <div className="min-w-0">
@@ -153,22 +164,16 @@ function RepoRow({
               <span
                 className={cn(
                   'rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider',
-                  repo.enabled
+                  anyOn
                     ? 'border-success-border bg-success-bg text-success'
                     : 'border-border bg-muted/40 text-muted-foreground',
                 )}
               >
-                {repo.enabled ? 'Enabled' : 'Paused'}
+                {anyOn ? 'Active' : 'Off'}
               </span>
-              <span
-                className={cn(
-                  'rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider',
-                  custom
-                    ? 'border-primary/25 bg-primary/10 text-primary'
-                    : 'border-border bg-secondary text-secondary-foreground',
-                )}
-              >
-                {custom ? 'Custom strategy' : 'Global strategy'}
+              <span className="truncate text-[11px] text-muted-foreground">
+                {describeModelRoute(route, modelOptions)}
+                {custom ? ' · custom' : ''}
               </span>
               {lastActivity && (
                 <span className="text-[11px] text-muted-foreground">
@@ -179,22 +184,24 @@ function RepoRow({
           </div>
         </div>
 
-        <p className="min-w-0 truncate text-xs text-muted-foreground lg:px-2">
-          {describeModelRoute(route, modelOptions)}
-        </p>
-
         <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
-          <div className="flex items-center gap-2 rounded-md border border-border/60 bg-background/60 px-2.5 py-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-              Reviews
-            </span>
-            <Switch
-              checked={repo.enabled}
-              disabled={togglePending}
-              aria-label={`${repo.enabled ? 'Pause' : 'Enable'} reviews for ${repo.owner}/${repo.repo}`}
-              onCheckedChange={(nextEnabled) => onToggleEnabled(repo, nextEnabled)}
-            />
-          </div>
+          {REPO_FLAGS.map(({ key, label, title }) => (
+            <div
+              key={key}
+              title={title}
+              className="flex items-center gap-2 rounded-md border border-border/60 bg-background/60 px-2.5 py-1.5"
+            >
+              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                {label}
+              </span>
+              <Switch
+                checked={repo[key]}
+                disabled={pendingFlags.has(key)}
+                aria-label={`${repo[key] ? 'Disable' : 'Enable'} ${label} for ${repo.owner}/${repo.repo}`}
+                onCheckedChange={(next) => onToggleFlag(repo, key, next)}
+              />
+            </div>
+          ))}
           <Button
             variant="outline"
             size="sm"
@@ -363,6 +370,55 @@ function RepoModelModal({
   );
 }
 
+interface ResetConfirmDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  repoCount: number;
+  resetting: boolean;
+  onConfirm: () => void;
+}
+
+function ResetConfirmDialog({ open, onOpenChange, repoCount, resetting, onConfirm }: ResetConfirmDialogProps) {
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-background/75 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in data-[state=closed]:fade-out" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-1.5rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-card p-5 shadow-2xl data-[state=open]:animate-in data-[state=open]:fade-in data-[state=open]:zoom-in-95">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+              <AlertTriangle size={18} />
+            </span>
+            <div className="min-w-0">
+              <Dialog.Title className="text-base font-semibold text-foreground">
+                Turn off every check?
+              </Dialog.Title>
+              <Dialog.Description className="mt-1.5 text-sm text-muted-foreground">
+                This sets Code Review, DocString Enforcer, and Toolbox Watcher to off for
+                all {repoCount} {repoCount === 1 ? 'repository' : 'repositories'}. Codra
+                stops issuing automatic checks until you re-enable them per repo.
+                On-demand <span className="font-medium text-foreground">@codra-app</span> comments still work.
+              </Dialog.Description>
+            </div>
+          </div>
+          <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Dialog.Close asChild>
+              <Button variant="outline" disabled={resetting}>Cancel</Button>
+            </Dialog.Close>
+            <Button
+              onClick={onConfirm}
+              disabled={resetting}
+              className="gap-2 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {resetting ? <RefreshCw size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+              Reset all repositories
+            </Button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 export function ReposPage() {
   const [repos, setRepos] = useState<RepoConfigRecord[]>([]);
   const [globalConfig, setGlobalConfig] = useState<ModelRouteConfig>(EMPTY_MODEL_ROUTE);
@@ -372,7 +428,10 @@ export function ReposPage() {
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [editingRepoId, setEditingRepoId] = useState<string | null>(null);
+  // Pending toggle keys: `${owner}/${repo}:${flag}` so each switch is independent.
   const [pendingToggles, setPendingToggles] = useState<Set<string>>(() => new Set());
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const editingRepo = repos.find(repo => repoId(repo) === editingRepoId) ?? null;
 
@@ -414,28 +473,51 @@ export function ReposPage() {
     );
   };
 
-  const handleToggleEnabled = async (repo: RepoConfigRecord, nextEnabled: boolean) => {
+  const flagLabel = (flag: RepoFlag) =>
+    REPO_FLAGS.find(f => f.key === flag)?.label ?? 'Check';
+
+  const handleToggleFlag = async (repo: RepoConfigRecord, flag: RepoFlag, value: boolean) => {
     const targetId = repoId(repo);
-    setPendingToggles(current => new Set(current).add(targetId));
-    const tid = toast.loading(nextEnabled ? 'Enabling code reviews…' : 'Pausing code reviews…');
+    const pendingKey = `${targetId}:${flag}`;
+    setPendingToggles(current => new Set(current).add(pendingKey));
+    const label = flagLabel(flag);
+    const tid = toast.loading(value ? `Enabling ${label}…` : `Disabling ${label}…`);
     try {
-      await api.updateRepoConfig(repo.owner, repo.repo, { enabled: nextEnabled });
-      mergeRepo(targetId, { enabled: nextEnabled });
-      toast.success(
-        nextEnabled ? 'Reviews active' : 'Reviews paused',
-        { id: tid, description: nextEnabled
-          ? `${targetId} will receive automated review comments.`
-          : `${targetId} is now quiet — no new reviews will be posted.`
-        },
-      );
+      await api.updateRepoConfig(repo.owner, repo.repo, { [flag]: value });
+      mergeRepo(targetId, { [flag]: value } as Partial<RepoConfigRecord>);
+      toast.success(value ? `${label} on` : `${label} off`, {
+        id: tid,
+        description: `${targetId} · ${label} is now ${value ? 'enabled' : 'disabled'}.`,
+      });
     } catch (err) {
       toast.error('Could not update repository', { id: tid, description: 'The change did not go through. Please try again.' });
     } finally {
       setPendingToggles(current => {
         const next = new Set(current);
-        next.delete(targetId);
+        next.delete(pendingKey);
         return next;
       });
+    }
+  };
+
+  const handleReset = async () => {
+    if (resetting) return;
+    setResetting(true);
+    const tid = toast.loading('Turning off all checks…');
+    try {
+      const result = await api.resetRepos();
+      setRepos(current =>
+        current.map(repo => ({ ...repo, enabled: false, docstringEnabled: false, toolboxEnabled: false })),
+      );
+      setResetOpen(false);
+      toast.success('All checks off', {
+        id: tid,
+        description: `${result.count} ${result.count === 1 ? 'repository' : 'repositories'} reset. Re-enable per repo as needed.`,
+      });
+    } catch (err) {
+      toast.error('Reset failed', { id: tid, description: 'No changes were made. Please try again.' });
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -505,6 +587,16 @@ export function ReposPage() {
             <Button
               variant="outline"
               size="sm"
+              onClick={() => setResetOpen(true)}
+              disabled={resetting || repos.length === 0}
+              className="gap-2 text-destructive hover:text-destructive"
+            >
+              <RotateCcw size={13} className={cn(resetting && 'animate-spin')} />
+              Reset all
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={handleSync}
               disabled={syncing}
               className="gap-2"
@@ -544,14 +636,24 @@ export function ReposPage() {
                 repo={repo}
                 globalConfig={globalConfig}
                 modelOptions={modelOptions}
-                togglePending={pendingToggles.has(id)}
-                onToggleEnabled={handleToggleEnabled}
+                pendingFlags={new Set(
+                  REPO_FLAGS.map(f => f.key).filter(key => pendingToggles.has(`${id}:${key}`)),
+                )}
+                onToggleFlag={handleToggleFlag}
                 onEdit={(nextRepo) => setEditingRepoId(repoId(nextRepo))}
               />
             );
           })}
         </div>
       )}
+
+      <ResetConfirmDialog
+        open={resetOpen}
+        onOpenChange={setResetOpen}
+        repoCount={repos.length}
+        resetting={resetting}
+        onConfirm={handleReset}
+      />
 
       <RepoModelModal
         repo={editingRepo}
