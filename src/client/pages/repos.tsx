@@ -115,20 +115,40 @@ function formatLastActivity(value: string | Date | null) {
   return new Date(value).toLocaleDateString();
 }
 
-/** The three independent per-repo auto-toggles. */
-type RepoFlag = 'enabled' | 'docstringEnabled' | 'toolboxEnabled';
+/**
+ * The three independent per-repo auto-toggles. Single source of truth: `label`
+ * is the compact switch caption, `full` the sentence-form name used in the reset
+ * dialog and toasts. `RepoFlag` is derived from here so adding a flag can't drift.
+ */
+const REPO_FLAGS = [
+  { key: 'enabled', label: 'Code Review', full: 'Code Review', title: 'Automatically review pull requests' },
+  { key: 'docstringEnabled', label: 'DocString', full: 'DocString Enforcer', title: 'Issue a Jules task when docstrings are missing or poor' },
+  { key: 'toolboxEnabled', label: 'Toolbox', full: 'Toolbox Watcher', title: 'Open a PR to install missing standard files for the repo type' },
+] as const;
 
-const REPO_FLAGS: Array<{ key: RepoFlag; label: string; title: string }> = [
-  { key: 'enabled', label: 'Code Review', title: 'Automatically review pull requests' },
-  { key: 'docstringEnabled', label: 'DocString', title: 'Issue a Jules task when docstrings are missing or poor' },
-  { key: 'toolboxEnabled', label: 'Toolbox', title: 'Open a PR to install missing standard files for the repo type' },
-];
+type RepoFlag = (typeof REPO_FLAGS)[number]['key'];
+
+const FLAG_LABEL: Record<RepoFlag, string> = Object.fromEntries(
+  REPO_FLAGS.map((f) => [f.key, f.label]),
+) as Record<RepoFlag, string>;
+
+/** Stable pending-toggle key so the same format is used everywhere. */
+function pendingKey(id: string, flag: RepoFlag) {
+  return `${id}::${flag}`;
+}
+
+function pluralize(n: number, singular: string, plural = `${singular}s`) {
+  return n === 1 ? singular : plural;
+}
 
 interface RepoRowProps {
   repo: RepoConfigRecord;
   globalConfig: GlobalModelConfig | ModelRouteConfig | null;
   modelOptions: ModelOption[];
-  pendingFlags: Set<RepoFlag>;
+  /** All in-flight toggle keys (see pendingKey); the row reads its own. */
+  pendingToggles: Set<string>;
+  /** A global reset is running — freeze every per-repo switch to avoid racing it. */
+  resetting: boolean;
   onToggleFlag: (repo: RepoConfigRecord, flag: RepoFlag, value: boolean) => void;
   onEdit: (repo: RepoConfigRecord) => void;
 }
@@ -137,7 +157,8 @@ function RepoRow({
   repo,
   globalConfig,
   modelOptions,
-  pendingFlags,
+  pendingToggles,
+  resetting,
   onToggleFlag,
   onEdit,
 }: RepoRowProps) {
@@ -145,6 +166,7 @@ function RepoRow({
   const custom = hasMeaningfulCustomStrategy(repo, globalConfig);
   const lastActivity = formatLastActivity(repo.lastJobCreatedAt);
   const anyOn = repo.enabled || repo.docstringEnabled || repo.toolboxEnabled;
+  const id = repoId(repo);
 
   return (
     <article className="surface surface-static-shadow min-w-0 px-3 py-3 sm:px-4">
@@ -196,7 +218,7 @@ function RepoRow({
               </span>
               <Switch
                 checked={repo[key]}
-                disabled={pendingFlags.has(key)}
+                disabled={resetting || pendingToggles.has(pendingKey(id, key))}
                 aria-label={`${repo[key] ? 'Disable' : 'Enable'} ${label} for ${repo.owner}/${repo.repo}`}
                 onCheckedChange={(next) => onToggleFlag(repo, key, next)}
               />
@@ -378,9 +400,16 @@ interface ResetConfirmDialogProps {
   onConfirm: () => void;
 }
 
+/** "A, B, and C" from the canonical flag names, so this text never drifts from REPO_FLAGS. */
+const RESET_CHECK_NAMES = REPO_FLAGS.map((f) => f.full);
+const checkNameList =
+  RESET_CHECK_NAMES.slice(0, -1).join(', ') + ', and ' + RESET_CHECK_NAMES[RESET_CHECK_NAMES.length - 1];
+
 function ResetConfirmDialog({ open, onOpenChange, repoCount, resetting, onConfirm }: ResetConfirmDialogProps) {
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    // Don't let Escape / overlay-click dismiss the dialog while the destructive
+    // request is in flight.
+    <Dialog.Root open={open} onOpenChange={(next) => { if (!resetting || next) onOpenChange(next); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-background/75 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in data-[state=closed]:fade-out" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-1.5rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-card p-5 shadow-2xl data-[state=open]:animate-in data-[state=open]:fade-in data-[state=open]:zoom-in-95">
@@ -393,10 +422,10 @@ function ResetConfirmDialog({ open, onOpenChange, repoCount, resetting, onConfir
                 Turn off every check?
               </Dialog.Title>
               <Dialog.Description className="mt-1.5 text-sm text-muted-foreground">
-                This sets Code Review, DocString Enforcer, and Toolbox Watcher to off for
-                all {repoCount} {repoCount === 1 ? 'repository' : 'repositories'}. Codra
-                stops issuing automatic checks until you re-enable them per repo.
-                On-demand <span className="font-medium text-foreground">@codra-app</span> comments still work.
+                This sets {checkNameList} to off for all {repoCount}{' '}
+                {pluralize(repoCount, 'repository', 'repositories')}. Codra stops issuing
+                automatic checks until you re-enable them per repo. On-demand{' '}
+                <span className="font-medium text-foreground">@codra-app</span> comments still work.
               </Dialog.Description>
             </div>
           </div>
@@ -419,6 +448,16 @@ function ResetConfirmDialog({ open, onOpenChange, repoCount, resetting, onConfir
   );
 }
 
+/**
+ * Repository settings page. Lists every repo Codra can access (sorted by last
+ * review activity) with three independent per-repo auto-toggles — Code Review,
+ * DocString Enforcer, Toolbox Watcher — plus a bulk "Reset all" that turns them
+ * all off, and a per-repo model-strategy editor.
+ *
+ * Local state it owns: `repos` (the list + optimistic toggle merges),
+ * `pendingToggles` (in-flight per-switch keys), `resetOpen`/`resetting` (the
+ * bulk-reset dialog + request), and `editingRepoId` (the model-strategy modal).
+ */
 export function ReposPage() {
   const [repos, setRepos] = useState<RepoConfigRecord[]>([]);
   const [globalConfig, setGlobalConfig] = useState<ModelRouteConfig>(EMPTY_MODEL_ROUTE);
@@ -433,7 +472,10 @@ export function ReposPage() {
   const [resetOpen, setResetOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
 
-  const editingRepo = repos.find(repo => repoId(repo) === editingRepoId) ?? null;
+  const editingRepo = useMemo(
+    () => repos.find(repo => repoId(repo) === editingRepoId) ?? null,
+    [repos, editingRepoId],
+  );
 
   const loadRepos = () => {
     setLoading(true);
@@ -473,18 +515,17 @@ export function ReposPage() {
     );
   };
 
-  const flagLabel = (flag: RepoFlag) =>
-    REPO_FLAGS.find(f => f.key === flag)?.label ?? 'Check';
-
   const handleToggleFlag = async (repo: RepoConfigRecord, flag: RepoFlag, value: boolean) => {
     const targetId = repoId(repo);
-    const pendingKey = `${targetId}:${flag}`;
-    setPendingToggles(current => new Set(current).add(pendingKey));
-    const label = flagLabel(flag);
+    const key = pendingKey(targetId, flag);
+    setPendingToggles(current => new Set(current).add(key));
+    const label = FLAG_LABEL[flag];
+    // Record<RepoFlag, boolean> — no cast, and adding a flag stays type-checked.
+    const patch: Partial<Record<RepoFlag, boolean>> = { [flag]: value };
     const tid = toast.loading(value ? `Enabling ${label}…` : `Disabling ${label}…`);
     try {
-      await api.updateRepoConfig(repo.owner, repo.repo, { [flag]: value });
-      mergeRepo(targetId, { [flag]: value } as Partial<RepoConfigRecord>);
+      await api.updateRepoConfig(repo.owner, repo.repo, patch);
+      mergeRepo(targetId, patch);
       toast.success(value ? `${label} on` : `${label} off`, {
         id: tid,
         description: `${targetId} · ${label} is now ${value ? 'enabled' : 'disabled'}.`,
@@ -494,7 +535,7 @@ export function ReposPage() {
     } finally {
       setPendingToggles(current => {
         const next = new Set(current);
-        next.delete(pendingKey);
+        next.delete(key);
         return next;
       });
     }
@@ -512,7 +553,7 @@ export function ReposPage() {
       setResetOpen(false);
       toast.success('All checks off', {
         id: tid,
-        description: `${result.count} ${result.count === 1 ? 'repository' : 'repositories'} reset. Re-enable per repo as needed.`,
+        description: `${result.count} ${pluralize(result.count, 'repository', 'repositories')} reset. Re-enable per repo as needed.`,
       });
     } catch (err) {
       toast.error('Reset failed', { id: tid, description: 'No changes were made. Please try again.' });
@@ -581,7 +622,7 @@ export function ReposPage() {
       <PageHeader
         category="Repositories"
         title="Repository settings"
-        description={!loading && `${repos.length} ${repos.length === 1 ? 'repository' : 'repositories'} with Codra access`}
+        description={!loading && `${repos.length} ${pluralize(repos.length, 'repository', 'repositories')} with Codra access`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -636,9 +677,8 @@ export function ReposPage() {
                 repo={repo}
                 globalConfig={globalConfig}
                 modelOptions={modelOptions}
-                pendingFlags={new Set(
-                  REPO_FLAGS.map(f => f.key).filter(key => pendingToggles.has(`${id}:${key}`)),
-                )}
+                pendingToggles={pendingToggles}
+                resetting={resetting}
                 onToggleFlag={handleToggleFlag}
                 onEdit={(nextRepo) => setEditingRepoId(repoId(nextRepo))}
               />
