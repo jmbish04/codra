@@ -589,11 +589,20 @@ async function runPreparePhase(
     }
   }
 
-  // Post a status comment to the PR so the team knows Codra is active
+  // Post a status comment to the PR so the team knows Codra is active. Word it
+  // to match what this job actually runs — a code review, or an on-demand audit.
   if (!job.statusCommentId) {
     try {
+      const scope = jobScope(job);
+      const auditNames = [
+        scope.docstring && 'DocString Enforcer',
+        scope.toolbox && 'Toolbox Watcher',
+      ].filter(Boolean).join(' + ');
+      const { heading, activity } = scope.codeReview
+        ? { heading: '\u{1F50D} Code Review', activity: 'reviewing this pull request' }
+        : { heading: `\u{1F9F0} ${auditNames || 'Audit'}`, activity: `running ${auditNames || 'checks'} on this pull request` };
       const monitorLink = env.APP_URL ? `\n\n<a href="${env.APP_URL}/jobs/${job.id}" target="_blank" rel="noopener noreferrer">👉 Click here to monitor progress</a>` : '';
-      const statusBody = `## \u{1F50D} Code Review\n\nCodra is reviewing this pull request. A summary will be posted here when the review is complete.${monitorLink}`;
+      const statusBody = `## ${heading}\n\nCodra is ${activity}. A summary will be posted here when it is complete.${monitorLink}`;
       const comment = await github.createIssueComment(job.owner, job.repo, job.prNumber, statusBody);
       await updateJobStatusComment(env, job.id, comment.id);
     } catch (err) {
