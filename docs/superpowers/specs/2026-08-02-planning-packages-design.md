@@ -1,5 +1,7 @@
 # Planning Packages — Design Spec
 
+[Return to Index](../../README.md)
+
 **Date:** 2026-08-02
 **Status:** Approved (design), pending implementation
 **Branch:** `claude/planning-packages-architecture-818e35`

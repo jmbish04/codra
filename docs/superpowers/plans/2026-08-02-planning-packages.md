@@ -1,5 +1,7 @@
 # Planning Packages Implementation Plan
 
+[Return to Index](../../README.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add per-repo "planning packages" to codra — immutable, fielded (no-blob), revision-safe plan bundles produced and merged by multi-agent orchestration (Jules-driven, codra-reviewed).

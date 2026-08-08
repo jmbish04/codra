@@ -7,6 +7,9 @@ import { defaultRepoConfig } from '@shared/schema';
 import { planReviewers } from '@server/core/reviewer-plan';
 
 
+/**
+ * Helper to generate a mock SHA-1 hash.
+ */
 const sha = (char: string) => char.repeat(40);
 
 // Properly mock the services as real classes with prototype methods
@@ -95,7 +98,10 @@ const REVIEW_FLOW_TIMEOUT_MS = 60_000;
 dbDescribe('Review Flow Lifecycle', () => {
   const env = createTestEnv();
 
-  async function runAndDrain(message: Parameters<typeof runReviewJob>[1]) {
+  /**
+ * Runs a review job and drains any subsequent queued jobs.
+ */
+async function runAndDrain(message: Parameters<typeof runReviewJob>[1]) {
     (env.REVIEW_QUEUE as any).sent.length = 0;
     await runReviewJob(env, message);
     const queue = env.REVIEW_QUEUE as any;

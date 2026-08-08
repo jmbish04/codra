@@ -5,6 +5,11 @@ import type { ReviewerId } from '@server/prompts/reviewers';
 
 const base = defaultRepoConfig.review;
 
+/**
+ * Helper to determine if there is enough subrequest budget for a plan.
+ */
+const hasBudget = (limit: number) => (needed: number) => needed <= limit;
+
 describe('planReviewers', () => {
   it('trivial diff → security+correctness', () => {
     expect(new Set(planReviewers(8, 1, base))).toEqual(new Set(['security', 'correctness']));
@@ -27,12 +32,12 @@ describe('selectFilePlanForBudget', () => {
 
   it('proceeds with the full plan when it fits the remaining subrequest budget', () => {
     // plan.length(6) + 2 margin = 8 needed; budget has plenty of room.
-    const decision = selectFilePlanForBudget(fullPlan, 0, (needed) => needed <= 42);
+    const decision = selectFilePlanForBudget(fullPlan, 0, hasBudget(42));
     expect(decision).toEqual({ action: 'proceed', plan: fullPlan });
   });
 
   it('single-reviewer plans always proceed unchanged, regardless of budget', () => {
-    const decision = selectFilePlanForBudget(['security'], 0, () => false);
+    const decision = selectFilePlanForBudget(['security'], 0, hasBudget(0));
     expect(decision).toEqual({ action: 'proceed', plan: ['security'] });
   });
 
@@ -40,7 +45,7 @@ describe('selectFilePlanForBudget', () => {
     // processedThisChunk > 0 means earlier files already started this
     // invocation; don't cram a reduced review into this file, wait for a
     // fresh per-invocation budget instead.
-    const decision = selectFilePlanForBudget(fullPlan, 1, () => false);
+    const decision = selectFilePlanForBudget(fullPlan, 1, hasBudget(0));
     expect(decision).toEqual({ action: 'defer' });
   });
 
@@ -48,12 +53,12 @@ describe('selectFilePlanForBudget', () => {
     // processedThisChunk === 0: no later invocation would do any better if we
     // just deferred (a fresh tracker still starts every invocation the same
     // way) — better to make partial progress now.
-    const decision = selectFilePlanForBudget(fullPlan, 0, () => false);
+    const decision = selectFilePlanForBudget(fullPlan, 0, hasBudget(0));
     expect(decision).toEqual({ action: 'proceed', plan: ['security', 'correctness'] });
   });
 
   it('falls back to the first reviewer if the plan has no trivial-tier members and nothing fits', () => {
-    const decision = selectFilePlanForBudget(['bugs', 'performance'], 0, () => false);
+    const decision = selectFilePlanForBudget(['bugs', 'performance'], 0, hasBudget(0));
     expect(decision).toEqual({ action: 'proceed', plan: ['bugs'] });
   });
 });

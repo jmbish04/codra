@@ -1,5 +1,7 @@
 # Codra Rebuild — In-Depth Plan
 
+[Return to Index](./README.md)
+
 **Strategy (your words):** enrich `core-template-cfw` with core-remodel's
 planning suite → fork it into the new codra → build the frontend (shoogle /
 shadcn registry research) → then the backend → rebuild from scratch.
