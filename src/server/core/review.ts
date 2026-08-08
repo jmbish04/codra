@@ -2,6 +2,7 @@ import { logger } from './logger';
 import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHubWebhookPayload, type IssueCommentWebhookPayload, type PullRequestWebhookPayload } from '@shared/github';
 import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview, recordFileReviewCost } from '@server/db/file-reviews';
+import { assertD1MigrationsCurrent } from '@server/db/migration-check';
 import { getPricingSnapshot, buildCostBreakdown, sumBreakdown, type PricingSnapshot, type UsageAmounts } from '@server/core/guardian-pricing';
 import { getProjectContext } from '@server/core/project-context';
 import { withTimeout } from '@server/core/timeout';
@@ -282,6 +283,8 @@ export async function runReviewJob(env: Env, message: ReviewJobMessage): Promise
   }
 
   const job = mapJob(claim.row);
+  await assertD1MigrationsCurrent(env);
+
   const phase = resolved.phase;
   const tracker = new TokenTracker();
   const github = new GitHubService(env, job.installationId, tracker);

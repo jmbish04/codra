@@ -47,6 +47,14 @@ jobs:
         with:
           node-version: 20
 
+      - name: Apply remote D1 migrations
+        if: \${{ github.event_name == 'push' || github.event.inputs.action == 'deploy' || github.event.inputs.action == 'migrate-db' }}
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 migrations apply ${dbName} --remote
+
       - name: Deploy Worker
         if: \${{ github.event_name == 'push' || github.event.inputs.action == 'deploy' }}
         uses: cloudflare/wrangler-action@v4
@@ -54,14 +62,6 @@ jobs:
           apiToken: \${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
-
-      - name: Apply remote D1 migrations
-        if: \${{ github.event.inputs.action == 'migrate-db' }}
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: \${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 migrations apply ${dbName} --remote
 
       - name: Check recent deployments / build status
         if: \${{ github.event.inputs.action == 'check-logs' }}
