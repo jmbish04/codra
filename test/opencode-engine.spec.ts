@@ -4,6 +4,9 @@ import { parseUnifiedDiff } from '@server/core/diff';
 import { defaultRepoConfig } from '@shared/schema';
 import { isRetryableOpenCodeError, OpenCodeError } from '@server/engines/opencode-client';
 
+/**
+ * Creates a mock OpenCode client returning a predictable response stream.
+ */
 function stubClient(lines: string[], reviewImpl?: () => AsyncIterable<string>) {
   return {
     healthCalls: 0,
@@ -17,6 +20,9 @@ function stubClient(lines: string[], reviewImpl?: () => AsyncIterable<string>) {
   };
 }
 
+/**
+ * Provides a base testing context for pull request reviews.
+ */
 function baseCtx(overrides: Partial<Record<string, unknown>> = {}) {
   const diff = 'diff --git a/src/a.ts b/src/a.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/a.ts\n@@ -0,0 +1,1 @@\n+export const a = 1;\n';
   const files = parseUnifiedDiff(diff);
@@ -32,6 +38,9 @@ function baseCtx(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+/**
+ * Generates a mock JSON string representing a single file review finding.
+ */
 const finding = (title: string) => JSON.stringify({
   path: 'src/a.ts', line: 1, position: 1, severity: 'P2', category: 'security', title, body: 'b',
 });

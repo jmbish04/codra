@@ -9,6 +9,9 @@ import {
 import { parseUnifiedDiff } from '@server/core/diff';
 import { defaultRepoConfig } from '@shared/schema';
 
+/**
+ * Creates a mock computer workspace for testing.
+ */
 function stubWorkspace(): ComputerWorkspace & { populateCalls: string[]; execCalls: Array<{ cmd: string; opts?: { backend?: string } }> } {
   return {
     populateCalls: [],
@@ -22,6 +25,9 @@ function stubWorkspace(): ComputerWorkspace & { populateCalls: string[]; execCal
   };
 }
 
+/**
+ * Creates a mock workspace factory for testing.
+ */
 function stubFactory(workspace: ComputerWorkspace, opts: { available?: boolean; createErr?: Error } = {}): ComputerWorkspaceFactory & { createCalls: number } {
   return {
     createCalls: 0,
@@ -34,6 +40,9 @@ function stubFactory(workspace: ComputerWorkspace, opts: { available?: boolean; 
   };
 }
 
+/**
+ * Provides a base testing context for pull request reviews.
+ */
 function baseCtx(overrides: Partial<Record<string, unknown>> = {}) {
   const diff = 'diff --git a/src/a.ts b/src/a.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/a.ts\n@@ -0,0 +1,1 @@\n+export const a = 1;\n';
   const files = parseUnifiedDiff(diff);
@@ -49,10 +58,16 @@ function baseCtx(overrides: Partial<Record<string, unknown>> = {}) {
   } as any;
 }
 
+/**
+ * Generates a mock review finding for tests.
+ */
 const finding = (reviewerId: string, path: string) => ({
   path, line: 1, position: 1, severity: 'P2', category: 'security', title: `${reviewerId}-finding`, body: 'b',
 });
 
+/**
+ * Creates a mock test runner for the computer engine.
+ */
 function stubRunner(seen: Array<{ reviewerId: string; filePath: string; workspace: ComputerWorkspace }>): ComputerReviewerRunner {
   return async ({ reviewer, file, workspace }) => {
     seen.push({ reviewerId: reviewer.id, filePath: file.path, workspace });

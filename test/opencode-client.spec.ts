@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OpenCodeClient, isRetryableOpenCodeError } from '@server/engines/opencode-client';
 
+/**
+ * Creates a mock secret object simulating Cloudflare Workers secret bindings.
+ */
 function secret(value: string) {
   return { get: async () => value };
 }
@@ -114,6 +117,9 @@ describe('OpenCodeClient', () => {
 
     // Small override of REVIEW_TIMEOUT_MS's default so the test doesn't wait
     // out the real 2-minute production bound.
+    /**
+     * Captures the rejected promise from the timed-out stream reader to assert on the error type.
+     */
     const caughtPromise = (async () => {
       for await (const _line of client.review({ job: 'x' }, undefined, 25)) {
         // no-op

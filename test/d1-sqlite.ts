@@ -13,6 +13,9 @@ import path from 'node:path';
 // - number[] / ArrayBuffer -> Uint8Array (BLOB round-trip: jobs.commit_sha is
 //   written as Array.from(hexToBytes(...)) and read back as Uint8Array).
 // - boolean -> 1/0, undefined -> null. Everything else passes through.
+/**
+ * Coerces parameters for the node:sqlite in-memory D1 shim, ensuring types like boolean and number arrays translate to SQLite equivalents.
+ */
 function coerceParam(param: unknown): unknown {
   if (param === undefined) return null;
   if (typeof param === 'boolean') return param ? 1 : 0;
@@ -21,6 +24,9 @@ function coerceParam(param: unknown): unknown {
   return param;
 }
 
+/**
+ * Creates an in-memory D1 shim using node:sqlite, applying local database migrations for tests.
+ */
 export function createD1(migrationsDir: string): D1Database {
   const db = new DatabaseSync(':memory:');
 
@@ -44,11 +50,17 @@ export function createD1(migrationsDir: string): D1Database {
     db.prepare('INSERT OR IGNORE INTO d1_migrations (name) VALUES (?)').run(tag);
   }
 
+  /**
+   * Prepares an SQL statement within the in-memory D1 shim.
+   */
   function prepare(sql: string) {
     // node:sqlite reuses one StatementSync; drizzle reuses the prepared stmt
     // across all()/raw() calls, so toggle the return mode per call.
     const stmt = db.prepare(sql);
 
+    /**
+     * Binds parameters to a prepared SQL statement in the in-memory D1 shim.
+     */
     function bind(...params: unknown[]) {
       const bound = params.map(coerceParam) as any[];
       return {

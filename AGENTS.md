@@ -52,8 +52,9 @@ driver** anywhere in the runtime.
 
 - **Build/Install**: `pnpm install`
 - **Development Server**: `npm run dev`
-- **Tests**: `npm test`
-- **Linting**: (If applicable, generally part of standard npm checks). Follow the existing code style.
+- **Database Migrations**: Generate with `npm run db:generate`, apply locally with `npm run migrate:local`.
+- **Tests**: `npm test` (Runs Vitest and Playwright. No external database is needed; tests run on an in-memory SQLite D1 instance.)
+- **Linting & Typechecking**: `npm run typecheck`
 
 ## Stack summary
 

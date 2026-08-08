@@ -81,6 +81,9 @@ function isRetryableEngineError(err: unknown): boolean {
   return isRetryableOpenCodeError(err) || isRetryableComputerEngineError(err);
 }
 
+/**
+ * Checks if a file review error message indicates a retryable failure (e.g., transient network issue).
+ */
 function isRetryableFileReviewErrorMessage(message: string | null | undefined) {
   if (!message) return false;
   const lower = message.toLowerCase();
@@ -101,12 +104,18 @@ function isRetryableFileReviewErrorMessage(message: string | null | undefined) {
   );
 }
 
+/**
+ * Calculates the backoff delay for a retryable model failure based on the failure count.
+ */
 function retryableModelFailureDelaySeconds(failureCount: number | null | undefined) {
   if (!failureCount || failureCount < 1) return RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS[0];
   const index = Math.min(failureCount - 1, RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS.length - 1);
   return RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS[index];
 }
 
+/**
+ * Extracts the explicit retry delay from an error object if one was set.
+ */
 function getRetryableModelFailureDelaySeconds(error: unknown) {
   const record = error && typeof error === 'object' ? error as { retryAfterSeconds?: unknown } : null;
   const retryAfterSeconds =
@@ -116,10 +125,16 @@ function getRetryableModelFailureDelaySeconds(error: unknown) {
   return retryAfterSeconds ?? RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS[0];
 }
 
+/**
+ * Determines whether an existing file review is eligible for a retry.
+ */
 function shouldRetryExistingFileReview(review: { file_status: string; error_msg: string | null }) {
   return review.file_status === 'failed' && isRetryableFileReviewErrorMessage(review.error_msg);
 }
 
+/**
+ * Determines if a file review is considered completed or in a terminal error state.
+ */
 function countsAsHandledFileReview(review: { file_status: string; error_msg: string | null }) {
   // A seeded 'pending' placeholder is NOT a completed review — it still needs to
   // be reviewed. (Treating it as handled skips the file entirely.)
@@ -127,8 +142,14 @@ function countsAsHandledFileReview(review: { file_status: string; error_msg: str
   return !shouldRetryExistingFileReview(review);
 }
 
+/**
+ * Extracts all configured model names from the repository configuration into a normalized set.
+ */
 function configuredModelSet(config: RepoConfig) {
   const models = new Set<string>();
+  /**
+   * Helper to normalize and add a model name to the set.
+   */
   const addModel = (model: string | null | undefined) => {
     if (model) models.add(normalizeModelId(model));
   };
@@ -147,10 +168,16 @@ function configuredModelSet(config: RepoConfig) {
   return models;
 }
 
+/**
+ * Checks if a previous file review's model is present in the current model strategy configuration.
+ */
 function canInheritParentFileReview(config: RepoConfig, review: { model_used: string }) {
   return configuredModelSet(config).has(normalizeModelId(review.model_used));
 }
 
+/**
+ * Looks up the provider name for a given model ID.
+ */
 async function resolveModelProviderName(env: Pick<Env, 'DB'>, modelId: string | null | undefined) {
   if (!modelId || modelId === 'unconfigured') return null;
 
@@ -165,6 +192,9 @@ async function resolveModelProviderName(env: Pick<Env, 'DB'>, modelId: string | 
   }
 }
 
+/**
+ * Determines if a pull request event should trigger a review.
+ */
 function shouldTriggerFromPullRequest(action: PullRequestWebhookPayload['action'], config: RepoConfig['review']) {
   return (config.on as string[]).includes(action);
 }
@@ -200,6 +230,9 @@ export type ReviewRequest = {
   trigger: 'auto' | 'mention';
 };
 
+/**
+ * Parses a webhook payload into a standardized review request context.
+ */
 export function extractReviewRequest(input: {
   eventName: GitHubWebhookEventName;
   payload: GitHubWebhookPayload;
@@ -265,6 +298,9 @@ export function extractReviewRequest(input: {
   return null;
 }
 
+/**
+ * Main entry point for processing a queued review job. Coordinates phases: preparation, standardization, docs-gap, review, and finalization.
+ */
 export async function runReviewJob(env: Env, message: ReviewJobMessage): Promise<ReviewJobRunResult> {
   const resolved = await resolveQueuedJob(env, message);
   if (!resolved) {
@@ -341,6 +377,9 @@ export async function runReviewJob(env: Env, message: ReviewJobMessage): Promise
   }
 }
 
+/**
+ * Retrieves a review job from the database, creating it if it doesn't exist, and ensures the review is not redundant.
+ */
 async function resolveQueuedJob(
   env: Env,
   message: ReviewJobMessage,
@@ -484,6 +523,9 @@ async function resolveQueuedJob(
   return { job, phase: 'prepare' };
 }
 
+/**
+ * Fetches pull request files and metadata, updates the check run, and persists the PR files for review.
+ */
 async function runPreparePhase(
   env: Env,
   job: PersistedReviewJob,
@@ -550,6 +592,9 @@ async function runPreparePhase(
   await enqueueJobPhase(env, job.id, 'review');
 }
 
+/**
+ * Coordinates the model review of the PR, iterating over modified files and handling retry and fallback logic.
+ */
 async function runReviewPhase(
   env: Env,
   job: PersistedReviewJob,
@@ -610,6 +655,9 @@ async function runReviewPhase(
   const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
   const failureModelId = config.model?.main ?? 'unconfigured';
   let failureModelProviderPromise: Promise<string | null> | null = null;
+  /**
+   * Resolves the provider of the model that failed the previous attempt, lazily and caching the result.
+   */
   const resolveFailureModelProvider = () => {
     failureModelProviderPromise ??= resolveModelProviderName(env, failureModelId);
     return failureModelProviderPromise;
@@ -736,9 +784,13 @@ async function runReviewPhase(
   // abort point for this loop; this heartbeat only ever refreshes the lease
   // and pings the check-run, and never throws into the review path.
   const heartbeatState = { last: Date.now() };
+  /**
+   * Sends a heartbeat for the current job lease, if the last one was longer than the required threshold.
+   */
   const maybeHeartbeat = async () => {
-    if (Date.now() - heartbeatState.last < 30_000) return;
-    heartbeatState.last = Date.now();
+    const currently = Date.now();
+    if (currently - heartbeatState.last < 30_000) return;
+    heartbeatState.last = currently;
     logReviewStep({ jobId: job.id, phase: 'review', model: 'heartbeat', durationMs: 0, findings: 0 });
     await heartbeatJobLease(env, job.id, leaseOwner, JOB_LEASE_SECONDS).catch((err) => logger.warn('Heartbeat lease refresh failed (ignored)', err));
     if (job.checkRunId) {
@@ -781,6 +833,9 @@ async function runReviewPhase(
       }
     }
 
+    /**
+     * Re-evaluates or re-uses the review plan for a single file, invoking `reviewAndPersistFile` if needed.
+     */
     const reviewTask = async () => {
       if (!inherited) {
         await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, filePlan, resolveFailureModelProvider, maybeHeartbeat, existingReview);
@@ -1276,6 +1331,9 @@ async function delegateToEngine(
   }
 }
 
+/**
+ * Runs the review plan for a single file, handles model errors and fallbacks, and persists the findings.
+ */
 async function reviewAndPersistFile(
   env: Env,
   job: PersistedReviewJob,
@@ -1627,6 +1685,9 @@ async function reviewAndPersistFile(
   }
 }
 
+/**
+ * Completes the review job, aggregating all findings into a PR summary comment and updating the GitHub check run status.
+ */
 async function runFinalizePhase(
   env: Env,
   job: PersistedReviewJob,
@@ -1915,6 +1976,9 @@ async function runFinalizePhase(
 // Throws JOB_SUPERSEDED if a newer commit/job has taken over this PR, or the PR
 // was merged/closed, so the current invocation stops before spending more model
 // calls on stale code.
+/**
+ * Asserts that the job has not been superseded, merged, or closed, throwing an error if it has.
+ */
 async function checkSuperseded(env: Env, jobId: string) {
   const currentJob = await getJobForProcessing(env, jobId);
   if (currentJob && ['superseded', 'merged', 'closed'].includes(currentJob.status)) {
@@ -2086,11 +2150,17 @@ async function runChangelogPhase(
   await github.updateIssueComment(job.owner, job.repo, job.statusCommentId, body);
 }
 
+/**
+ * Refreshes the lease on the current job and checks if it has been superseded.
+ */
 async function heartbeatAndCheckSuperseded(env: Env, jobId: string, leaseOwner: string) {
   await heartbeatJobLease(env, jobId, leaseOwner, JOB_LEASE_SECONDS);
   await checkSuperseded(env, jobId);
 }
 
+/**
+ * Places a job continuation onto the queue for a specific phase (e.g., 'review' or 'finalize').
+ */
 async function enqueueJobPhase(
   env: Env,
   jobId: string,
@@ -2108,10 +2178,16 @@ async function enqueueJobPhase(
   );
 }
 
+/**
+ * Checks if a specific step in the job's execution history has completed successfully.
+ */
 function hasCompletedStep(job: PersistedReviewJob, stepName: string) {
   return job.steps.some((step) => step.name === stepName && step.status === 'done');
 }
 
+/**
+ * Marks a job as failed in the database and updates the corresponding GitHub check run with the failure message.
+ */
 async function failJobAndCheckRun(
   env: Env,
   job: PersistedReviewJob,
@@ -2188,6 +2264,9 @@ type HousekeepingChange = {
   existingSha?: string;
 };
 
+/**
+ * Evaluates the repository for documentation gaps and stages a background Jules task if enabled.
+ */
 async function evaluateAndStageJulesDocsTask(
   env: Env, job: PersistedReviewJob, github: GitHubService, model: ModelService, config: RepoConfig,
 ) {
@@ -2218,6 +2297,9 @@ async function evaluateAndStageJulesDocsTask(
   });
 }
 
+/**
+ * Automatically standardizes the repository format using configured rules (e.g., Prettier/ESLint fixes).
+ */
 async function standardizeRepository(
   env: Env,
   job: PersistedReviewJob,

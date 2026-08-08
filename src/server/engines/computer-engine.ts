@@ -83,10 +83,16 @@ export class ComputerEngineError extends Error {
   }
 }
 
+/**
+ * Determines whether an error thrown by the computer engine is retryable.
+ */
 export function isRetryableComputerEngineError(err: unknown): boolean {
   return err instanceof ComputerEngineError && err.retryable;
 }
 
+/**
+ * Provides a string description for an error, handling unknown types.
+ */
 function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }

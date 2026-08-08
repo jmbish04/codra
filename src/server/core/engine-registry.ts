@@ -18,6 +18,9 @@ export const engineRegistry: Record<EngineName, EngineFactory> = {
   computer: (env) => new ComputerEngine(env),
 };
 
+/**
+ * Retrieves the engine factory function for a given engine name.
+ */
 export function getEngineFactory(name: EngineName): EngineFactory {
   return engineRegistry[name];
 }

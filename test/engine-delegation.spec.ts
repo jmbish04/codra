@@ -7,6 +7,9 @@ import { resolveEngine } from '@server/core/engine-selector';
 import type { ReviewEngine } from '@server/core/review-engine';
 import { OpenCodeError } from '@server/engines/opencode-client';
 
+/**
+ * Creates a mock commit SHA for testing.
+ */
 const sha = (char: string) => char.repeat(40);
 
 // Same shape as review-flow.spec.ts's mocks — reused verbatim so the queue-driven
@@ -76,6 +79,9 @@ vi.mock('@server/core/engine-selector', async (importOriginal) => {
   return { ...actual, resolveEngine: vi.fn() };
 });
 
+/**
+ * Creates a mock review engine instance.
+ */
 function stubEngine(reviewPullRequest: ReviewEngine['reviewPullRequest']): ReviewEngine {
   return { name: 'opencode', isConfigured: () => true, healthCheck: vi.fn(async () => true), reviewPullRequest };
 }
@@ -86,6 +92,9 @@ const TIMEOUT_MS = 60_000;
 dbDescribe('Engine delegation in runReviewPhase', () => {
   const env = createTestEnv();
 
+  /**
+   * Processes a review job and synchronously drains the resulting queue of continuations.
+   */
   async function runAndDrain(message: Parameters<typeof runReviewJob>[1]) {
     (env.REVIEW_QUEUE as any).sent.length = 0;
     await runReviewJob(env, message);

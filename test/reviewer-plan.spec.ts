@@ -62,6 +62,9 @@ describe('selectFilePlanForBudget', () => {
     const perFile = fullPlan.length + 2;
     let reserved = 0;
     const used = 32;
+    /**
+     * Predicate to check if a required token amount fits within a hard-coded budget.
+     */
     const hasBudget = (needed: number) => used + needed + reserved <= 50;
 
     expect(selectFilePlanForBudget(fullPlan, 0, (needed) => hasBudget(needed))).toEqual({
