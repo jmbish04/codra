@@ -144,7 +144,23 @@
 		"CF_DLQ_ID": "",
 		"STANDARDIZATION_REPO": "jmbish04/core-github-standardization",
 		"AI_GATEWAY_ID": "codra",
+		// Spec 2 source-aware engines: cloudflared Tunnel URL to the Mac's
+		// OpenCode server (see docs/opencode-setup.md, Task 7 runbook). Empty
+		// string = unconfigured; OpenCodeEngine.isConfigured(env) is false and
+		// resolveEngine skips it — no behavior change until this is set.
+		"OPENCODE_TUNNEL_URL": "",
 	},
+	// Spec 2 source-aware engines — NOT added yet, needs real account resources
+	// provisioned first (Task 7 runbook has the full setup steps):
+	//   - secrets_store_secrets entries for OPENCODE_ACCESS_CLIENT_ID and
+	//     OPENCODE_ACCESS_CLIENT_SECRET (Cloudflare Access service-token
+	//     credentials for the cloudflared Tunnel in front of the Mac's
+	//     OpenCode server).
+	//   - a Workers VPC service binding named OPENCODE_VPC pointing at the
+	//     Mac's OpenCode service, as an alternative/preferred transport to
+	//     OPENCODE_TUNNEL_URL.
+	// OpenCodeClient (opencode-client.ts) already reads these defensively —
+	// their absence just means OpenCodeEngine.isConfigured(env) is false.
 	"secrets_store_secrets": [
 		{
 			"binding": "CORE_GITHUB_API_GITHUB_APP_PRIVATE_KEY_PT1",
