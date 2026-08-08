@@ -56,4 +56,26 @@ describe('selectFilePlanForBudget', () => {
     const decision = selectFilePlanForBudget(['bugs', 'performance'], 0, () => false);
     expect(decision).toEqual({ action: 'proceed', plan: ['bugs'] });
   });
+
+  it('accounts for reserved subrequests from earlier files in the same chunk', () => {
+    const fullPlan: ReviewerId[] = ['security', 'correctness', 'bugs', 'performance', 'quality', 'docs'];
+    const perFile = fullPlan.length + 2;
+    let reserved = 0;
+    const used = 32;
+    const hasBudget = (needed: number) => used + needed + reserved <= 50;
+
+    expect(selectFilePlanForBudget(fullPlan, 0, (needed) => hasBudget(needed))).toEqual({
+      action: 'proceed',
+      plan: fullPlan,
+    });
+    reserved += perFile;
+
+    expect(selectFilePlanForBudget(fullPlan, 1, (needed) => hasBudget(needed))).toEqual({
+      action: 'proceed',
+      plan: fullPlan,
+    });
+    reserved += perFile;
+
+    expect(selectFilePlanForBudget(fullPlan, 2, (needed) => hasBudget(needed))).toEqual({ action: 'defer' });
+  });
 });

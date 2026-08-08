@@ -4,7 +4,11 @@ const THRESHOLD = 5;
 const COOLDOWN_MS = 60_000;
 
 /** Per-engine/provider breaker in KV. Trips only on retryable failures the
- *  caller decides to record (connectivity/429/503/timeout) — never on auth. */
+ *  caller decides to record (connectivity/429/503/timeout) — never on auth.
+ *  Keyed globally per engine name (`breaker:<name>`), not per repo — for a
+ *  single shared OpenCode/Computer backend, one repo's connectivity failures
+ *  demote ALL repos to native for the 60s cooldown. Intended for a shared
+ *  backend; noted here in case that assumption ever changes. */
 export class CircuitBreaker {
   constructor(private kv: KVNamespace, private name: string) {}
   private key() { return `breaker:${this.name}`; }

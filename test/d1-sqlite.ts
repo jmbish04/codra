@@ -27,12 +27,21 @@ export function createD1(migrationsDir: string): D1Database {
   const files = readdirSync(migrationsDir)
     .filter((file) => file.endsWith('.sql'))
     .sort();
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS d1_migrations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+    )
+  `);
   for (const file of files) {
     const sqlText = readFileSync(path.join(migrationsDir, file), 'utf8');
     for (const statement of sqlText.split('--> statement-breakpoint')) {
       const trimmed = statement.trim();
       if (trimmed) db.exec(trimmed);
     }
+    const tag = file.replace(/\.sql$/, '');
+    db.prepare('INSERT OR IGNORE INTO d1_migrations (name) VALUES (?)').run(tag);
   }
 
   function prepare(sql: string) {
@@ -46,6 +55,10 @@ export function createD1(migrationsDir: string): D1Database {
         async all() {
           stmt.setReturnArrays(false);
           return { results: stmt.all(...bound), success: true, meta: {} };
+        },
+        async first<T = unknown>() {
+          stmt.setReturnArrays(false);
+          return (stmt.get(...bound) ?? null) as T | null;
         },
         async run() {
           const result = stmt.run(...bound);
@@ -67,7 +80,10 @@ export function createD1(migrationsDir: string): D1Database {
       };
     }
 
-    return { bind };
+    return { bind, first: async () => {
+      stmt.setReturnArrays(false);
+      return stmt.get() ?? null;
+    } };
   }
 
   return {

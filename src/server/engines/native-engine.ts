@@ -11,7 +11,8 @@ import { REVIEWERS, buildReviewerSystemPrompt } from '@server/prompts/reviewers'
  */
 export class NativeEngine implements ReviewEngine {
   readonly name = 'native' as const;
-  async healthCheck() { return true; } // always available
+  async healthCheck(_signal?: AbortSignal) { return true; } // always available
+  isConfigured(_env: Env) { return true; } // always available
 
   async reviewPullRequest(ctx: ReviewContext): Promise<EngineReviewResult> {
     const plan = planReviewers(ctx.totalLineCount, ctx.files.length, ctx.config.review);

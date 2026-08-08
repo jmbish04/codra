@@ -25,5 +25,13 @@ export type EngineReviewResult = { comments: ParsedReviewComment[]; perReviewer:
 export interface ReviewEngine {
   readonly name: 'opencode' | 'computer' | 'native';
   reviewPullRequest(ctx: ReviewContext): Promise<EngineReviewResult>;
-  healthCheck(): Promise<boolean>;
+  /** signal is aborted if the caller's timeout fires — real engines should
+   *  forward it into their fetch so a stalled probe cancels promptly. */
+  healthCheck(signal?: AbortSignal): Promise<boolean>;
+  /** Cheap, synchronous, NO I/O — does this engine even have the infra/
+   *  bindings to ever be viable (a transport binding present, a factory
+   *  available)? resolveEngine skips unconfigured candidates before
+   *  touching the CircuitBreaker/KV or calling healthCheck, so the default
+   *  'auto' config with nothing provisioned does zero KV I/O per job. */
+  isConfigured(env: Env): boolean;
 }

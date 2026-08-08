@@ -1,0 +1,31 @@
+# Template — run by the operator, not by CI/agents.
+#
+# cloudflared named-tunnel config for Codra's OpenCodeEngine fallback
+# transport (docs/opencode-setup.md, Section B). This is the FALLBACK path
+# only — Workers VPC (Section C) is primary; OpenCodeClient tries VPC first
+# and only falls back to this tunnel on a connectivity failure.
+#
+# Setup (see docs/opencode-setup.md Section B for full steps):
+#   cloudflared tunnel login
+#   cloudflared tunnel create codra-opencode
+#   cp scripts/opencode/cloudflared-config.template.yml ~/.cloudflared/config.yml
+#   # fill in the <FILL_ME_*> placeholders below using what `tunnel create`
+#   # printed, then:
+#   cloudflared tunnel route dns codra-opencode <FILL_ME_PUBLIC_HOSTNAME>
+#   cloudflared tunnel run codra-opencode
+#
+# No secrets belong in this file. The Cloudflare Access service token
+# (Client ID/Secret) that protects this hostname is generated separately in
+# the Zero Trust dashboard and stored in Cloudflare Secrets Store — never
+# here, never in wrangler.jsonc, never committed.
+
+tunnel: <FILL_ME_TUNNEL_UUID>
+credentials-file: <FILL_ME_CREDENTIALS_FILE_PATH>  # e.g. ~/.cloudflared/<FILL_ME_TUNNEL_UUID>.json
+
+ingress:
+  # Must match the --port the OpenCode server was started with
+  # (com.codra.opencode.plist) and the port in OPENCODE_TUNNEL_URL.
+  - hostname: <FILL_ME_PUBLIC_HOSTNAME>
+    service: http://localhost:4096
+  # Required catch-all — cloudflared refuses to start without one.
+  - service: http_status:404

@@ -1,5 +1,22 @@
 import type { ParsedReviewComment } from '@shared/schema';
 
+const SEVERITY_RANKS: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3, nit: 4 };
+
+/** Applies min_severity filtering, severity ordering, and max_comments cap for
+ *  finalize. `omittedCount` counts only findings dropped by the cap (not by
+ *  min_severity), so the PR summary note stays accurate. */
+export function limitFinalReviewComments(
+  comments: ParsedReviewComment[],
+  minSeverity: string,
+  maxComments: number,
+): { comments: ParsedReviewComment[]; omittedCount: number } {
+  const minRank = SEVERITY_RANKS[minSeverity] ?? 4;
+  const filtered = comments.filter((c) => (SEVERITY_RANKS[c.severity] ?? 4) <= minRank);
+  filtered.sort((a, b) => (SEVERITY_RANKS[a.severity] ?? 4) - (SEVERITY_RANKS[b.severity] ?? 4));
+  const omittedCount = Math.max(0, filtered.length - maxComments);
+  return { comments: filtered.slice(0, maxComments), omittedCount };
+}
+
 /** One specialized reviewer's raw model call result for a single file. */
 export type ReviewerCallResult = {
   reviewer: string;

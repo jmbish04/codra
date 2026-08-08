@@ -790,4 +790,79 @@ dbDescribe('Review Flow Lifecycle', () => {
     getFileSpy.mockRestore();
     getDiffSpy.mockRestore();
   }, REVIEW_FLOW_TIMEOUT_MS);
+
+  it('finalize re-enqueues review when seeded pending placeholders remain', async () => {
+    const { GitHubService } = await import('@server/services/github');
+    const repo = `test-repo-${Date.now()}-pending-finalize`;
+    const headSha = sha('e');
+    const getDiffSpy = vi.spyOn(GitHubService.prototype, 'getPullRequestDiff').mockResolvedValue(
+      generateMockDiff([
+        { path: 'src/done.ts', content: 'done();' },
+        { path: 'src/pending.ts', content: 'pending();' },
+      ]),
+    );
+
+    const job = await insertJob(env, {
+      installationId: '123',
+      owner: 'test-owner',
+      repo,
+      prNumber: 9,
+      prTitle: 'Pending finalize',
+      prAuthor: 'author',
+      commitSha: headSha,
+      baseSha: sha('f'),
+      trigger: 'auto',
+      headRef: 'feature',
+      baseRef: 'main',
+      configSnapshot: defaultRepoConfig,
+    });
+    await updateJobFileCount(env, job.id, 2);
+    await updateJobStep(env, job.id, 'Preparation', { status: 'done' });
+    await updateJobStep(env, job.id, 'Reviewing Files', { status: 'running' });
+    await upsertFileReview(env, job.id, {
+      filePath: 'src/done.ts',
+      fileStatus: 'done',
+      modelUsed: 'test-model',
+      modelProvider: 'test-provider',
+      diffLineCount: 1,
+      diffInput: 'diff',
+      rawAiOutput: '{}',
+      parsedComments: [],
+      inputTokens: 1,
+      outputTokens: 1,
+      durationMs: 1,
+      verdict: 'approve',
+      fileSummary: 'ok',
+      errorMessage: null,
+    });
+    await upsertFileReview(env, job.id, {
+      filePath: 'src/pending.ts',
+      fileStatus: 'pending',
+      modelUsed: 'pending',
+      diffLineCount: 1,
+      diffInput: 'diff',
+      rawAiOutput: null,
+      parsedComments: [],
+      inputTokens: null,
+      outputTokens: null,
+      durationMs: null,
+      verdict: null,
+      fileSummary: null,
+      errorMessage: null,
+    });
+
+    (env.REVIEW_QUEUE as any).sent.length = 0;
+    const result = await runReviewJob(env, {
+      jobId: job.id,
+      deliveryId: 'delivery-pending-finalize',
+      phase: 'finalize',
+    });
+    expect(result).toEqual({ action: 'ack' });
+    expect((env.REVIEW_QUEUE as any).sent[0]).toMatchObject({ jobId: job.id, phase: 'review' });
+
+    const jobAfter = await getJobForProcessing(env, job.id);
+    expect(jobAfter?.status).not.toBe('done');
+
+    getDiffSpy.mockRestore();
+  }, REVIEW_FLOW_TIMEOUT_MS);
 });

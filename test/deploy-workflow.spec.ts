@@ -11,6 +11,13 @@ describe('buildDeployWorkflowYaml', () => {
     expect(yaml).toContain('CLOUDFLARE_API_TOKEN');
     expect(yaml).toContain('CLOUDFLARE_ACCOUNT_ID');
   });
+  it('applies remote D1 migrations before deploying the Worker', () => {
+    const migrateIdx = yaml.indexOf('Apply remote D1 migrations');
+    const deployIdx = yaml.indexOf('Deploy Worker');
+    expect(migrateIdx).toBeGreaterThan(-1);
+    expect(deployIdx).toBeGreaterThan(migrateIdx);
+    expect(yaml).toContain("github.event.inputs.action == 'deploy' || github.event.inputs.action == 'migrate-db'");
+  });
   it('ships the push-to-main auto-deploy block commented out', () => {
     // every line of the push trigger must be commented
     expect(yaml).toMatch(/#\s*on:\s*\n#\s*push:/);
