@@ -23,6 +23,9 @@ export const jobs = sqliteTable('jobs', {
   commit_sha: blob('commit_sha').notNull(),
   base_sha: blob('base_sha').notNull(),
   trigger: text('trigger').notNull(),
+  // Which checks this job runs: { codeReview, docstring, toolbox }. NULL is the
+  // legacy shape { codeReview: true, docstring: false, toolbox: false }.
+  scope: text('scope', { mode: 'json' }),
   status: text('status').notNull().default('queued'),
   verdict: text('verdict'),
   pr_title: text('pr_title'),
