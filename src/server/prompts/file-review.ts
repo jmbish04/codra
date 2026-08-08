@@ -25,12 +25,18 @@ Your goal is to identify bugs, security vulnerabilities, performance bottlenecks
 - P2: Performance issue, maintainability concern, or potential future bug
 - P3: Nit — style, documentation, or minor improvement`;
 
+/**
+ * Builds the system prompt for file review, incorporating configured guidelines and personas.
+ */
 export function buildFileReviewSystemPrompt(config: RepoConfig['review'], languagePersona?: string) {
   const persona = languagePersona ? ` as ${languagePersona}` : '';
   const prompt = fileReviewSystemPromptBase.replace('{{MAX_COMMENTS}}', config.max_comments.toString());
   return `You are a world-class professional senior code reviewer${persona}. ${prompt}`;
 }
 
+/**
+ * Assembles the system and user prompts to review a single file change.
+ */
 export function buildFileReviewPrompts(input: {
   file: FileDiff;
   prTitle: string | null;
@@ -80,6 +86,9 @@ export function buildFileReviewPrompts(input: {
   return { systemPrompt, userPrompt };
 }
 
+/**
+ * Renders a file diff object into a text representation for the prompt.
+ */
 function renderFileDiff(file: FileDiff) {
   const lines = [`diff --git a/${file.previousPath ?? file.path} b/${file.path}`];
   for (const hunk of file.hunks) {

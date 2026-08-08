@@ -73,9 +73,33 @@ Codra listens to GitHub pull request events, runs AI-powered review jobs, posts 
 
 ## Installation, Running, and Testing
 
-- **Installation**: Use `pnpm install` to install dependencies.
-- **Running**: Start the local development server (client and worker) using `npm run dev`. Generate database migrations with `npm run db:generate` and apply them using `npm run migrate:local`.
-- **Testing**: Run the test suite (Vitest + Playwright) via `npm test` or in watch mode using `npm run test:watch`. No external database is needed, as tests run on an in-memory SQLite D1 instance.
+Codra uses `pnpm` for dependency management.
+
+1. **Install dependencies:**
+   ```bash
+   pnpm install
+   ```
+
+2. **Database setup:**
+   Generate and apply the local SQLite schema using D1:
+   ```bash
+   pnpm run db:generate
+   pnpm run migrate:local
+   ```
+
+3. **Run locally:**
+   Start the local development server (client and worker):
+   ```bash
+   npm run dev
+   ```
+
+4. **Run tests:**
+   Execute the test suite (Vitest and Playwright) and typechecker:
+   ```bash
+   npm test
+   npm run typecheck
+   ```
+   *Note: No external database is needed; tests run on an in-memory SQLite D1 instance.*
 
 ## Docs Suite
 
@@ -93,46 +117,10 @@ The internal documentation suite lives in the `docs/` directory. It includes doc
   secrets (`src/server/core/github-secrets.ts`) requires the GitHub App's
   **Actions Secrets: write** permission; without it, Codra writes the secret
   names and setup steps into the deploy-workflow PR body instead.
-## Development
-
-### Setup & Run
-1. Install dependencies: `pnpm install`
-2. Start the local development server: `npm run dev`
-
-### Testing
-Execute the test suite (Vitest and Playwright) using: `npm test`
-
-## Development & Testing
-
-Codra uses `pnpm` for dependency management.
-
-1. **Install dependencies:**
-   ```bash
-   pnpm install
-   ```
-2. **Database setup:**
-   Generate and apply the local SQLite schema using D1:
-   ```bash
-   pnpm run db:generate
-   pnpm run migrate:local
-   ```
-3. **Run locally:**
-   Start the local development server (client and worker):
-   ```bash
-   pnpm run dev
-   ```
-4. **Run tests:**
-   Execute the test suite (Vitest and Playwright):
-   ```bash
-   pnpm test
-   ```
 
 ## Documentation
 
 The full setup and operations guides live at [codra.run/docs](https://codra.run/docs). The internal documentation suite for the repository (such as the rebuild plan and roadmap) lives in the `docs/` directory at the repository root.
-For local setup and architectural context, see the [docs/](docs/) suite in this repository.
-
-The full setup and operations guides live at [codra.run/docs](https://codra.run/docs).
 
 - [Installation guide](https://codra.run/docs/installation)
 - [Configuration guide](https://codra.run/docs/configuration)

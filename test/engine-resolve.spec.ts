@@ -4,6 +4,9 @@ import type { ReviewEngine } from '@server/core/review-engine';
 import type { RepoConfig } from '@shared/schema';
 import { defaultRepoConfig } from '@shared/schema';
 
+/**
+ * Creates a mock KV namespace for testing.
+ */
 function fakeKv() {
   const m = new Map<string, string>();
   return {
@@ -13,6 +16,9 @@ function fakeKv() {
   } as any;
 }
 
+/**
+ * Creates a mock review engine instance with configurable health and provision state.
+ */
 function stubEngine(name: 'opencode' | 'computer' | 'native', healthy: boolean, configured = true): ReviewEngine {
   return {
     name,
@@ -22,10 +28,16 @@ function stubEngine(name: 'opencode' | 'computer' | 'native', healthy: boolean, 
   };
 }
 
+/**
+ * Generates a partial repository configuration with the specified engine setting.
+ */
 function config(engine: RepoConfig['review']['engine']): RepoConfig {
   return { ...defaultRepoConfig, review: { ...defaultRepoConfig.review, engine } };
 }
 
+/**
+ * Creates a mock environment referencing the specified KV store.
+ */
 function env(kv: any): Env {
   return { APP_KV: kv } as any;
 }
