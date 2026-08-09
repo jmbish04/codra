@@ -4,6 +4,7 @@ import { and, desc, eq, isNull, isNotNull } from 'drizzle-orm';
 
 export type JulesSessionState = 'staged' | 'launched' | 'skipped' | 'error';
 export type JulesSessionRow = typeof julesSessions.$inferSelect;
+export type JulesSessionCategory = 'INTERNAL_CODRA' | 'EXTERNAL_MANUAL' | 'EXTERNAL_CI';
 
 export type StageJulesSessionInput = {
   owner: string;
@@ -13,6 +14,9 @@ export type StageJulesSessionInput = {
   prompt: string;
   gapSummary: string;
   prCommentId?: number | null;
+  category?: JulesSessionCategory;
+  kind?: string;
+  targetFiles?: string[];
 };
 
 /** Insert a staged session, or update the existing non-terminal one for this PR. */
@@ -31,6 +35,7 @@ export async function stageJulesSession(env: Pick<Env, 'DB'>, input: StageJulesS
       .set({
         prompt: input.prompt,
         gap_summary: input.gapSummary,
+        target_files: input.targetFiles ?? existing[0].target_files,
         triggering_job_id: input.triggeringJobId ?? existing[0].triggering_job_id,
         pr_comment_id: input.prCommentId ?? existing[0].pr_comment_id,
         updated_at: new Date().toISOString(),
@@ -48,6 +53,9 @@ export async function stageJulesSession(env: Pick<Env, 'DB'>, input: StageJulesS
     prompt: input.prompt,
     gap_summary: input.gapSummary,
     pr_comment_id: input.prCommentId ?? null,
+    category: input.category ?? 'INTERNAL_CODRA',
+    kind: input.kind ?? 'docs',
+    target_files: input.targetFiles ?? [],
   }).returning();
   return row;
 }

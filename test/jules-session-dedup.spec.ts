@@ -15,3 +15,24 @@ describe('jules_sessions ledger columns', () => {
     expect(row.target_files).toEqual([]);
   });
 });
+
+describe('stageJulesSession threads ledger fields', () => {
+  let env: Env;
+  beforeEach(() => { env = createTestEnv(); });
+
+  it('persists explicit targetFiles and keeps them on update', async () => {
+    const first = await stageJulesSession(env, {
+      owner: 'o', repo: 'r', triggeringPrNumber: 2, prompt: 'p1', gapSummary: 'g1',
+      targetFiles: ['src/a.ts', 'src/b.ts'],
+    });
+    expect(first.target_files).toEqual(['src/a.ts', 'src/b.ts']);
+
+    // Re-stage the same PR (upsert path): new files replace the old set.
+    const second = await stageJulesSession(env, {
+      owner: 'o', repo: 'r', triggeringPrNumber: 2, prompt: 'p2', gapSummary: 'g2',
+      targetFiles: ['src/c.ts'],
+    });
+    expect(second.id).toBe(first.id);
+    expect(second.target_files).toEqual(['src/c.ts']);
+  });
+});
