@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { stageJulesSession } from '@server/db/jules-sessions';
+import { stageJulesSession, markJulesLaunched, findOutstandingCodraDocsSession } from '@server/db/jules-sessions';
+import { setJulesSessionCreatedPr } from '@server/db/jules-interactions';
 import { createTestEnv } from './helpers';
 
 describe('jules_sessions ledger columns', () => {
@@ -49,5 +50,34 @@ describe('stageJulesSession threads ledger fields', () => {
     });
     expect(second.id).toBe(first.id);
     expect(second.target_files).toEqual(['src/x.ts']);
+  });
+});
+
+describe('findOutstandingCodraDocsSession', () => {
+  let env: Env;
+  beforeEach(() => { env = createTestEnv(); });
+
+  async function launched(owner: string, repo: string, pr: number, sessionId: string) {
+    const s = await stageJulesSession(env, { owner, repo, triggeringPrNumber: pr, prompt: 'p', gapSummary: 'g' });
+    await markJulesLaunched(env, s.id, { sessionId, sessionUrl: 'u', sessionState: 'IN_PROGRESS' });
+    return s;
+  }
+
+  it('finds a launched docs session with no PR yet', async () => {
+    await launched('o', 'r', 1, 'sess-A');
+    const found = await findOutstandingCodraDocsSession(env, { owner: 'o', repo: 'r' });
+    expect(found?.session_id).toBe('sess-A');
+  });
+
+  it('ignores a session that already opened a PR', async () => {
+    await launched('o', 'r', 1, 'sess-A');
+    await setJulesSessionCreatedPr(env, 'sess-A', { number: 5, url: 'https://github.com/o/r/pull/5' });
+    expect(await findOutstandingCodraDocsSession(env, { owner: 'o', repo: 'r' })).toBeNull();
+  });
+
+  it('ignores still-staged (not launched) sessions and other repos', async () => {
+    await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 1, prompt: 'p', gapSummary: 'g' });
+    await launched('o', 'other', 1, 'sess-B');
+    expect(await findOutstandingCodraDocsSession(env, { owner: 'o', repo: 'r' })).toBeNull();
   });
 });

@@ -129,6 +129,31 @@ export async function listLaunchedSessionsWithoutPr(
     .limit(limit).all();
 }
 
+/**
+ * The one INTERNAL_CODRA docs session that is still running for this repo
+ * (launched, has a session_id, hasn't opened a PR yet). Used to fold a new docs
+ * task into an existing session instead of launching a duplicate.
+ */
+export async function findOutstandingCodraDocsSession(
+  env: Pick<Env, 'DB'>, q: { owner: string; repo: string },
+): Promise<JulesSessionRow | null> {
+  const db = getDb(env);
+  const row = await db.select().from(julesSessions)
+    .where(and(
+      eq(julesSessions.owner, q.owner),
+      eq(julesSessions.repo, q.repo),
+      eq(julesSessions.category, 'INTERNAL_CODRA'),
+      eq(julesSessions.kind, 'docs'),
+      eq(julesSessions.state, 'launched'),
+      isNotNull(julesSessions.session_id),
+      isNull(julesSessions.created_pr_number),
+    ))
+    .orderBy(desc(julesSessions.created_at))
+    .limit(1)
+    .get();
+  return row ?? null;
+}
+
 export async function listJulesSessions(
   env: Pick<Env, 'DB'>, q: { owner?: string; repo?: string; limit: number; offset: number },
 ): Promise<JulesSessionRow[]> {
