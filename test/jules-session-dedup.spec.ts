@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { stageJulesSession, markJulesLaunched, findOutstandingCodraDocsSession } from '@server/db/jules-sessions';
 import { setJulesSessionCreatedPr } from '@server/db/jules-interactions';
 import { createTestEnv } from './helpers';
+import { collectTargetFiles } from '@server/core/jules-docs-gap';
 
 describe('jules_sessions ledger columns', () => {
   let env: Env;
@@ -79,5 +80,25 @@ describe('findOutstandingCodraDocsSession', () => {
     await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 1, prompt: 'p', gapSummary: 'g' });
     await launched('o', 'other', 1, 'sess-B');
     expect(await findOutstandingCodraDocsSession(env, { owner: 'o', repo: 'r' })).toBeNull();
+  });
+});
+
+describe('collectTargetFiles', () => {
+  it('flattens docstring gap paths, ignoring non-docstring items', () => {
+    const report = {
+      summary: 's',
+      items: [
+        { kind: 'readme', reason: 'r' },
+        { kind: 'docstrings', reason: 'r', docstrings: [
+          { path: 'src/a.ts', functions: ['f'] },
+          { path: 'src/b.ts', functions: ['g', 'h'] },
+        ] },
+      ],
+    } as const;
+    expect(collectTargetFiles(report as any)).toEqual(['src/a.ts', 'src/b.ts']);
+  });
+
+  it('returns [] when there are no docstring items', () => {
+    expect(collectTargetFiles({ summary: 's', items: [] } as any)).toEqual([]);
   });
 });

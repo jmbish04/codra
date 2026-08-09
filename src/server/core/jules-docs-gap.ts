@@ -17,6 +17,11 @@ export type DocsGapItem = {
 
 export type DocsGapReport = { items: DocsGapItem[]; summary: string };
 
+/** Flat list of source paths a docs-gap report targets (docstring gaps only). */
+export function collectTargetFiles(report: DocsGapReport): string[] {
+  return report.items.flatMap((i) => i.docstrings?.map((d) => d.path) ?? []);
+}
+
 export type DocsGapJob = { id: string; owner: string; repo: string; prNumber: number; headSha: string };
 
 /** Minimal GitHub surface this module needs — GitHubService satisfies it structurally. */
