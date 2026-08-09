@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { stageJulesSession, markJulesLaunched, findOutstandingCodraDocsSession } from '@server/db/jules-sessions';
+import { stageJulesSession, markJulesLaunched, findOutstandingCodraDocsSession, getJulesSessionById } from '@server/db/jules-sessions';
 import { setJulesSessionCreatedPr } from '@server/db/jules-interactions';
 import { createTestEnv } from './helpers';
 import { collectTargetFiles } from '@server/core/jules-docs-gap';
+import { foldIntoOutstandingDocsSession } from '@server/core/jules';
 
 describe('jules_sessions ledger columns', () => {
   let env: Env;
@@ -100,5 +101,51 @@ describe('collectTargetFiles', () => {
 
   it('returns [] when there are no docstring items', () => {
     expect(collectTargetFiles({ summary: 's', items: [] } as any)).toEqual([]);
+  });
+});
+
+describe('foldIntoOutstandingDocsSession', () => {
+  let env: Env;
+  beforeEach(() => { env = createTestEnv(); });
+
+  function fakeGithub() {
+    const calls: any[] = [];
+    return {
+      calls,
+      getRepo: async () => ({ default_branch: 'main' }),
+      createIssueComment: async (_o: string, _r: string, n: number, body: string) => { calls.push({ n, body }); return { id: 1 }; },
+      updateIssueComment: async (_o: string, _r: string, id: number, body: string) => { calls.push({ id, body }); return {}; },
+    };
+  }
+
+  it('folds into a running session and does not launch a new one', async () => {
+    // Seed an outstanding launched session for the repo.
+    const running = await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 1, prompt: 'first', gapSummary: 'g' });
+    await markJulesLaunched(env, running.id, { sessionId: 'sess-A', sessionUrl: 'u', sessionState: 'IN_PROGRESS' });
+
+    // A fresh staged row from a later PR.
+    const next = await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 2, prompt: 'second', gapSummary: 'g2' });
+
+    const sends: any[] = [];
+    const send = async (_e: any, _k: string, input: any) => { sends.push(input); return { ok: true, interactionId: 'x' }; };
+
+    const folded = await foldIntoOutstandingDocsSession(
+      env, 'api-key', fakeGithub(), { owner: 'o', repo: 'r', prNumber: 2 }, next, send as any,
+    );
+
+    expect(folded).toBe(true);
+    expect(sends).toHaveLength(1);
+    expect(sends[0]).toMatchObject({ sessionId: 'sess-A', kind: 'improve', text: 'second' });
+    const after = await getJulesSessionById(env, next.id);
+    expect(after?.state).toBe('skipped');
+  });
+
+  it('returns false when no session is running (caller launches normally)', async () => {
+    const row = await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 1, prompt: 'p', gapSummary: 'g' });
+    const send = async () => ({ ok: true, interactionId: 'x' });
+    const folded = await foldIntoOutstandingDocsSession(
+      env, 'api-key', fakeGithub(), { owner: 'o', repo: 'r', prNumber: 1 }, row, send as any,
+    );
+    expect(folded).toBe(false);
   });
 });

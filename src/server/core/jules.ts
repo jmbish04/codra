@@ -1,8 +1,8 @@
 import { logger } from '@server/core/logger';
 import { getSecretStoreBinding } from '@server/utils/secrets';
-import { listStagedJulesSessions, markJulesLaunched, markJulesOutcome, listLaunchedSessionsWithoutPr } from '@server/db/jules-sessions';
+import { listStagedJulesSessions, markJulesLaunched, markJulesOutcome, listLaunchedSessionsWithoutPr, findOutstandingCodraDocsSession, type JulesSessionRow } from '@server/db/jules-sessions';
 import { isRepoConnected as realIsRepoConnected, startJulesSession as realStartJulesSession, getJulesSession } from '@server/services/jules';
-import { logLaunch } from '@server/services/jules-interactions';
+import { logLaunch, sendJulesLogged } from '@server/services/jules-interactions';
 import { setJulesSessionCreatedPr } from '@server/db/jules-interactions';
 
 type Deps = { isRepoConnected: typeof realIsRepoConnected; startJulesSession: typeof realStartJulesSession };
@@ -13,6 +13,35 @@ type MergeGithub = {
   createIssueComment(owner: string, repo: string, issueNumber: number, body: string): Promise<{ id: number }>;
   updateIssueComment(owner: string, repo: string, commentId: number, body: string): Promise<unknown>;
 };
+
+/**
+ * If an INTERNAL_CODRA docs session is still running for this repo (launched, no
+ * PR yet), send the new task to it and mark this staged row skipped, instead of
+ * opening a second session. Returns true when folded (caller must skip launch).
+ * `send` is injectable so the decision + logging are testable without network.
+ */
+export async function foldIntoOutstandingDocsSession(
+  env: Env, apiKey: string, github: MergeGithub,
+  ctx: { owner: string; repo: string; prNumber: number }, row: JulesSessionRow,
+  send: typeof sendJulesLogged = sendJulesLogged,
+): Promise<boolean> {
+  const outstanding = await findOutstandingCodraDocsSession(env, { owner: ctx.owner, repo: ctx.repo });
+  if (!outstanding?.session_id) return false;
+
+  await send(env, apiKey, {
+    sessionId: outstanding.session_id, kind: 'improve', text: row.prompt,
+    repository: `${ctx.owner}/${ctx.repo}`, prNumber: ctx.prNumber,
+  });
+  await markJulesOutcome(env, row.id, {
+    state: 'skipped', errorMsg: `Folded into outstanding session ${outstanding.session_id}`,
+  }).catch(() => {});
+
+  const body = `📚 An existing Jules docs session is still running, so Codra sent these documentation gaps to it instead of opening a new one.\n\n- Session: ${outstanding.session_url ?? outstanding.session_id}`;
+  if (row.pr_comment_id != null) await github.updateIssueComment(ctx.owner, ctx.repo, row.pr_comment_id, body).catch(() => {});
+  else await github.createIssueComment(ctx.owner, ctx.repo, ctx.prNumber, body).catch(() => {});
+
+  return true;
+}
 
 /** On PR merge, launch any staged Jules docs sessions. Best-effort; never throws. */
 export async function launchStagedJulesSessions(
@@ -55,6 +84,7 @@ export async function launchStagedJulesSessions(
     let launched = 0;
     for (const row of staged) {
       try {
+        if (await foldIntoOutstandingDocsSession(env, apiKey, github, ctx, row)) continue;
         const s = await deps.startJulesSession(apiKey, { owner: ctx.owner, repo: ctx.repo, branch, prompt: row.prompt, title: 'Codra: documentation improvements' });
         await markJulesLaunched(env, row.id, { sessionId: s.id, sessionUrl: s.url, sessionState: s.state });
         await logLaunch(env, { sessionId: s.id, repository: `${ctx.owner}/${ctx.repo}`, prNumber: ctx.prNumber, text: row.prompt }).catch(() => {});
