@@ -1,5 +1,5 @@
 import { getDb, parseJsonColumn } from './client';
-import { defaultRepoConfig, jobDetailSchema, jobSummarySchema, repoConfigSchema, type RepoConfig } from '@shared/schema';
+import { defaultRepoConfig, jobDetailSchema, jobSummarySchema, repoConfigSchema, type JobScope, type RepoConfig } from '@shared/schema';
 import { getOrCreateRepository } from './repositories';
 import { jobs, repositories, fileReviews, reviewComments, fileReviewCosts } from './schemas';
 import { eq, and, sql, or, lt, gt, like, desc, asc, inArray, notInArray, isNull, isNotNull, ne } from 'drizzle-orm';
@@ -77,6 +77,7 @@ export function mapJob(row: any) {
       prCreatedAt: row.pr_created_at ?? null,
       commitSha: bytesToHex(row.commit_sha),
       trigger: row.trigger,
+      scope: parseJsonColumn(row.scope, null),
       status: row.status,
       verdict: row.verdict,
       fileCount: row.file_count ?? 0,
@@ -129,6 +130,7 @@ export async function insertJob(
     baseRef: string | null;
     configSnapshot?: RepoConfig | null;
     retryOfJobId?: string | null;
+    scope?: JobScope | null;
   },
 ) {
   const db = getDb(env);
@@ -147,6 +149,7 @@ export async function insertJob(
     commit_sha: Array.from(hexToBytes(input.commitSha)),
     base_sha: Array.from(hexToBytes(input.baseSha)),
     trigger: input.trigger,
+    scope: input.scope ?? null,
     status: 'queued',
     config_snapshot: input.configSnapshot ?? defaultRepoConfig,
     head_ref: input.headRef,

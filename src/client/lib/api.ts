@@ -108,7 +108,7 @@ export type ProviderPayload = {
   clearApiKey?: boolean;
   enabled: boolean;
 };
-type RepoConfigPatch = Partial<Pick<RepoConfig, 'review' | 'model'> & { enabled: boolean }>;
+type RepoConfigPatch = Partial<Pick<RepoConfig, 'review' | 'model'> & { enabled: boolean; docstringEnabled: boolean; toolboxEnabled: boolean }>;
 
 /**
  * request
@@ -440,6 +440,13 @@ export const api = {
   },
   syncRepos() {
     return request<SyncReposResponse>('/api/repos/sync', {
+      method: 'POST',
+    });
+  },
+  /** Reset button: turn off all three checks (code review, docstring, toolbox)
+   *  for every repo. Returns how many repo configs were reset. */
+  resetRepos() {
+    return request<{ ok: boolean; count: number }>('/api/repos/reset', {
       method: 'POST',
     });
   },
