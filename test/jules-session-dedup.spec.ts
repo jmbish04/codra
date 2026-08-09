@@ -148,4 +148,24 @@ describe('foldIntoOutstandingDocsSession', () => {
     );
     expect(folded).toBe(false);
   });
+
+  it('never folds an EXTERNAL_MANUAL row into a docs session', async () => {
+    const running = await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 1, prompt: 'first', gapSummary: 'g' });
+    await markJulesLaunched(env, running.id, { sessionId: 'sess-A', sessionUrl: 'u', sessionState: 'IN_PROGRESS' });
+
+    const external = await stageJulesSession(env, {
+      owner: 'o', repo: 'r', triggeringPrNumber: 2, prompt: 'external task', gapSummary: 'g2',
+      category: 'EXTERNAL_MANUAL',
+    });
+
+    const sends: any[] = [];
+    const send = async (_e: any, _k: string, input: any) => { sends.push(input); return { ok: true, interactionId: 'x' }; };
+
+    const folded = await foldIntoOutstandingDocsSession(
+      env, 'api-key', fakeGithub(), { owner: 'o', repo: 'r', prNumber: 2 }, external, send as any,
+    );
+
+    expect(folded).toBe(false);
+    expect(sends).toHaveLength(0);
+  });
 });

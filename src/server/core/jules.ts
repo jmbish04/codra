@@ -25,6 +25,10 @@ export async function foldIntoOutstandingDocsSession(
   ctx: { owner: string; repo: string; prNumber: number }, row: JulesSessionRow,
   send: typeof sendJulesLogged = sendJulesLogged,
 ): Promise<boolean> {
+  // Only fold Codra docs rows — never redirect an external or non-docs task
+  // into a docs session (future EXTERNAL_* / non-docs rows must launch normally).
+  if (row.category !== 'INTERNAL_CODRA' || row.kind !== 'docs') return false;
+
   const outstanding = await findOutstandingCodraDocsSession(env, { owner: ctx.owner, repo: ctx.repo });
   if (!outstanding?.session_id) return false;
 
