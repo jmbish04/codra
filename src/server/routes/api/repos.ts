@@ -26,6 +26,9 @@ const repoConfigPatchSchema = z
     'Repository config patch cannot be empty.',
   );
 
+/**
+ * Docstring for mapWithConcurrency
+ */
 async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
@@ -34,6 +37,9 @@ async function mapWithConcurrency<T, R>(
   const results: R[] = new Array(items.length);
   let nextIndex = 0;
 
+  /**
+   * Docstring for worker
+   */
   async function worker() {
     while (nextIndex < items.length) {
       const currentIndex = nextIndex;
@@ -46,6 +52,9 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+/**
+ * Docstring for createReposRouter
+ */
 export function createReposRouter() {
   const app = new Hono<AppEnv>();
 

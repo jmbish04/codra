@@ -6,6 +6,9 @@ import { countAutoReviewsForPr, MAX_AUTO_REVIEWS_PER_PR } from '@server/db/jobs'
 import { defaultRepoConfig } from '@shared/schema';
 import { createTestEnv } from './helpers';
 
+/**
+ * Docstring for seedRepo
+ */
 async function seedRepo(env: Env): Promise<number> {
   const [row] = await getDb(env).insert(repositories)
     .values({ installation_id: 123, owner: 'test-owner', repo: 'app' })
@@ -13,6 +16,9 @@ async function seedRepo(env: Env): Promise<number> {
   return row.id;
 }
 
+/**
+ * Docstring for seedJob
+ */
 async function seedJob(env: Env, repositoryId: number, prNumber: number, trigger: string): Promise<string> {
   const db = getDb(env);
   const [row] = await db.insert(jobs).values({
@@ -30,6 +36,9 @@ const ALL_ON = { enabled: true, docstringEnabled: true, toolboxEnabled: true };
 const CODE_ONLY = { enabled: true, docstringEnabled: false, toolboxEnabled: false };
 const ALL_OFF = { enabled: false, docstringEnabled: false, toolboxEnabled: false };
 
+/**
+ * Docstring for commentPayload
+ */
 function commentPayload(body: string) {
   return {
     action: 'created',
@@ -40,6 +49,9 @@ function commentPayload(body: string) {
   } as any;
 }
 
+/**
+ * Docstring for pullRequestPayload
+ */
 function pullRequestPayload(sender?: { login: string; type?: string }) {
   return {
     action: 'opened',

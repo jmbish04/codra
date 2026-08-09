@@ -4,6 +4,9 @@ import { getOrCreateRepository } from './repositories';
 import { repoConfigs, repositories, jobs } from './schemas';
 import { eq, and, sql } from 'drizzle-orm';
 
+/**
+ * Docstring for mapRepo
+ */
 function mapRepo(row: any) {
   const parsedJson = normalizeRepoConfig(repoConfigSchema.parse(parseJsonColumn(row.parsed_json, defaultRepoConfig)));
   return repoConfigRecordSchema.parse({
@@ -23,6 +26,9 @@ function mapRepo(row: any) {
   });
 }
 
+/**
+ * Docstring for upsertRepoConfig
+ */
 export async function upsertRepoConfig(
   env: Pick<Env, 'DB'>,
   input: {
@@ -66,6 +72,9 @@ export async function upsertRepoConfig(
     });
 }
 
+/**
+ * Docstring for syncRepoConfig
+ */
 export async function syncRepoConfig(
   env: Pick<Env, 'DB'>,
   input: {
@@ -136,6 +145,9 @@ export async function resetAllRepoConfigs(env: Pick<Env, 'DB'>): Promise<number>
   return rows.length;
 }
 
+/**
+ * Docstring for listRepoConfigs
+ */
 export async function listRepoConfigs(env: Pick<Env, 'DB'>) {
   const db = getDb(env);
   
@@ -179,6 +191,9 @@ export async function listRepoConfigs(env: Pick<Env, 'DB'>) {
   return rows.map(mapRepo);
 }
 
+/**
+ * Docstring for getRepoConfigRecord
+ */
 export async function getRepoConfigRecord(env: Pick<Env, 'DB'>, owner: string, repo: string) {
   const db = getDb(env);
   

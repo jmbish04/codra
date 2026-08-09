@@ -367,10 +367,16 @@ export const DEPRECATED_MODEL_ALIASES: Record<string, string> = {
   [KIMI_K2_5_MODEL]: KIMI_K2_6_MODEL,
 };
 
+/**
+ * Docstring for normalizeModelId
+ */
 export function normalizeModelId(model: string) {
   return DEPRECATED_MODEL_ALIASES[model] ?? model;
 }
 
+/**
+ * Docstring for normalizeRepoModelConfig
+ */
 export function normalizeRepoModelConfig(model: RepoConfig['model']): RepoConfig['model'] {
   return {
     ...model,
@@ -390,6 +396,9 @@ export function normalizeRepoModelConfig(model: RepoConfig['model']): RepoConfig
   };
 }
 
+/**
+ * Docstring for normalizeRepoConfig
+ */
 export function normalizeRepoConfig(config: RepoConfig): RepoConfig {
   return {
     ...config,
