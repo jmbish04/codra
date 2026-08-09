@@ -35,4 +35,19 @@ describe('stageJulesSession threads ledger fields', () => {
     expect(second.id).toBe(first.id);
     expect(second.target_files).toEqual(['src/c.ts']);
   });
+
+  it('preserves existing targetFiles when update omits the field', async () => {
+    const first = await stageJulesSession(env, {
+      owner: 'o', repo: 'r', triggeringPrNumber: 3, prompt: 'p1', gapSummary: 'g1',
+      targetFiles: ['src/x.ts'],
+    });
+    expect(first.target_files).toEqual(['src/x.ts']);
+
+    // Re-stage the same PR WITHOUT targetFiles: existing set should be preserved.
+    const second = await stageJulesSession(env, {
+      owner: 'o', repo: 'r', triggeringPrNumber: 3, prompt: 'p2', gapSummary: 'g2',
+    });
+    expect(second.id).toBe(first.id);
+    expect(second.target_files).toEqual(['src/x.ts']);
+  });
 });
