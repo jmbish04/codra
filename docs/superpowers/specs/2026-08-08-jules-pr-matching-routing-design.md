@@ -258,6 +258,30 @@ Per the repo's D1-only `node:sqlite` in-memory harness:
 App-import specs may hit the known pre-existing `orchestrator.ts` vitest quirk;
 verify via typecheck + build where that occurs.
 
+## Fast-follows carried from the P0+P3 slice
+
+The P0+P3 implementation (dedup + ledger, plan
+`plans/2026-08-08-jules-session-dedup-and-ledger.md`) shipped with two known
+gaps deferred to this work, both surfaced by the final whole-branch review:
+
+1. **`findOutstandingCodraDocsSession` has no recency/terminal bound.** It matches
+   any `state='launched'` docs session with no `created_pr_number`. The only exit
+   from that set today is `setJulesSessionCreatedPr` (fired by the
+   `captureLaunchedSessionPrs` cron when Jules actually opens a PR). A session that
+   stalls or fails on Jules' side and never opens a PR becomes a **permanent
+   per-repo sink** — every future docs task folds into the dead session. When P1/P2
+   touch this query, bound it by `created_at` recency (only fold into sessions
+   launched within N hours) and/or exclude terminal `session_state` values. Mind
+   the timestamp format: `created_at` is SQLite `CURRENT_TIMESTAMP`
+   (`'YYYY-MM-DD HH:MM:SS'`), so any JS-computed threshold must match that format
+   (not `toISOString()`'s `T`/`Z`) for a correct lexicographic compare.
+
+2. **`foldIntoOutstandingDocsSession` swallow can re-fold.** `markJulesOutcome(...
+   'skipped').catch(()=>{})` — if that write silently fails, the row stays
+   `staged` after the caller already skipped launching, so a re-delivered merge
+   webhook could re-fold and re-send. Low harm (duplicate `improve` message), but
+   worth hardening when the interaction ledger is revisited.
+
 ## Open questions
 
 None blocking. Enum string values (`INTERNAL_CODRA` etc.) and the config key name
