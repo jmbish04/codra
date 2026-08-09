@@ -32,10 +32,12 @@ export async function foldIntoOutstandingDocsSession(
   const outstanding = await findOutstandingCodraDocsSession(env, { owner: ctx.owner, repo: ctx.repo });
   if (!outstanding?.session_id) return false;
 
-  await send(env, apiKey, {
+  const res = await send(env, apiKey, {
     sessionId: outstanding.session_id, kind: 'improve', text: row.prompt,
     repository: `${ctx.owner}/${ctx.repo}`, prNumber: ctx.prNumber,
   });
+  // A failed send must not claim success: leave the row staged and let the caller launch a fresh session.
+  if (!res.ok) return false;
   await markJulesOutcome(env, row.id, {
     state: 'skipped', errorMsg: `Folded into outstanding session ${outstanding.session_id}`,
   }).catch(() => {});
@@ -88,6 +90,7 @@ export async function launchStagedJulesSessions(
     let launched = 0;
     for (const row of staged) {
       try {
+        // ponytail: lock-free dedup — two PRs merging concurrently can both miss the outstanding session and both launch; acceptable per the no-blocking-loops design.
         if (await foldIntoOutstandingDocsSession(env, apiKey, github, ctx, row)) continue;
         const s = await deps.startJulesSession(apiKey, { owner: ctx.owner, repo: ctx.repo, branch, prompt: row.prompt, title: 'Codra: documentation improvements' });
         await markJulesLaunched(env, row.id, { sessionId: s.id, sessionUrl: s.url, sessionState: s.state });

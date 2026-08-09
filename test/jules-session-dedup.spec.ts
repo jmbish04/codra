@@ -168,4 +168,22 @@ describe('foldIntoOutstandingDocsSession', () => {
     expect(folded).toBe(false);
     expect(sends).toHaveLength(0);
   });
+
+  it('does not mark the row skipped when the send fails', async () => {
+    // Seed an outstanding launched session for the repo.
+    const running = await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 1, prompt: 'first', gapSummary: 'g' });
+    await markJulesLaunched(env, running.id, { sessionId: 'sess-A', sessionUrl: 'u', sessionState: 'IN_PROGRESS' });
+
+    // A fresh staged row from a later PR whose send to the outstanding session fails.
+    const next = await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 2, prompt: 'second', gapSummary: 'g2' });
+    const sendFail = async () => ({ ok: false, interactionId: 'x' });
+
+    const folded = await foldIntoOutstandingDocsSession(
+      env, 'api-key', fakeGithub(), { owner: 'o', repo: 'r', prNumber: 2 }, next, sendFail as any,
+    );
+
+    expect(folded).toBe(false);
+    const after = await getJulesSessionById(env, next.id);
+    expect(after?.state).not.toBe('skipped');
+  });
 });
