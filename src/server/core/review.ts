@@ -37,7 +37,7 @@ import { detectTestTargets } from '@server/core/test-detection';
 import { runAndReportPrTests } from '@server/core/test-runner';
 import { runDocsReview } from '@server/core/docs-review';
 import { listSecretsStoreSecrets, ensureSecretBindings, type SecretBindingSpec } from '@server/core/secrets-store';
-import { evaluateDocsGaps, buildJulesPrompt } from '@server/core/jules-docs-gap';
+import { evaluateDocsGaps, buildJulesPrompt, collectTargetFiles } from '@server/core/jules-docs-gap';
 import { stageJulesSession } from '@server/db/jules-sessions';
 import { ensureDeployWorkflow } from '@server/core/deploy-workflow';
 import { emitReviewDatapoint, logReviewStep } from '@server/core/review-telemetry';
@@ -2348,6 +2348,8 @@ async function evaluateAndStageJulesDocsTask(
     router: "Match the repository's existing routing setup — inspect how routes/pages are already registered (e.g. react-router, Next.js app router, file-based routing) and follow that exact pattern; do NOT assume a framework.",
   });
 
+  const targetFiles = collectTargetFiles(report);
+
   const comment = await github.createIssueComment(job.owner, job.repo, job.prNumber,
     `📚 **Codra found documentation gaps**\n\n${report.summary}\n\nOnce this PR is **merged**, Codra will open a Jules agent session to address them. (Nothing happens if the PR is closed without merging.)`,
   ).catch(() => null);
@@ -2357,6 +2359,7 @@ async function evaluateAndStageJulesDocsTask(
     triggeringPrNumber: job.prNumber, triggeringJobId: job.id,
     prompt, gapSummary: report.summary,
     prCommentId: comment?.id ?? null,
+    targetFiles,
   });
 }
 
