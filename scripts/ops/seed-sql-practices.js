@@ -37,8 +37,70 @@ const rule2Instructions = [
   }
 ];
 
+// Required Integration Pattern: D1 bulk inserts must chunk by the 100-bound-param
+// cap and flush via db.batch(). The reviewer injects these instructions whenever a
+// changed file touches D1, and flags PRs that violate either anti-pattern.
+const rule3Instructions = [
+  {
+    type: 'h3',
+    children: [{ text: 'D1 Bulk Insert Batching (Required Integration Pattern)' }]
+  },
+  {
+    type: 'p',
+    children: [
+      { text: 'CHECK PROCEDURE — evaluate this file and report pass or violation for the practice "D1 Bulk Insert Batching".' }
+    ]
+  },
+  {
+    type: 'p',
+    children: [
+      { text: 'Trigger: this file reads/writes Cloudflare D1 (Drizzle db.insert/db.update, SQL, or a migration). If it does not, status = pass.' }
+    ]
+  },
+  {
+    type: 'p',
+    children: [
+      { text: 'When triggered, it is a VIOLATION if any of these fail:' }
+    ]
+  },
+  {
+    type: 'ul',
+    children: [
+      {
+        type: 'li',
+        children: [
+          { text: 'Bulk/multi-row inserts must be chunked by ' },
+          { text: 'Math.floor(100 / COLUMNS_PER_ROW)', code: true },
+          { text: ' (D1 caps a query at 100 bound parameters).' }
+        ]
+      },
+      {
+        type: 'li',
+        children: [
+          { text: 'Chunks must be flushed in a single ' },
+          { text: 'db.batch()', code: true },
+          { text: ' call, not a sequential loop of awaited db.insert() calls.' }
+        ]
+      },
+      {
+        type: 'li',
+        children: [
+          { text: 'Database access uses Drizzle ORM + migrations (no raw SQL in standard worker code).' }
+        ]
+      }
+    ]
+  },
+  {
+    type: 'p',
+    children: [
+      { text: 'Report: { practice: "D1 Bulk Insert Batching", status: "pass" | "violation", note: "<what you found>" }.' }
+    ]
+  }
+];
+
 const rule1Json = JSON.stringify(rule1Instructions).replace(/'/g, "''");
 const rule2Json = JSON.stringify(rule2Instructions).replace(/'/g, "''");
+const rule3Json = JSON.stringify(rule3Instructions).replace(/'/g, "''");
 
 const sql = `
 -- Seed ORM Best Practice for Cloudflare Workers
@@ -55,6 +117,17 @@ ON CONFLICT(id) DO UPDATE SET
 -- Seed ORM Best Practice for Python
 INSERT INTO best_practices (id, name, infra_id, criteria, instructions, is_active) VALUES
 ('bp-orm-python', 'ORM Enforcement for Python', 'python', 'sql, select, insert, update, delete', '${rule2Json}', 1)
+ON CONFLICT(id) DO UPDATE SET
+  name = excluded.name,
+  infra_id = excluded.infra_id,
+  criteria = excluded.criteria,
+  instructions = excluded.instructions,
+  is_active = excluded.is_active,
+  updated_at = CURRENT_TIMESTAMP;
+
+-- Seed D1 Bulk Insert Batching Required Integration Pattern for Cloudflare Workers
+INSERT INTO best_practices (id, name, infra_id, criteria, instructions, is_active) VALUES
+('bp-d1-batch-chunking', 'D1 Bulk Insert Batching', 'cloudflare-workers', 'd1, db.insert, .values, db.batch, bulk insert', '${rule3Json}', 1)
 ON CONFLICT(id) DO UPDATE SET
   name = excluded.name,
   infra_id = excluded.infra_id,
