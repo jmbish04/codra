@@ -258,29 +258,34 @@ Per the repo's D1-only `node:sqlite` in-memory harness:
 App-import specs may hit the known pre-existing `orchestrator.ts` vitest quirk;
 verify via typecheck + build where that occurs.
 
-## Fast-follows carried from the P0+P3 slice
+## P0+P3 review hardening (resolved)
 
-The P0+P3 implementation (dedup + ledger, plan
-`plans/2026-08-08-jules-session-dedup-and-ledger.md`) shipped with two known
-gaps deferred to this work, both surfaced by the final whole-branch review:
+The final whole-branch review and a follow-up cursor peer-review of PR #38
+surfaced several gaps in the P0+P3 slice; all were fixed on the branch before
+merge (commits `42c0a7c` DB layer, `0d58b54` launch logic):
 
-1. **`findOutstandingCodraDocsSession` has no recency/terminal bound.** It matches
-   any `state='launched'` docs session with no `created_pr_number`. The only exit
-   from that set today is `setJulesSessionCreatedPr` (fired by the
-   `captureLaunchedSessionPrs` cron when Jules actually opens a PR). A session that
-   stalls or fails on Jules' side and never opens a PR becomes a **permanent
-   per-repo sink** — every future docs task folds into the dead session. When P1/P2
-   touch this query, bound it by `created_at` recency (only fold into sessions
-   launched within N hours) and/or exclude terminal `session_state` values. Mind
-   the timestamp format: `created_at` is SQLite `CURRENT_TIMESTAMP`
-   (`'YYYY-MM-DD HH:MM:SS'`), so any JS-computed threshold must match that format
-   (not `toISOString()`'s `T`/`Z`) for a correct lexicographic compare.
+- **Recency bound on `findOutstandingCodraDocsSession`** — now only folds into
+  sessions launched within a 24h window (`gt(updated_at, now-24h)`, ordered by
+  `updated_at`), so a stalled `launched` session no longer becomes a permanent
+  per-repo sink on deploy. Threshold is ISO-8601 to match the ISO `updated_at`
+  that `markJulesLaunched` writes.
+- **No `target_files` wipe** — `stageJulesSession` treats an empty `targetFiles`
+  as "keep prior" (`input.targetFiles?.length ? … : existing`).
+- **Fold failure degrades to launch** — the fold check in
+  `launchStagedJulesSessions` is wrapped so a transient DB/send error launches
+  normally instead of marking the row `error` (never reprocessed). Combined with
+  `markJulesFolded` replacing the swallowed `markJulesOutcome`, a redelivered
+  merge webhook no longer re-folds (a successful fold marks the row `skipped`, so
+  it drops out of the staged set).
+- **Folded rows keep the session link** (`markJulesFolded` stamps `session_id`
+  and merges target files into the outstanding session), the follow-up sent to
+  Jules is a reframed gap summary rather than the raw kickoff prompt, and the
+  fold count is logged.
 
-2. **`foldIntoOutstandingDocsSession` swallow can re-fold.** `markJulesOutcome(...
-   'skipped').catch(()=>{})` — if that write silently fails, the row stays
-   `staged` after the caller already skipped launching, so a re-delivered merge
-   webhook could re-fold and re-send. Low harm (duplicate `improve` message), but
-   worth hardening when the interaction ledger is revisited.
+Remaining hardening genuinely deferred to P1/P2: excluding terminal
+`session_state` values from the outstanding set (belt-and-suspenders alongside
+the recency bound), and surfacing folded/`skipped` sessions distinctly in the
+operations dashboard.
 
 ## Open questions
 
