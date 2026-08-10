@@ -1,4 +1,4 @@
-import type { ParsedReviewComment } from '@shared/schema';
+import type { BestPracticeCheck, ParsedReviewComment } from '@shared/schema';
 import { mergeBestPracticeChecks } from '@server/core/model-output';
 
 const SEVERITY_RANKS: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3, nit: 4 };
@@ -23,7 +23,7 @@ export type ReviewerCallResult = {
   reviewer: string;
   parsed: {
     comments: ParsedReviewComment[];
-    bestPracticeChecks?: Array<{ practice: string; status: 'pass' | 'violation'; note?: string }>;
+    bestPracticeChecks?: BestPracticeCheck[];
     verdict: 'approve' | 'comment';
     fileSummary: string | null;
     overallCorrectness?: string | null;
@@ -40,7 +40,7 @@ export type ReviewerCallResult = {
 
 export type AggregatedReview = {
   comments: ParsedReviewComment[];
-  bestPracticeChecks: Array<{ practice: string; status: 'pass' | 'violation'; note?: string }>;
+  bestPracticeChecks: BestPracticeCheck[];
   verdict: 'approve' | 'comment';
   fileSummary: string | null;
   overallCorrectness: string | null;

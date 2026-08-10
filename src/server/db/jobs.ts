@@ -1,5 +1,5 @@
 import { getDb, parseJsonColumn } from './client';
-import { defaultRepoConfig, jobDetailSchema, jobSummarySchema, repoConfigSchema, type RepoConfig } from '@shared/schema';
+import { defaultRepoConfig, jobDetailSchema, jobSummarySchema, repoConfigSchema, type BestPracticeCheck, type RepoConfig } from '@shared/schema';
 import { getOrCreateRepository } from './repositories';
 import { jobs, repositories, fileReviews, reviewComments, fileReviewCosts } from './schemas';
 import type { CloudflareDocResult } from '@server/services/cloudflare-docs';
@@ -301,7 +301,7 @@ export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) 
       verdict: fr.verdict,
       summary: fr.summary,
       costUsd: fr.costUsd,
-      bestPracticeChecks: parseJsonColumn<Array<{ practice: string; status: 'pass' | 'violation'; note?: string }>>(fr.bestPracticeChecks, []),
+      bestPracticeChecks: parseJsonColumn<BestPracticeCheck[]>(fr.bestPracticeChecks, []),
       commentCount: comments.length,
       comments,
     };

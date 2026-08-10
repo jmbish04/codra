@@ -1,6 +1,6 @@
 import { logger } from './logger';
 import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHubWebhookPayload, type IssueCommentWebhookPayload, type PullRequestWebhookPayload } from '@shared/github';
-import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, normalizeModelId, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
+import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, normalizeModelId, type BestPracticeCheck, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview, recordFileReviewCost } from '@server/db/file-reviews';
 import { assertD1MigrationsCurrent } from '@server/db/migration-check';
 import { getPricingSnapshot, buildCostBreakdown, sumBreakdown, type PricingSnapshot, type UsageAmounts } from '@server/core/guardian-pricing';
@@ -17,6 +17,7 @@ import { aggregateReviewerResults, limitFinalReviewComments, type ReviewerCallRe
 import { coordinateFindings, parseCoordinatorKeep, windowSourceLines } from '@server/core/coordinator';
 import { COORDINATOR_SCHEMA } from '@server/models/schemas';
 import { aggregateBestPracticeDocs } from '@server/core/best-practice-docs';
+import { parseJsonColumn } from '@server/db/client';
 
 import { GitHubService } from '../services/github';
 import { GitHubClient } from './github';
@@ -793,6 +794,7 @@ async function runReviewPhase(
         await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, filePlan, resolveFailureModelProvider, maybeHeartbeat, existingReview);
       } else {
         const inheritedComments = inherited.parsed_comments as ParsedReviewComment[];
+        const inheritedBestPracticeChecks = parseJsonColumn<BestPracticeCheck[]>(inherited.best_practice_checks, []);
         const fileReviewId = await upsertFileReview(env, job.id, {
           filePath: file.path,
           fileStatus: 'done',
@@ -808,6 +810,7 @@ async function runReviewPhase(
           verdict: inherited.verdict as any,
           fileSummary: inherited.file_summary,
           overallCorrectness: inherited.overall_correctness,
+          bestPracticeChecks: inheritedBestPracticeChecks,
           confidenceScore: inherited.confidence_score,
           errorMessage: null,
         });
@@ -1029,6 +1032,7 @@ async function persistBatchResponses(
         verdict: parsed.verdict,
         fileSummary: parsed.fileSummary,
         overallCorrectness: parsed.overallCorrectness,
+        bestPracticeChecks: parsed.bestPracticeChecks ?? [],
         confidenceScore: parsed.confidenceScore,
         errorMessage: null,
       });
@@ -1309,7 +1313,7 @@ async function reviewAndPersistFile(
     let cacheReadTokens: number | null;
     let cacheWriteTokens: number | null;
     let reviewerCallCount: number;
-    let bestPracticeChecks: Array<{ practice: string; status: 'pass' | 'violation'; note?: string }> = [];
+    let bestPracticeChecks: BestPracticeCheck[] = [];
 
     if (plan.length <= 1) {
       // Legacy single-call path — behavior here is byte-identical to before the

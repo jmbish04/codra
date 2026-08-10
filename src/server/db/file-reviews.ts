@@ -1,4 +1,4 @@
-import type { ParsedReviewComment } from '@shared/schema';
+import type { BestPracticeCheck, ParsedReviewComment } from '@shared/schema';
 import type { CostRow } from '@server/core/guardian-pricing';
 import type { BatchItem } from 'drizzle-orm/batch';
 import { getDb, type DbClient } from './client';
@@ -65,7 +65,7 @@ export async function insertFileReview(
     engineUsed?: string | null;
     cacheReadTokens?: number | null;
     cacheWriteTokens?: number | null;
-    bestPracticeChecks?: Array<{ practice: string; status: 'pass' | 'violation'; note?: string }> | null;
+    bestPracticeChecks?: BestPracticeCheck[] | null;
   },
 ) {
   const db = getDb(env);
@@ -132,7 +132,7 @@ export async function upsertFileReview(
     engineUsed?: string | null;
     cacheReadTokens?: number | null;
     cacheWriteTokens?: number | null;
-    bestPracticeChecks?: Array<{ practice: string; status: 'pass' | 'violation'; note?: string }> | null;
+    bestPracticeChecks?: BestPracticeCheck[] | null;
   },
 ) {
   const db = getDb(env);

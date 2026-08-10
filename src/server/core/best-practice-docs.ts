@@ -3,9 +3,8 @@ import { listBestPractices } from '@server/db/best-practices';
 import { recordBestPracticeDocs, type BestPracticeDocsPayload } from '@server/db/jobs';
 import { fileReviews } from '@server/db/schemas';
 import { fetchCloudflareDocResult, type CloudflareDocResult } from '@server/services/cloudflare-docs';
+import type { BestPracticeCheck } from '@shared/schema';
 import { eq } from 'drizzle-orm';
-
-type Check = { practice: string; status: 'pass' | 'violation'; note?: string };
 
 /**
  * Read all persisted per-file best_practice_checks for a job, tally pass/violation
@@ -22,7 +21,7 @@ export async function aggregateBestPracticeDocs(env: Pick<Env, 'DB'>, jobId: str
 
   const tally = new Map<string, { passed: number; violated: number }>();
   for (const row of rows) {
-    const checks = parseJsonColumn<Check[]>(row.checks, []);
+    const checks = parseJsonColumn<BestPracticeCheck[]>(row.checks, []);
     for (const check of checks) {
       const current = tally.get(check.practice) ?? { passed: 0, violated: 0 };
       if (check.status === 'violation') current.violated += 1;
