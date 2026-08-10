@@ -22,6 +22,7 @@ export type ReviewerCallResult = {
   reviewer: string;
   parsed: {
     comments: ParsedReviewComment[];
+    bestPracticeChecks?: Array<{ practice: string; status: 'pass' | 'violation'; note?: string }>;
     verdict: 'approve' | 'comment';
     fileSummary: string | null;
     overallCorrectness?: string | null;
@@ -38,6 +39,7 @@ export type ReviewerCallResult = {
 
 export type AggregatedReview = {
   comments: ParsedReviewComment[];
+  bestPracticeChecks: Array<{ practice: string; status: 'pass' | 'violation'; note?: string }>;
   verdict: 'approve' | 'comment';
   fileSummary: string | null;
   overallCorrectness: string | null;
@@ -78,6 +80,7 @@ export function aggregateReviewerResults(results: ReviewerCallResult[]): Aggrega
   const first = results[0];
   const worst = results.find((r) => r.parsed.verdict === 'comment') ?? first;
   const comments = results.flatMap((r) => r.parsed.comments ?? []);
+  const bestPracticeChecks = results.flatMap((r) => r.parsed.bestPracticeChecks ?? []);
   const verdict = results.some((r) => r.parsed.verdict === 'comment') ? 'comment' : 'approve';
   const fileSummary = results
     .map((r) => r.parsed.fileSummary)
@@ -89,6 +92,7 @@ export function aggregateReviewerResults(results: ReviewerCallResult[]): Aggrega
 
   return {
     comments,
+    bestPracticeChecks,
     verdict,
     fileSummary,
     overallCorrectness: worst.parsed.overallCorrectness ?? first.parsed.overallCorrectness ?? null,

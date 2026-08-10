@@ -8,7 +8,7 @@ import { getProjectContext } from '@server/core/project-context';
 import { withTimeout } from '@server/core/timeout';
 import { getResolvedModelConfig } from '@server/db/model-configs';
 import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, countAutoReviewsForPr, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, MAX_AUTO_REVIEWS_PER_PR, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
-import { parseFileReviewResponse } from './model-output';
+import { mergeBestPracticeChecks, parseFileReviewResponse } from '@server/core/model-output';
 import { filterReviewableFiles, parseUnifiedDiff, renderFileDiff } from './diff';
 import { planReviewers, selectFilePlanForBudget } from '@server/core/reviewer-plan';
 import { REVIEWERS, buildReviewerSystemPrompt, type ReviewerId } from '@server/prompts/reviewers';
@@ -1308,6 +1308,7 @@ async function reviewAndPersistFile(
     let cacheReadTokens: number | null;
     let cacheWriteTokens: number | null;
     let reviewerCallCount: number;
+    let bestPracticeChecks: Array<{ practice: string; status: 'pass' | 'violation'; note?: string }> = [];
 
     if (plan.length <= 1) {
       // Legacy single-call path — behavior here is byte-identical to before the
@@ -1329,6 +1330,7 @@ async function reviewAndPersistFile(
       fileSummary = response.parsed.fileSummary;
       overallCorrectness = response.parsed.overallCorrectness;
       confidenceScore = response.parsed.confidenceScore;
+      bestPracticeChecks = response.parsed.bestPracticeChecks ?? [];
       inputTokens = response.inputTokens;
       outputTokens = response.outputTokens;
       cacheReadTokens = response.cacheReadTokens ?? null;
@@ -1419,6 +1421,7 @@ async function reviewAndPersistFile(
       fileSummary = aggregate.fileSummary;
       overallCorrectness = aggregate.overallCorrectness;
       confidenceScore = aggregate.confidenceScore;
+      bestPracticeChecks = mergeBestPracticeChecks(results.map(r => r.parsed?.bestPracticeChecks ?? []));
       inputTokens = aggregate.inputTokens;
       outputTokens = aggregate.outputTokens;
       cacheReadTokens = aggregate.cacheReadTokens;
@@ -1441,6 +1444,7 @@ async function reviewAndPersistFile(
       verdict,
       fileSummary: fileSummary ?? null,
       overallCorrectness,
+      bestPracticeChecks,
       confidenceScore,
       errorMessage: null,
       engineUsed: 'native',
