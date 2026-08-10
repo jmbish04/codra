@@ -232,6 +232,7 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
           enabled: repoConfig.enabled,
           docstringEnabled: repoConfig.docstringEnabled,
           toolboxEnabled: repoConfig.toolboxEnabled,
+          externalJulesEnabled: repoConfig.externalJulesEnabled,
         },
       });
 

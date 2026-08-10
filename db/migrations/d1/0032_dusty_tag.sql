@@ -1,0 +1,1 @@
+ALTER TABLE `repo_configs` ADD `external_jules_enabled` integer DEFAULT false NOT NULL;

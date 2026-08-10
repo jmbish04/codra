@@ -108,7 +108,12 @@ export type ProviderPayload = {
   clearApiKey?: boolean;
   enabled: boolean;
 };
-type RepoConfigPatch = Partial<Pick<RepoConfig, 'review' | 'model'> & { enabled: boolean; docstringEnabled: boolean; toolboxEnabled: boolean }>;
+type RepoConfigPatch = Partial<Pick<RepoConfig, 'review' | 'model'> & {
+  enabled: boolean;
+  docstringEnabled: boolean;
+  toolboxEnabled: boolean;
+  externalJulesEnabled: boolean;
+}>;
 
 /**
  * request
@@ -443,7 +448,7 @@ export const api = {
       method: 'POST',
     });
   },
-  /** Reset button: turn off all three checks (code review, docstring, toolbox)
+  /** Reset button: turn off all repo checks (code review, docstring, toolbox, external Jules)
    *  for every repo. Returns how many repo configs were reset. */
   resetRepos() {
     return request<{ ok: boolean; count: number }>('/api/repos/reset', {

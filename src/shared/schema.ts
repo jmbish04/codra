@@ -322,6 +322,7 @@ export const repoConfigRecordSchema = z.object({
   enabled: z.boolean(),
   docstringEnabled: z.boolean(),
   toolboxEnabled: z.boolean(),
+  externalJulesEnabled: z.boolean().default(false),
 });
 
 export const statsSchema = z.object({
