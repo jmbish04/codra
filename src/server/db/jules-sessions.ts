@@ -1,10 +1,14 @@
 import { getDb } from './client';
 import { julesSessions } from './schemas';
-import { and, desc, eq, isNull, isNotNull } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, isNotNull } from 'drizzle-orm';
 
 export type JulesSessionState = 'staged' | 'launched' | 'skipped' | 'error';
 export type JulesSessionRow = typeof julesSessions.$inferSelect;
 export type JulesSessionCategory = 'INTERNAL_CODRA' | 'EXTERNAL_MANUAL' | 'EXTERNAL_CI';
+export type JulesSessionKind = 'docs';
+
+/** How long after launch a session still counts as "outstanding" for folding. */
+const OUTSTANDING_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export type StageJulesSessionInput = {
   owner: string;
@@ -15,7 +19,7 @@ export type StageJulesSessionInput = {
   gapSummary: string;
   prCommentId?: number | null;
   category?: JulesSessionCategory;
-  kind?: string;
+  kind?: JulesSessionKind;
   targetFiles?: string[];
 };
 
@@ -35,7 +39,7 @@ export async function stageJulesSession(env: Pick<Env, 'DB'>, input: StageJulesS
       .set({
         prompt: input.prompt,
         gap_summary: input.gapSummary,
-        target_files: input.targetFiles ?? existing[0].target_files,
+        target_files: input.targetFiles?.length ? input.targetFiles : existing[0].target_files,
         triggering_job_id: input.triggeringJobId ?? existing[0].triggering_job_id,
         pr_comment_id: input.prCommentId ?? existing[0].pr_comment_id,
         updated_at: new Date().toISOString(),
@@ -98,6 +102,31 @@ export async function markJulesOutcome(
   }).where(eq(julesSessions.id, id));
 }
 
+/**
+ * Record that a staged row's task was folded into an already-running session
+ * instead of launching a new one: mark the row skipped but KEEP the link to the
+ * session that got the work, and merge the folded task's target files into that
+ * outstanding session's set (deduped).
+ */
+export async function markJulesFolded(
+  env: Pick<Env, 'DB'>,
+  foldedRowId: string,
+  into: { sessionId: string; sessionUrl: string | null; sessionRowId: string; mergeTargetFiles: string[] },
+): Promise<void> {
+  const db = getDb(env);
+  await db.update(julesSessions).set({
+    state: 'skipped',
+    session_id: into.sessionId,
+    session_url: into.sessionUrl,
+    updated_at: new Date().toISOString(),
+  }).where(eq(julesSessions.id, foldedRowId));
+  if (into.mergeTargetFiles.length) {
+    const outstanding = await db.select().from(julesSessions).where(eq(julesSessions.id, into.sessionRowId)).get();
+    const merged = Array.from(new Set([...(outstanding?.target_files ?? []), ...into.mergeTargetFiles]));
+    await db.update(julesSessions).set({ target_files: merged, updated_at: new Date().toISOString() }).where(eq(julesSessions.id, into.sessionRowId));
+  }
+}
+
 /** Fetch a single session row by its Codra id. */
 export async function getJulesSessionById(
   env: Pick<Env, 'DB'>, id: string,
@@ -147,8 +176,9 @@ export async function findOutstandingCodraDocsSession(
       eq(julesSessions.state, 'launched'),
       isNotNull(julesSessions.session_id),
       isNull(julesSessions.created_pr_number),
+      gt(julesSessions.updated_at, new Date(Date.now() - OUTSTANDING_WINDOW_MS).toISOString()),
     ))
-    .orderBy(desc(julesSessions.created_at))
+    .orderBy(desc(julesSessions.updated_at))
     .limit(1)
     .get();
   return row ?? null;

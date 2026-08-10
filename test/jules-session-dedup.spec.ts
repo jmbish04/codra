@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { stageJulesSession, markJulesLaunched, findOutstandingCodraDocsSession, getJulesSessionById } from '@server/db/jules-sessions';
+import { eq } from 'drizzle-orm';
+import {
+  stageJulesSession, markJulesLaunched, markJulesFolded, findOutstandingCodraDocsSession, getJulesSessionById,
+} from '@server/db/jules-sessions';
 import { setJulesSessionCreatedPr } from '@server/db/jules-interactions';
+import { getDb } from '@server/db/client';
+import { julesSessions } from '@server/db/schemas';
 import { createTestEnv } from './helpers';
 import { collectTargetFiles } from '@server/core/jules-docs-gap';
 import { foldIntoOutstandingDocsSession } from '@server/core/jules';
@@ -53,6 +58,54 @@ describe('stageJulesSession threads ledger fields', () => {
     expect(second.id).toBe(first.id);
     expect(second.target_files).toEqual(['src/x.ts']);
   });
+
+  it('preserves existing targetFiles when the update passes an empty array', async () => {
+    const first = await stageJulesSession(env, {
+      owner: 'o', repo: 'r', triggeringPrNumber: 4, prompt: 'p1', gapSummary: 'g1',
+      targetFiles: ['src/y.ts'],
+    });
+    expect(first.target_files).toEqual(['src/y.ts']);
+
+    // A re-review that finds no docstring gaps passes []: that carries no new
+    // information, so the previously-captured paths must survive.
+    const second = await stageJulesSession(env, {
+      owner: 'o', repo: 'r', triggeringPrNumber: 4, prompt: 'p2', gapSummary: 'g2',
+      targetFiles: [],
+    });
+    expect(second.id).toBe(first.id);
+    expect(second.target_files).toEqual(['src/y.ts']);
+  });
+});
+
+describe('markJulesFolded', () => {
+  let env: Env;
+  beforeEach(() => { env = createTestEnv(); });
+
+  it('marks the folded row skipped with the session link and merges target files', async () => {
+    const outstanding = await stageJulesSession(env, {
+      owner: 'o', repo: 'r', triggeringPrNumber: 1, prompt: 'first', gapSummary: 'g',
+      targetFiles: ['src/a.ts', 'src/b.ts'],
+    });
+    await markJulesLaunched(env, outstanding.id, { sessionId: 'sess-A', sessionUrl: 'u', sessionState: 'IN_PROGRESS' });
+
+    const foldedRow = await stageJulesSession(env, {
+      owner: 'o', repo: 'r', triggeringPrNumber: 2, prompt: 'second', gapSummary: 'g2',
+      targetFiles: ['src/b.ts', 'src/c.ts'],
+    });
+
+    await markJulesFolded(env, foldedRow.id, {
+      sessionId: 'sess-A', sessionUrl: 'u', sessionRowId: outstanding.id,
+      mergeTargetFiles: ['src/b.ts', 'src/c.ts'],
+    });
+
+    const after = await getJulesSessionById(env, foldedRow.id);
+    expect(after?.state).toBe('skipped');
+    expect(after?.session_id).toBe('sess-A');
+    expect(after?.session_url).toBe('u');
+
+    const merged = await getJulesSessionById(env, outstanding.id);
+    expect(merged?.target_files).toEqual(['src/a.ts', 'src/b.ts', 'src/c.ts']);
+  });
 });
 
 describe('findOutstandingCodraDocsSession', () => {
@@ -82,6 +135,30 @@ describe('findOutstandingCodraDocsSession', () => {
     await launched('o', 'other', 1, 'sess-B');
     expect(await findOutstandingCodraDocsSession(env, { owner: 'o', repo: 'r' })).toBeNull();
   });
+
+  it('returns a session launched within the recency window', async () => {
+    await launched('o', 'r', 1, 'sess-NEW');
+    const found = await findOutstandingCodraDocsSession(env, { owner: 'o', repo: 'r' });
+    expect(found?.session_id).toBe('sess-NEW');
+  });
+
+  it('ignores a stalled session launched outside the recency window', async () => {
+    await launched('o', 'r', 1, 'sess-OLD');
+    await getDb(env).update(julesSessions)
+      .set({ updated_at: new Date(Date.now() - 48 * 3600 * 1000).toISOString() })
+      .where(eq(julesSessions.session_id, 'sess-OLD'));
+    expect(await findOutstandingCodraDocsSession(env, { owner: 'o', repo: 'r' })).toBeNull();
+  });
+
+  it('prefers the most recently launched session', async () => {
+    await launched('o', 'r', 1, 'sess-OLDER');
+    await getDb(env).update(julesSessions)
+      .set({ updated_at: new Date(Date.now() - 3600 * 1000).toISOString() })
+      .where(eq(julesSessions.session_id, 'sess-OLDER'));
+    await launched('o', 'r', 2, 'sess-NEWER');
+    const found = await findOutstandingCodraDocsSession(env, { owner: 'o', repo: 'r' });
+    expect(found?.session_id).toBe('sess-NEWER');
+  });
 });
 
 describe('collectTargetFiles', () => {
@@ -101,6 +178,20 @@ describe('collectTargetFiles', () => {
 
   it('returns [] when there are no docstring items', () => {
     expect(collectTargetFiles({ summary: 's', items: [] } as any)).toEqual([]);
+  });
+
+  it('dedupes a path repeated across docstring items', () => {
+    const report = {
+      summary: 's',
+      items: [
+        { kind: 'docstrings', reason: 'r', docstrings: [{ path: 'src/a.ts', functions: ['f'] }] },
+        { kind: 'docstrings', reason: 'r', docstrings: [
+          { path: 'src/a.ts', functions: ['g'] },
+          { path: 'src/b.ts', functions: ['h'] },
+        ] },
+      ],
+    } as const;
+    expect(collectTargetFiles(report as any)).toEqual(['src/a.ts', 'src/b.ts']);
   });
 });
 
