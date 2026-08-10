@@ -32,10 +32,20 @@ export async function classifyAndLinkJulesPr(
     if (!taskId) return { diverted: false };
 
     const session = await findJulesSessionBySessionId(env, taskId);
-    if (!session || session.category !== 'INTERNAL_CODRA') {
-      // A Jules PR we can't tie to one of our sessions — log for the id-join
-      // verification and leave it to the normal flow / P2.
-      logger.info('jules pr not linked to a codra session', { owner: pr.owner, repo: pr.repo, prNumber: pr.prNumber, taskId, matched: Boolean(session) });
+    // Divert only a Codra session that belongs to THIS repo and is either not yet
+    // linked to a PR or already linked to this same PR (idempotent re-delivery).
+    // Owner/repo binding blocks a cross-repo task-id spoof; the created_pr_number
+    // check blocks reusing an old completed task id to bypass review.
+    const eligible = session
+      && session.category === 'INTERNAL_CODRA'
+      && session.owner === pr.owner
+      && session.repo === pr.repo
+      && (session.created_pr_number == null || session.created_pr_number === pr.prNumber);
+    if (!eligible) {
+      logger.info('jules pr not linked to a codra session', {
+        owner: pr.owner, repo: pr.repo, prNumber: pr.prNumber, taskId,
+        matched: Boolean(session), reason: !session ? 'no-session' : 'not-eligible',
+      });
       return { diverted: false };
     }
 

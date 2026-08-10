@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { detectJulesTaskId, classifyAndLinkJulesPr } from '@server/core/jules-pr';
 import { stageJulesSession, markJulesLaunched, findJulesSessionBySessionId, getJulesSessionById } from '@server/db/jules-sessions';
+import { setJulesSessionCreatedPr } from '@server/db/jules-interactions';
 import { createTestEnv } from './helpers';
 
 describe('detectJulesTaskId', () => {
@@ -65,5 +66,52 @@ describe('classifyAndLinkJulesPr', () => {
       body: 'https://jules.google.com/task/999999', headRef: 'jules-x-999999',
     });
     expect(res.diverted).toBe(false);
+  });
+
+  it('does not divert a task id from a different repo (spoof)', async () => {
+    const s = await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 1, prompt: 'p', gapSummary: 'g' });
+    await markJulesLaunched(env, s.id, { sessionId: '6837743215401320221', sessionUrl: 'u', sessionState: 'IN_PROGRESS' });
+
+    const res = await classifyAndLinkJulesPr(env, {
+      owner: 'o', repo: 'OTHER', prNumber: 99, prUrl: 'u',
+      body: 'x https://jules.google.com/task/6837743215401320221 y', headRef: 'jules-docs-gaps-6837743215401320221',
+    });
+
+    expect(res.diverted).toBe(false);
+    const original = await getJulesSessionById(env, s.id);
+    expect(original?.created_pr_number).toBeNull();
+  });
+
+  it('does not divert an already-linked session for a different PR', async () => {
+    const s = await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 1, prompt: 'p', gapSummary: 'g' });
+    await markJulesLaunched(env, s.id, { sessionId: '6837743215401320221', sessionUrl: 'u', sessionState: 'IN_PROGRESS' });
+    await setJulesSessionCreatedPr(env, '6837743215401320221', { number: 42, url: 'u' });
+
+    const res = await classifyAndLinkJulesPr(env, {
+      owner: 'o', repo: 'r', prNumber: 99, prUrl: 'u2',
+      body: 'x https://jules.google.com/task/6837743215401320221 y', headRef: 'jules-docs-gaps-6837743215401320221',
+    });
+
+    expect(res.diverted).toBe(false);
+  });
+
+  it('diverts idempotently on re-delivery of the same PR', async () => {
+    const s = await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 1, prompt: 'p', gapSummary: 'g' });
+    await markJulesLaunched(env, s.id, { sessionId: '6837743215401320221', sessionUrl: 'u', sessionState: 'IN_PROGRESS' });
+
+    const prPayload = {
+      owner: 'o', repo: 'r', prNumber: 42, prUrl: 'u',
+      body: 'x https://jules.google.com/task/6837743215401320221 y', headRef: 'jules-docs-gaps-6837743215401320221',
+    };
+
+    const res1 = await classifyAndLinkJulesPr(env, prPayload);
+    expect(res1.diverted).toBe(true);
+    const after1 = await getJulesSessionById(env, s.id);
+    expect(after1?.created_pr_number).toBe(42);
+
+    const res2 = await classifyAndLinkJulesPr(env, prPayload);
+    expect(res2.diverted).toBe(true);
+    const after2 = await getJulesSessionById(env, s.id);
+    expect(after2?.created_pr_number).toBe(42);
   });
 });
