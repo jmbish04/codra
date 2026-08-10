@@ -1,4 +1,5 @@
 import { parseFileReviewResponse } from '@server/core/model-output';
+import { mergeBestPracticeChecks } from '@server/core/model-output';
 import type { FileDiff } from '@server/core/diff';
 
 describe('Model Output Parsing Deep Dive', () => {
@@ -246,5 +247,32 @@ export function nextOwner(owner: string) {
     expect(result.comments[0].confidenceScore).toBe(0.3);
     // Second finding without confidence_score should be undefined
     expect(result.comments[1].confidenceScore).toBeUndefined();
+  });
+});
+
+describe('bestPracticeChecks', () => {
+  it('parseFileReviewResponse surfaces bestPracticeChecks', () => {
+    const raw = JSON.stringify({
+      findings: [],
+      overall_correctness: 'patch is correct',
+      overall_explanation: 'ok',
+      best_practice_checks: [{ practice: 'D1 Bulk Insert Batching', status: 'violation', note: 'no db.batch()' }],
+    });
+    const out = parseFileReviewResponse(raw, { path: 'a.ts', hunks: [] } as any);
+    expect(out.bestPracticeChecks).toEqual([
+      { practice: 'D1 Bulk Insert Batching', status: 'violation', note: 'no db.batch()' },
+    ]);
+  });
+
+  it('mergeBestPracticeChecks dedupes by practice with violation winning', () => {
+    const merged = mergeBestPracticeChecks([
+      [{ practice: 'X', status: 'pass' }],
+      [{ practice: 'X', status: 'violation', note: 'bad' }],
+      [{ practice: 'Y', status: 'pass' }],
+    ]);
+    expect(merged).toEqual([
+      { practice: 'X', status: 'violation', note: 'bad' },
+      { practice: 'Y', status: 'pass' },
+    ]);
   });
 });

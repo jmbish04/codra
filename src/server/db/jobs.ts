@@ -1,7 +1,8 @@
 import { getDb, parseJsonColumn } from './client';
-import { defaultRepoConfig, jobDetailSchema, jobSummarySchema, repoConfigSchema, type JobScope, type RepoConfig } from '@shared/schema';
+import { defaultRepoConfig, jobDetailSchema, jobSummarySchema, repoConfigSchema, type BestPracticeCheck, type JobScope, type RepoConfig } from '@shared/schema';
 import { getOrCreateRepository } from './repositories';
 import { jobs, repositories, fileReviews, reviewComments, fileReviewCosts } from './schemas';
+import type { CloudflareDocResult } from '@server/services/cloudflare-docs';
 import { eq, and, sql, or, lt, gt, like, desc, asc, inArray, notInArray, isNull, isNotNull, ne } from 'drizzle-orm';
 
 export type JobRow = typeof jobs.$inferSelect;
@@ -18,6 +19,12 @@ export type JobLeaseClaim =
   | { status: 'busy'; row: any; retryAfterSeconds: number }
   | { status: 'terminal'; row: any }
   | { status: 'missing' };
+
+export type BestPracticeDocsPayload = {
+  violated: string[];
+  checks: Array<{ practice: string; passed: number; violated: number }>;
+  docs: CloudflareDocResult[];
+};
 
 function hexToBytes(hex: string) {
   const bytes = new Uint8Array(hex.length / 2);
@@ -242,6 +249,7 @@ export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) 
     verdict: jobs.verdict,
     status: jobs.status,
     finishedAt: jobs.finished_at,
+    best_practice_docs: jobs.best_practice_docs,
   })
     .from(jobs)
     .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
@@ -274,6 +282,7 @@ export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) 
     verdict: fileReviews.verdict,
     summary: fileReviews.file_summary,
     costUsd: fileReviews.total_cost_usd,
+    bestPracticeChecks: fileReviews.best_practice_checks,
   })
     .from(fileReviews)
     .where(eq(fileReviews.job_id, jobId))
@@ -295,6 +304,7 @@ export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) 
       verdict: fr.verdict,
       summary: fr.summary,
       costUsd: fr.costUsd,
+      bestPracticeChecks: parseJsonColumn<BestPracticeCheck[]>(fr.bestPracticeChecks, []),
       commentCount: comments.length,
       comments,
     };
@@ -314,6 +324,7 @@ export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) 
     suggestionCount: suggestions.length,
     fileCount: files.length,
     filesWithComments: files.filter((f) => f.commentCount > 0).length,
+    bestPractices: parseJsonColumn<BestPracticeDocsPayload | null>(jobRow.best_practice_docs, null),
     files,
     suggestions,
   };
@@ -544,6 +555,15 @@ export async function clearJobBatch(env: Pick<Env, 'DB'>, jobId: string) {
     batch_file_paths: null,
     batch_submitted_at: null,
   }).where(eq(jobs.id, jobId));
+}
+
+export async function recordBestPracticeDocs(
+  env: Pick<Env, 'DB'>,
+  jobId: string,
+  payload: BestPracticeDocsPayload,
+) {
+  const db = getDb(env);
+  await db.update(jobs).set({ best_practice_docs: JSON.stringify(payload) }).where(eq(jobs.id, jobId));
 }
 
 export async function markJobContinuationQueued(env: Pick<Env, 'DB'>, jobId: string, delaySeconds = 0) {

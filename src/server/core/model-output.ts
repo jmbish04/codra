@@ -1,4 +1,4 @@
-import { fileReviewModelOutputSchema, parsedReviewCommentSchema, summaryModelOutputSchema, type ParsedReviewComment, reviewSeverities } from '@shared/schema';
+import { fileReviewModelOutputSchema, parsedReviewCommentSchema, summaryModelOutputSchema, type BestPracticeCheck, type ParsedReviewComment, reviewSeverities } from '@shared/schema';
 import { z } from 'zod';
 import { logger } from './logger';
 import { findClosestValidLine, findPositionForLine, getValidNewLines, getValidPositions } from './diff';
@@ -291,6 +291,7 @@ export function parseFileReviewResponse(raw: string, file: FileDiff): {
   fileSummary: string;
   overallCorrectness?: string;
   confidenceScore?: number;
+  bestPracticeChecks: BestPracticeCheck[];
 } {
   let extracted = '';
   try {
@@ -479,7 +480,24 @@ export function parseFileReviewResponse(raw: string, file: FileDiff): {
     fileSummary: fileSummary,
     overallCorrectness: parsed.overall_correctness,
     confidenceScore: parsed.overall_confidence_score,
+    bestPracticeChecks: parsed.best_practice_checks ?? [],
   };
+}
+
+/** Combine per-reviewer/per-call checks: dedupe by practice, a violation wins. */
+export function mergeBestPracticeChecks(
+  lists: BestPracticeCheck[][],
+): BestPracticeCheck[] {
+  const byPractice = new Map<string, BestPracticeCheck>();
+  for (const list of lists) {
+    for (const c of list ?? []) {
+      const existing = byPractice.get(c.practice);
+      if (!existing || (existing.status === 'pass' && c.status === 'violation')) {
+        byPractice.set(c.practice, c);
+      }
+    }
+  }
+  return [...byPractice.values()];
 }
 
 export function parseSummaryResponse(raw: string): string {

@@ -1,8 +1,46 @@
-import type { ParsedReviewComment } from '@shared/schema';
+import type { BestPracticeCheck, ParsedReviewComment } from '@shared/schema';
 import type { CostRow } from '@server/core/guardian-pricing';
-import { getDb } from './client';
+import type { BatchItem } from 'drizzle-orm/batch';
+import { getDb, type DbClient } from './client';
 import { fileReviews, reviewComments, fileReviewCosts } from './schemas';
 import { eq, and, sql, inArray, desc } from 'drizzle-orm';
+
+// D1 rejects any query with more than 100 bound parameters. A single multi-row
+// INSERT of N rows binds N * (params-per-row) params, so a bulk array insert
+// overflows the cap once the row count grows — the real cause of the
+// "insert into review_comments ... [N rows]" failures.
+//
+// Fix: split into param-safe chunks and run every chunk in ONE db.batch() call.
+// db.batch() sends all statements in a single network round-trip wrapped in a
+// transaction — sequential `await db.insert()` in a loop would instead pay a
+// separate D1 round-trip per chunk. See scripts/ops/seed-sql-practices.js
+// (bp-d1-batch-chunking) for the reviewer-enforced version of this rule.
+const D1_MAX_BOUND_PARAMS = 100;
+const REVIEW_COMMENT_PARAMS_PER_ROW = 9;
+export const REVIEW_COMMENTS_INSERT_CHUNK = Math.floor(D1_MAX_BOUND_PARAMS / REVIEW_COMMENT_PARAMS_PER_ROW);
+// file_reviews binds 17 params/row here (16 set columns + the crypto.randomUUID
+// id; created_at is a literal CURRENT_TIMESTAMP, not a bound param).
+const FILE_REVIEW_PARAMS_PER_ROW = 17;
+export const FILE_REVIEWS_INSERT_CHUNK = Math.floor(D1_MAX_BOUND_PARAMS / FILE_REVIEW_PARAMS_PER_ROW);
+
+function chunk<T>(rows: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < rows.length; i += size) {
+    chunks.push(rows.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function insertReviewComments(
+  db: DbClient,
+  rows: Array<typeof reviewComments.$inferInsert>,
+) {
+  if (rows.length === 0) return;
+  const batchQueries = chunk(rows, REVIEW_COMMENTS_INSERT_CHUNK).map(
+    (c) => db.insert(reviewComments).values(c),
+  );
+  await db.batch(batchQueries as unknown as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]]);
+}
 
 export async function insertFileReview(
   env: Pick<Env, 'DB'>,
@@ -27,6 +65,7 @@ export async function insertFileReview(
     engineUsed?: string | null;
     cacheReadTokens?: number | null;
     cacheWriteTokens?: number | null;
+    bestPracticeChecks?: BestPracticeCheck[] | null;
   },
 ) {
   const db = getDb(env);
@@ -51,6 +90,7 @@ export async function insertFileReview(
     engine_used: input.engineUsed ?? null,
     cache_read_tokens: input.cacheReadTokens ?? null,
     cache_write_tokens: input.cacheWriteTokens ?? null,
+    best_practice_checks: input.bestPracticeChecks ? JSON.stringify(input.bestPracticeChecks) : null,
   }).returning({ id: fileReviews.id });
 
   if (input.parsedComments.length > 0) {
@@ -65,7 +105,7 @@ export async function insertFileReview(
       body: c.body,
       code_suggestion: c.codeSuggestion ?? null,
     }));
-    await db.insert(reviewComments).values(commentsToInsert);
+    await insertReviewComments(db, commentsToInsert);
   }
 }
 
@@ -92,6 +132,7 @@ export async function upsertFileReview(
     engineUsed?: string | null;
     cacheReadTokens?: number | null;
     cacheWriteTokens?: number | null;
+    bestPracticeChecks?: BestPracticeCheck[] | null;
   },
 ) {
   const db = getDb(env);
@@ -122,6 +163,7 @@ export async function upsertFileReview(
       engine_used: input.engineUsed ?? null,
       cache_read_tokens: input.cacheReadTokens ?? null,
       cache_write_tokens: input.cacheWriteTokens ?? null,
+      best_practice_checks: input.bestPracticeChecks ? JSON.stringify(input.bestPracticeChecks) : null,
     }).where(eq(fileReviews.id, reviewRow.id));
   } else {
     const [inserted] = await db.insert(fileReviews).values({
@@ -144,6 +186,7 @@ export async function upsertFileReview(
       engine_used: input.engineUsed ?? null,
       cache_read_tokens: input.cacheReadTokens ?? null,
       cache_write_tokens: input.cacheWriteTokens ?? null,
+      best_practice_checks: input.bestPracticeChecks ? JSON.stringify(input.bestPracticeChecks) : null,
     }).returning({ id: fileReviews.id });
     reviewRow = inserted;
   }
@@ -162,7 +205,7 @@ export async function upsertFileReview(
       body: c.body,
       code_suggestion: c.codeSuggestion ?? null,
     }));
-    await db.insert(reviewComments).values(commentsToInsert);
+    await insertReviewComments(db, commentsToInsert);
   }
 
   return reviewRow.id;
@@ -325,7 +368,15 @@ export async function batchInsertFileReviews(
     error_msg: r.errorMessage,
   }));
 
-  const insertedReviews = await db.insert(fileReviews).values(rowsToInsert).returning({ id: fileReviews.id, file_path: fileReviews.file_path });
+  // Same D1 100-param cap as review_comments: 17 params/row means an unbounded
+  // multi-row insert overflows past ~5 files. Chunk + single db.batch() round-trip.
+  const insertQueries = chunk(rowsToInsert, FILE_REVIEWS_INSERT_CHUNK).map(
+    (c) => db.insert(fileReviews).values(c).returning({ id: fileReviews.id, file_path: fileReviews.file_path }),
+  );
+  const insertedChunks = await db.batch(
+    insertQueries as unknown as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]],
+  );
+  const insertedReviews = (insertedChunks as Array<Array<{ id: string; file_path: string }>>).flat();
 
   const commentsToInsert: Array<typeof reviewComments.$inferInsert> = [];
 
@@ -349,7 +400,7 @@ export async function batchInsertFileReviews(
   }
 
   if (commentsToInsert.length > 0) {
-    await db.insert(reviewComments).values(commentsToInsert);
+    await insertReviewComments(db, commentsToInsert);
   }
 }
 

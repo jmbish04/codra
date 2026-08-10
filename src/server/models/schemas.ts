@@ -44,6 +44,19 @@ export const REVIEW_RESPONSE_SCHEMA = {
         },
       },
     },
+    best_practice_checks: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['practice', 'status'],
+        properties: {
+          practice: { type: 'string' },
+          status: { type: 'string', enum: ['pass', 'violation'] },
+          note: { type: 'string' },
+        },
+      },
+    },
     overall_explanation: { type: 'string' },
     overall_correctness: { type: 'string', enum: ['patch is correct', 'patch is incorrect'] },
     overall_confidence_score: { type: 'number', minimum: 0, maximum: 1 },

@@ -71,3 +71,11 @@ export function extractToolText(body: string): string {
   }
   return '';
 }
+
+export type CloudflareDocResult = { query: string; source: 'cloudflare-docs'; content: string };
+
+/** Structured, storable form of searchCloudflareDocs. Best-effort; never throws. */
+export async function fetchCloudflareDocResult(query: string): Promise<CloudflareDocResult> {
+  const content = await searchCloudflareDocs(query);
+  return { query, source: 'cloudflare-docs', content };
+}

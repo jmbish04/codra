@@ -1,6 +1,6 @@
 import { logger } from './logger';
 import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHubWebhookPayload, type IssueCommentWebhookPayload, type PullRequestWebhookPayload } from '@shared/github';
-import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, LEGACY_JOB_SCOPE, normalizeModelId, type JobScope, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
+import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, LEGACY_JOB_SCOPE, normalizeModelId, type BestPracticeCheck, type JobScope, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview, recordFileReviewCost } from '@server/db/file-reviews';
 import { assertD1MigrationsCurrent } from '@server/db/migration-check';
 import { getPricingSnapshot, buildCostBreakdown, sumBreakdown, type PricingSnapshot, type UsageAmounts } from '@server/core/guardian-pricing';
@@ -16,6 +16,8 @@ import { buildSharedContext } from '@server/core/shared-context';
 import { aggregateReviewerResults, limitFinalReviewComments, type ReviewerCallResult } from '@server/core/reviewer-aggregate';
 import { coordinateFindings, parseCoordinatorKeep, windowSourceLines } from '@server/core/coordinator';
 import { COORDINATOR_SCHEMA } from '@server/models/schemas';
+import { aggregateBestPracticeDocs } from '@server/core/best-practice-docs';
+import { parseJsonColumn } from '@server/db/client';
 
 import { GitHubService } from '../services/github';
 import { GitHubClient } from './github';
@@ -889,6 +891,7 @@ async function runReviewPhase(
         await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, filePlan, resolveFailureModelProvider, maybeHeartbeat, existingReview);
       } else {
         const inheritedComments = inherited.parsed_comments as ParsedReviewComment[];
+        const inheritedBestPracticeChecks = parseJsonColumn<BestPracticeCheck[]>(inherited.best_practice_checks, []);
         const fileReviewId = await upsertFileReview(env, job.id, {
           filePath: file.path,
           fileStatus: 'done',
@@ -904,6 +907,7 @@ async function runReviewPhase(
           verdict: inherited.verdict as any,
           fileSummary: inherited.file_summary,
           overallCorrectness: inherited.overall_correctness,
+          bestPracticeChecks: inheritedBestPracticeChecks,
           confidenceScore: inherited.confidence_score,
           errorMessage: null,
         });
@@ -1125,6 +1129,7 @@ async function persistBatchResponses(
         verdict: parsed.verdict,
         fileSummary: parsed.fileSummary,
         overallCorrectness: parsed.overallCorrectness,
+        bestPracticeChecks: parsed.bestPracticeChecks ?? [],
         confidenceScore: parsed.confidenceScore,
         errorMessage: null,
       });
@@ -1405,6 +1410,7 @@ async function reviewAndPersistFile(
     let cacheReadTokens: number | null;
     let cacheWriteTokens: number | null;
     let reviewerCallCount: number;
+    let bestPracticeChecks: BestPracticeCheck[] = [];
 
     if (plan.length <= 1) {
       // Legacy single-call path — behavior here is byte-identical to before the
@@ -1426,6 +1432,7 @@ async function reviewAndPersistFile(
       fileSummary = response.parsed.fileSummary;
       overallCorrectness = response.parsed.overallCorrectness;
       confidenceScore = response.parsed.confidenceScore;
+      bestPracticeChecks = response.parsed.bestPracticeChecks ?? [];
       inputTokens = response.inputTokens;
       outputTokens = response.outputTokens;
       cacheReadTokens = response.cacheReadTokens ?? null;
@@ -1516,6 +1523,7 @@ async function reviewAndPersistFile(
       fileSummary = aggregate.fileSummary;
       overallCorrectness = aggregate.overallCorrectness;
       confidenceScore = aggregate.confidenceScore;
+      bestPracticeChecks = aggregate.bestPracticeChecks;
       inputTokens = aggregate.inputTokens;
       outputTokens = aggregate.outputTokens;
       cacheReadTokens = aggregate.cacheReadTokens;
@@ -1538,6 +1546,7 @@ async function reviewAndPersistFile(
       verdict,
       fileSummary: fileSummary ?? null,
       overallCorrectness,
+      bestPracticeChecks,
       confidenceScore,
       errorMessage: null,
       engineUsed: 'native',
@@ -1889,6 +1898,14 @@ async function runFinalizePhase(
       ? `\n>\n> 🔗 [View all findings on Codra](${env.APP_URL.replace(/\/+$/, '')}/jobs/${job.id})`
       : '';
     formattedSummary += `\n\n> [!IMPORTANT]\n> **Codra left ${finalComments.length} inline comment${finalComments.length === 1 ? '' : 's'}** across ${countsByFile.size} file${countsByFile.size === 1 ? '' : 's'} on this pull request. Fetch this PR's review comments to read them inline:\n${fileLines}${jobLink}`;
+  }
+
+  // Phase 3: collate best-practice checks across the PR's files and attach a
+  // static Cloudflare-docs snapshot for each violated practice. Best-effort.
+  try {
+    await aggregateBestPracticeDocs(env, job.id);
+  } catch (err) {
+    logger.warn('best-practice docs aggregation failed', { jobId: job.id, error: err instanceof Error ? err.message : String(err) });
   }
 
   await updateJobStep(env, job.id, 'Completing', { status: 'running' });
