@@ -19,6 +19,12 @@ export type JobLeaseClaim =
   | { status: 'terminal'; row: any }
   | { status: 'missing' };
 
+export type BestPracticeDocsPayload = {
+  violated: string[];
+  checks: Array<{ practice: string; passed: number; violated: number }>;
+  docs: Array<{ query: string; source: 'cloudflare-docs'; content: string }>;
+};
+
 function hexToBytes(hex: string) {
   const bytes = new Uint8Array(hex.length / 2);
   for (let index = 0; index < bytes.length; index += 1) {
@@ -541,6 +547,15 @@ export async function clearJobBatch(env: Pick<Env, 'DB'>, jobId: string) {
     batch_file_paths: null,
     batch_submitted_at: null,
   }).where(eq(jobs.id, jobId));
+}
+
+export async function recordBestPracticeDocs(
+  env: Pick<Env, 'DB'>,
+  jobId: string,
+  payload: BestPracticeDocsPayload,
+) {
+  const db = getDb(env);
+  await db.update(jobs).set({ best_practice_docs: JSON.stringify(payload) }).where(eq(jobs.id, jobId));
 }
 
 export async function markJobContinuationQueued(env: Pick<Env, 'DB'>, jobId: string, delaySeconds = 0) {

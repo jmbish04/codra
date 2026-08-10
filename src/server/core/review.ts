@@ -16,6 +16,7 @@ import { buildSharedContext } from '@server/core/shared-context';
 import { aggregateReviewerResults, limitFinalReviewComments, type ReviewerCallResult } from '@server/core/reviewer-aggregate';
 import { coordinateFindings, parseCoordinatorKeep, windowSourceLines } from '@server/core/coordinator';
 import { COORDINATOR_SCHEMA } from '@server/models/schemas';
+import { aggregateBestPracticeDocs } from '@server/core/best-practice-docs';
 
 import { GitHubService } from '../services/github';
 import { GitHubClient } from './github';
@@ -1751,6 +1752,14 @@ async function runFinalizePhase(
       ? `\n>\n> 🔗 [View all findings on Codra](${env.APP_URL.replace(/\/+$/, '')}/jobs/${job.id})`
       : '';
     formattedSummary += `\n\n> [!IMPORTANT]\n> **Codra left ${finalComments.length} inline comment${finalComments.length === 1 ? '' : 's'}** across ${countsByFile.size} file${countsByFile.size === 1 ? '' : 's'} on this pull request. Fetch this PR's review comments to read them inline:\n${fileLines}${jobLink}`;
+  }
+
+  // Phase 3: collate best-practice checks across the PR's files and attach a
+  // static Cloudflare-docs snapshot for each violated practice. Best-effort.
+  try {
+    await aggregateBestPracticeDocs(env, job.id);
+  } catch (err) {
+    logger.warn('best-practice docs aggregation failed', { jobId: job.id, error: err instanceof Error ? err.message : String(err) });
   }
 
   await updateJobStep(env, job.id, 'Completing', { status: 'running' });
