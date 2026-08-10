@@ -255,6 +255,14 @@ dbDescribe('Review Flow Lifecycle', () => {
     const sourceHeadSha = sha('4');
     const retryHeadSha = sha('5');
     const baseSha = sha('6');
+    const inheritanceConfig = {
+      ...defaultRepoConfig,
+      model: {
+        main: 'test-model',
+        fallbacks: [],
+        size_overrides: [],
+      },
+    };
 
     const source = await insertJob(env, {
       installationId: '123',
@@ -268,13 +276,13 @@ dbDescribe('Review Flow Lifecycle', () => {
       trigger: 'auto',
       headRef: 'feature',
       baseRef: 'main',
-      configSnapshot: defaultRepoConfig,
+      configSnapshot: inheritanceConfig,
     });
     const inheritedChecks = [{ practice: 'D1 Bulk Insert Batching', status: 'violation', note: 'missing db.batch()' }] as const;
     await upsertFileReview(env, source.id, {
       filePath: 'src/app.ts',
       fileStatus: 'done',
-      modelUsed: defaultRepoConfig.model.main ?? 'gemma-4-31b-it',
+      modelUsed: 'test-model',
       modelProvider: 'test-provider',
       diffLineCount: 1,
       diffInput: 'old diff',
@@ -301,7 +309,7 @@ dbDescribe('Review Flow Lifecycle', () => {
       trigger: 'retry',
       headRef: 'feature',
       baseRef: 'main',
-      configSnapshot: defaultRepoConfig,
+      configSnapshot: inheritanceConfig,
       retryOfJobId: source.id,
     });
 
