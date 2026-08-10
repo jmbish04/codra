@@ -138,36 +138,66 @@ backstops the loop (idempotency, not a blocking retry loop — see Loop Preventi
 
 ### P1 — Webhook match & route
 
-In the `pull_request` `opened` branch of `routes/webhook.ts`, **before** the
-`isBotSender` gate:
+**Correction (verified against a real Jules PR):** Jules opens PRs as the
+**authenticating user** (e.g. `jmbish04`, `is_bot: false`), *not* as
+`google-labs-jules[bot]`. So the `isBotSender` gate (`review.ts:254`, on
+`payload.sender`) does **not** divert them — a Jules docs PR opened today flows
+straight into the standard paid AI review. P1's diversion is therefore a real
+cost saver, not just bookkeeping.
 
-1. **Detect a Jules PR:** author login `google-labs-jules[bot]` **OR** body matches
-   `jules\.google\.com/task/(\d+)`. Extract `taskId`.
-2. **Match** `taskId` against `jules_sessions.session_id`.
+Hook in the `pull_request` branch of `routes/webhook.ts` near the existing
+`markPrReadyByUrl` fast-path (147–151), i.e. **before** `extractReviewRequest`
+queues a job:
+
+1. **Detect a Jules PR** by content, not author:
+   - `payload.pull_request.body` matches `jules\.google\.com/task/(\d+)`, **or**
+   - `payload.pull_request.head.ref` (branch) starts with `jules-` and ends
+     `-(\d+)`.
+   Extract `taskId` (the trailing digits; body and branch agree on it).
+2. **Match** `taskId` against `jules_sessions.session_id` via a new
+   `findJulesSessionBySessionId(env, sessionId)` query. **Tolerant:** on any miss
+   or malformed id, log and treat as external — never throw, never block the
+   webhook.
    - **Match → `INTERNAL_CODRA` (Cat 3).** Immediately set `created_pr_number` /
-     `created_pr_url` on that row (fills the gap the async poller leaves). Route to
-     **P4**. Standard review flow is skipped.
-   - **No match → external.** Insert a lightweight `jules_sessions` row with
-     `category` = `EXTERNAL_CI` or `EXTERNAL_MANUAL` (per CI presence). Route to **P2**.
+     `created_pr_url` on that row (fills the async-poller gap; also promptly drops
+     the session out of the "outstanding fold sink" set). **Divert:** do not let
+     the standard review job be created for this PR (return before/around
+     `extractReviewRequest`). Route to **P4** (deferred slice).
+   - **No match → external.** Insert a lightweight `jules_sessions` row
+     (`category` = `EXTERNAL_CI` or `EXTERNAL_MANUAL` per CI presence). Route to
+     **P2**. In the P1-only slice, external PRs are recorded and left to the
+     normal flow (no behavior change yet); P2 adds the cost-aware routing.
+
+The `taskId == session_id` join is the one assumption not verifiable offline
+(both are the same big integer in the example, and our `session_url` is
+`.../session/<id>`); the tolerant matcher above degrades safely if it turns out
+otherwise, and we confirm on the next real launched Jules PR.
 
 ### P2 — Cost-aware routing
 
-No blind AI review. New per-repo config block (default OFF = cost-safe), added to
-`reviewConfigSchema` in `src/shared/schema.ts`:
+**Reconciled with #36's toggle model.** #36 replaced the blanket
+`enabled === false` gate with a three-column per-repo toggle set on
+`repo_configs` (`enabled` = Code Review, `docstring_enabled`, `toolbox_enabled`),
+surfaced as `RepoCheckFlags` and turned into a `jobs.scope`
+`{codeReview, docstring, toolbox}`. P2 follows that exact pattern rather than the
+old JSON `external_jules` block:
 
-```ts
-external_jules: {
-  enabled: boolean;                 // default false
-  require_failing_checks: boolean;  // default true
-}
-```
+- Add an `external_jules_enabled` **column** to `repo_configs` (migration,
+  `integer boolean NOT NULL DEFAULT 0` = off), threaded through
+  `db/repo-configs.ts`, `CachedConfig`/`loadRepoConfig` (`core/config.ts`), and
+  `RepoCheckFlags` (`review.ts`), mirroring `docstring_enabled`.
+- Routing an external Jules PR to review = creating a normal
+  `scope = { codeReview: true }` job for it (bypassing the content-diversion from
+  P1), gated by `external_jules_enabled` AND the CI signal below.
+- `@codra-app review` continues to force a review regardless (already wired
+  through the mention grammar).
 
 Routing decision table for a matched Jules PR:
 
 | Category | Condition | Action |
 |----------|-----------|--------|
 | `INTERNAL_CODRA` | always | P4 specialized verification (not standard review) |
-| external | `external_jules.enabled === false` | label + no-op |
+| external | `external_jules_enabled` off | label + no-op |
 | external | opted-in, **no CI** configured | trigger AI review on open |
 | external | opted-in, CI present, checks **passing** | no-op (wait) |
 | external | opted-in, CI present, checks **failing** | trigger AI review |
