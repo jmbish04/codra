@@ -39,6 +39,14 @@ export const parsedReviewCommentSchema = z.object({
   confidenceScore: z.number().min(0).max(1).optional(),
 });
 
+export const bestPracticeStatuses = ['pass', 'violation'] as const;
+export const bestPracticeCheckSchema = z.object({
+  practice: z.string().min(1),
+  status: z.enum(bestPracticeStatuses),
+  note: z.string().optional(),
+});
+export type BestPracticeCheck = z.infer<typeof bestPracticeCheckSchema>;
+
 export const fileReviewModelOutputSchema = z.object({
   findings: z.array(
     z.object({
@@ -57,6 +65,7 @@ export const fileReviewModelOutputSchema = z.object({
       code_suggestion: z.string().optional(),
     }),
   ),
+  best_practice_checks: z.array(bestPracticeCheckSchema).optional().default([]),
   overall_correctness: z.string().optional().default('patch is correct'),
   overall_explanation: z.string().optional().default('Review completed (partial output).'),
   overall_confidence_score: z.number().min(0).max(1).optional(),

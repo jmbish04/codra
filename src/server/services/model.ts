@@ -383,6 +383,16 @@ export class ModelService {
       ...matchedPractices.map(p => `Best Practice [${p.name}]:\n${convertPlateToMarkdown(p.instructions)}`),
     ];
 
+    if (matchedPractices.length > 0) {
+      customRules.push(
+        `=== Best-Practice Check Reporting ===\n` +
+        `Each "Best Practice [name]" above is a CHECK PROCEDURE for this file. ` +
+        `Run each one against this file and report the result in the "best_practice_checks" ` +
+        `output array as { "practice": "<exact name>", "status": "pass" | "violation", "note": "<short evidence>" }. ` +
+        `Report one entry per applicable best practice above. If a practice's trigger condition does not apply to this file, use status "pass".`,
+      );
+    }
+
     if (lessons && lessons.length > 0) {
       customRules.push(`
 === Lessons Learned from Past Incorrect Code Review Comments on this file ===

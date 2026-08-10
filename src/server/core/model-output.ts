@@ -291,6 +291,7 @@ export function parseFileReviewResponse(raw: string, file: FileDiff): {
   fileSummary: string;
   overallCorrectness?: string;
   confidenceScore?: number;
+  bestPracticeChecks: Array<{ practice: string; status: 'pass' | 'violation'; note?: string }>;
 } {
   let extracted = '';
   try {
@@ -479,7 +480,24 @@ export function parseFileReviewResponse(raw: string, file: FileDiff): {
     fileSummary: fileSummary,
     overallCorrectness: parsed.overall_correctness,
     confidenceScore: parsed.overall_confidence_score,
+    bestPracticeChecks: parsed.best_practice_checks ?? [],
   };
+}
+
+/** Combine per-reviewer/per-call checks: dedupe by practice, a violation wins. */
+export function mergeBestPracticeChecks(
+  lists: Array<Array<{ practice: string; status: 'pass' | 'violation'; note?: string }>>,
+): Array<{ practice: string; status: 'pass' | 'violation'; note?: string }> {
+  const byPractice = new Map<string, { practice: string; status: 'pass' | 'violation'; note?: string }>();
+  for (const list of lists) {
+    for (const c of list ?? []) {
+      const existing = byPractice.get(c.practice);
+      if (!existing || (existing.status === 'pass' && c.status === 'violation')) {
+        byPractice.set(c.practice, c);
+      }
+    }
+  }
+  return [...byPractice.values()];
 }
 
 export function parseSummaryResponse(raw: string): string {
