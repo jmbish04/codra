@@ -29,30 +29,18 @@ export async function recordWebhookDelivery(
   input: {
     deliveryId: string;
     eventName: string;
-    owner: string | null;
-    repo: string | null;
     payload: unknown;
   },
 ) {
   const db = getDb(env);
-  let repositoryId: number | null = null;
 
-  if (input.owner && input.repo) {
-    const repoRow = await db.select({ id: repositories.id })
-      .from(repositories)
-      .where(and(eq(repositories.owner, input.owner), eq(repositories.repo, input.repo)))
-      .limit(1)
-      .get();
-    if (repoRow) {
-      repositoryId = repoRow.id;
-    }
-  }
-
+  // repository_id is linked later by finalizeWebhookDelivery, once the payload
+  // has been parsed. It stays null here (the caller has no owner/repo yet).
   const result = await db.insert(webhookDeliveries)
     .values({
       delivery_id: input.deliveryId,
       event_name: input.eventName,
-      repository_id: repositoryId,
+      repository_id: null,
       payload: input.payload,
     })
     .onConflictDoNothing()
