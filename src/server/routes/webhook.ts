@@ -27,15 +27,23 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
     }
 
     // Record the delivery BEFORE verifying, so rejected and failed deliveries
-    // are visible on the dashboard too. Never let a recording failure block
-    // webhook processing.
-    const inserted = await recordWebhookDelivery(c.env, {
-      deliveryId,
-      eventName,
-      owner: null,
-      repo: null,
-      payload: rawBody,
-    }).catch(() => true);
+    // are visible on the dashboard too. `inserted` is true for the first
+    // sighting of a delivery id and false for a GitHub retry of one already
+    // recorded (onConflictDoNothing). A genuine insert failure (e.g. payload
+    // over D1's size limit) must NOT be treated as a fresh delivery — doing so
+    // would re-queue duplicate review jobs on every retry — so we abort with a
+    // 500 and let GitHub retry against a hopefully-recovered DB instead.
+    let inserted: boolean;
+    try {
+      inserted = await recordWebhookDelivery(c.env, {
+        deliveryId,
+        eventName,
+        payload: rawBody,
+      });
+    } catch (err) {
+      console.error('Failed to record webhook delivery:', err);
+      return jsonError('Failed to record webhook delivery.', 500);
+    }
 
     // `owner`/`repo` become known after the payload parses; finish() links them.
     let owner: string | null = null;

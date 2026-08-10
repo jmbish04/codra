@@ -12,10 +12,10 @@ describe('webhook delivery recording', () => {
   it('records, finalizes, lists, and filters by outcome', async () => {
     const env = createTestEnv();
 
-    await recordWebhookDelivery(env, { deliveryId: 'd1', eventName: 'pull_request', owner: null, repo: null, payload: '{}' });
+    await recordWebhookDelivery(env, { deliveryId: 'd1', eventName: 'pull_request', payload: '{}' });
     await finalizeWebhookDelivery(env, 'd1', { outcome: 'job_created', action: 'review', prNumber: 42, jobId: 'job-1' });
 
-    await recordWebhookDelivery(env, { deliveryId: 'd2', eventName: 'pull_request', owner: null, repo: null, payload: '{}' });
+    await recordWebhookDelivery(env, { deliveryId: 'd2', eventName: 'pull_request', payload: '{}' });
     await finalizeWebhookDelivery(env, 'd2', { outcome: 'rejected_signature' });
 
     const row = await getWebhookDeliveryRow(env, 'd1');
@@ -34,15 +34,15 @@ describe('webhook delivery recording', () => {
 
   it('recording is idempotent per delivery id (returns false on duplicate)', async () => {
     const env = createTestEnv();
-    const first = await recordWebhookDelivery(env, { deliveryId: 'dup', eventName: 'push', owner: null, repo: null, payload: '{}' });
-    const second = await recordWebhookDelivery(env, { deliveryId: 'dup', eventName: 'push', owner: null, repo: null, payload: '{}' });
+    const first = await recordWebhookDelivery(env, { deliveryId: 'dup', eventName: 'push', payload: '{}' });
+    const second = await recordWebhookDelivery(env, { deliveryId: 'dup', eventName: 'push', payload: '{}' });
     expect(first).toBe(true);
     expect(second).toBe(false);
   });
 
   it('detail lookup by id parses the stored payload', async () => {
     const env = createTestEnv();
-    await recordWebhookDelivery(env, { deliveryId: 'd3', eventName: 'pull_request', owner: null, repo: null, payload: JSON.stringify({ hello: 'world' }) });
+    await recordWebhookDelivery(env, { deliveryId: 'd3', eventName: 'pull_request', payload: JSON.stringify({ hello: 'world' }) });
     await finalizeWebhookDelivery(env, 'd3', { outcome: 'no_action' });
 
     const list = await listWebhookDeliveries(env, { limit: 1, offset: 0 });
