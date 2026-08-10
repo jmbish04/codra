@@ -1,4 +1,5 @@
 import type { ParsedReviewComment } from '@shared/schema';
+import { mergeBestPracticeChecks } from '@server/core/model-output';
 
 const SEVERITY_RANKS: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3, nit: 4 };
 
@@ -80,7 +81,7 @@ export function aggregateReviewerResults(results: ReviewerCallResult[]): Aggrega
   const first = results[0];
   const worst = results.find((r) => r.parsed.verdict === 'comment') ?? first;
   const comments = results.flatMap((r) => r.parsed.comments ?? []);
-  const bestPracticeChecks = results.flatMap((r) => r.parsed.bestPracticeChecks ?? []);
+  const bestPracticeChecks = mergeBestPracticeChecks(results.map((r) => r.parsed.bestPracticeChecks ?? []));
   const verdict = results.some((r) => r.parsed.verdict === 'comment') ? 'comment' : 'approve';
   const fileSummary = results
     .map((r) => r.parsed.fileSummary)

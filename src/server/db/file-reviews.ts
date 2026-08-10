@@ -90,6 +90,7 @@ export async function insertFileReview(
     engine_used: input.engineUsed ?? null,
     cache_read_tokens: input.cacheReadTokens ?? null,
     cache_write_tokens: input.cacheWriteTokens ?? null,
+    best_practice_checks: input.bestPracticeChecks ? JSON.stringify(input.bestPracticeChecks) : null,
   }).returning({ id: fileReviews.id });
 
   if (input.parsedComments.length > 0) {

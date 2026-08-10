@@ -87,10 +87,16 @@ describe('file-reviews multi-row review_comments insert', () => {
       ...baseReview,
       bestPracticeChecks: [{ practice: 'D1 Bulk Insert Batching', status: 'violation', note: 'no batch' }],
     });
+    await upsertFileReview(env, 'job-1', {
+      filePath: 'bp.ts',
+      parsedComments: [],
+      ...baseReview,
+      bestPracticeChecks: [{ practice: 'Use db.batch for chunked inserts', status: 'pass', note: 'chunked write path' }],
+    });
     const db = getDb(env);
     const [row] = await db.select().from(fileReviews).where(eq(fileReviews.file_path, 'bp.ts'));
     expect(JSON.parse(row.best_practice_checks!)).toEqual([
-      { practice: 'D1 Bulk Insert Batching', status: 'violation', note: 'no batch' },
+      { practice: 'Use db.batch for chunked inserts', status: 'pass', note: 'chunked write path' },
     ]);
   });
 
