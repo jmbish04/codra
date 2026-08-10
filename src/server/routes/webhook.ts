@@ -134,6 +134,16 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
         return finish(202, { ok: true, message: 'kb_updated' }, 'kb_updated', { action: 'kb_update' });
       }
 
+      if (eventName === 'check_run' || eventName === 'check_suite' || eventName === 'workflow_run') {
+        const p = payload as import('@shared/github').CheckWebhookPayload;
+        const detail = p.check_run ?? p.check_suite ?? p.workflow_run;
+        if (p.action !== 'completed' || !detail || (detail.conclusion !== 'failure' && detail.conclusion !== 'timed_out')) {
+          return finish(202, { ok: true, ignored: true }, 'no_action');
+        }
+        // P2c fills in: for each detail.pull_requests[], route an external Jules PR to review.
+        return finish(202, { ok: true, message: 'ci_failure_noted' }, 'no_action');
+      }
+
       if (!installationId) {
         return finish(202, { ok: true, ignored: true }, 'ignored_no_installation');
       }

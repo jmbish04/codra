@@ -401,6 +401,31 @@ export class GitHubClient {
     });
   }
 
+  /** Combined commit status + check-runs conclusion for a ref. */
+  async getRefCiStatus(owner: string, repo: string, ref: string): Promise<{ hasChecks: boolean; failing: boolean }> {
+    return withRetry(`getRefCiStatus ${owner}/${repo}@${ref}`, async () => {
+      const [statusRes, checksRes] = await Promise.all([
+        this.requestAndCheck(`${repoApiPath(owner, repo)}/commits/${encodeURIComponent(ref)}/status`),
+        this.requestAndCheck(`${repoApiPath(owner, repo)}/commits/${encodeURIComponent(ref)}/check-runs`),
+      ]);
+      const status = (await statusRes.json()) as { state: 'success' | 'failure' | 'pending' | 'error'; total_count: number };
+      const checks = (await checksRes.json()) as { total_count: number; check_runs: { conclusion: string | null; status: string }[] };
+      const hasChecks = status.total_count > 0 || checks.total_count > 0;
+      const failing = status.state === 'failure' || status.state === 'error'
+        || checks.check_runs.some((r) => r.conclusion === 'failure' || r.conclusion === 'timed_out' || r.conclusion === 'cancelled');
+      return { hasChecks, failing };
+    });
+  }
+
+  /** Does the repo have ≥1 enabled Actions workflow? (CI-presence, race-free.) */
+  async hasConfiguredCI(owner: string, repo: string): Promise<boolean> {
+    return withRetry(`hasConfiguredCI ${owner}/${repo}`, async () => {
+      const res = await this.requestAndCheck(`${repoApiPath(owner, repo)}/actions/workflows`);
+      const body = (await res.json()) as { total_count: number; workflows: { state: string }[] };
+      return (body.workflows ?? []).some((w) => w.state === 'active');
+    }).catch(() => false);
+  }
+
   async listOpenPullRequests(owner: string, repo: string) {
     return withRetry(`listOpenPullRequests ${owner}/${repo}`, async () => {
       const out: Array<{
