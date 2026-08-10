@@ -246,6 +246,7 @@ export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) 
     verdict: jobs.verdict,
     status: jobs.status,
     finishedAt: jobs.finished_at,
+    best_practice_docs: jobs.best_practice_docs,
   })
     .from(jobs)
     .innerJoin(repositories, eq(jobs.repository_id, repositories.id))
@@ -278,6 +279,7 @@ export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) 
     verdict: fileReviews.verdict,
     summary: fileReviews.file_summary,
     costUsd: fileReviews.total_cost_usd,
+    bestPracticeChecks: fileReviews.best_practice_checks,
   })
     .from(fileReviews)
     .where(eq(fileReviews.job_id, jobId))
@@ -299,6 +301,7 @@ export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) 
       verdict: fr.verdict,
       summary: fr.summary,
       costUsd: fr.costUsd,
+      bestPracticeChecks: parseJsonColumn<Array<{ practice: string; status: 'pass' | 'violation'; note?: string }>>(fr.bestPracticeChecks, []),
       commentCount: comments.length,
       comments,
     };
@@ -318,6 +321,7 @@ export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) 
     suggestionCount: suggestions.length,
     fileCount: files.length,
     filesWithComments: files.filter((f) => f.commentCount > 0).length,
+    bestPractices: parseJsonColumn<{ violated: string[]; checks: Array<{ practice: string; passed: number; violated: number }>; docs: Array<{ query: string; source: 'cloudflare-docs'; content: string }> } | null>(jobRow.best_practice_docs, null as any),
     files,
     suggestions,
   };
