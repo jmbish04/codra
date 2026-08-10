@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getDb } from '@server/db/client';
 import { jobs, repositories, fileReviews } from '@server/db/schemas';
 import { createBestPractice } from '@server/db/best-practices';

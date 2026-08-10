@@ -2,6 +2,7 @@ import { getDb, parseJsonColumn } from './client';
 import { defaultRepoConfig, jobDetailSchema, jobSummarySchema, repoConfigSchema, type RepoConfig } from '@shared/schema';
 import { getOrCreateRepository } from './repositories';
 import { jobs, repositories, fileReviews, reviewComments, fileReviewCosts } from './schemas';
+import type { CloudflareDocResult } from '@server/services/cloudflare-docs';
 import { eq, and, sql, or, lt, gt, like, desc, asc, inArray, notInArray, isNull, isNotNull, ne } from 'drizzle-orm';
 
 export type JobRow = typeof jobs.$inferSelect;
@@ -22,7 +23,7 @@ export type JobLeaseClaim =
 export type BestPracticeDocsPayload = {
   violated: string[];
   checks: Array<{ practice: string; passed: number; violated: number }>;
-  docs: Array<{ query: string; source: 'cloudflare-docs'; content: string }>;
+  docs: CloudflareDocResult[];
 };
 
 function hexToBytes(hex: string) {

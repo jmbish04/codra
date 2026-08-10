@@ -2,7 +2,7 @@ import { getDb, parseJsonColumn } from '@server/db/client';
 import { listBestPractices } from '@server/db/best-practices';
 import { recordBestPracticeDocs, type BestPracticeDocsPayload } from '@server/db/jobs';
 import { fileReviews } from '@server/db/schemas';
-import { fetchCloudflareDocResult } from '@server/services/cloudflare-docs';
+import { fetchCloudflareDocResult, type CloudflareDocResult } from '@server/services/cloudflare-docs';
 import { eq } from 'drizzle-orm';
 
 type Check = { practice: string; status: 'pass' | 'violation'; note?: string };
@@ -43,9 +43,13 @@ export async function aggregateBestPracticeDocs(env: Pick<Env, 'DB'>, jobId: str
   );
   const cfViolated = [...new Set(violated.filter((name) => cloudflareWorkersPracticeNames.has(name)))];
 
-  const docs = [];
+  const docs: CloudflareDocResult[] = [];
   for (const name of cfViolated) {
-    docs.push(await fetchCloudflareDocResult(name));
+    try {
+      docs.push(await fetchCloudflareDocResult(name));
+    } catch {
+      docs.push({ query: name, source: 'cloudflare-docs', content: '' });
+    }
   }
 
   const payload: BestPracticeDocsPayload = { violated, checks, docs };
