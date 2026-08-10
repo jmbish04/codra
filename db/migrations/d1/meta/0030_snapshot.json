@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5ae810b2-0d23-4c0c-a8ec-691131314801",
-  "prevId": "7dda949c-cce2-45f2-8e82-d04aef2111b9",
+  "id": "bc06b059-d0e5-4cb0-9008-3f0ea1367d73",
+  "prevId": "5ae810b2-0d23-4c0c-a8ec-691131314801",
   "tables": {
     "repositories": {
       "name": "repositories",
@@ -2817,6 +2817,37 @@
         },
         "created_pr_url": {
           "name": "created_pr_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'INTERNAL_CODRA'"
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'docs'"
+        },
+        "target_files": {
+          "name": "target_files",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "automation_mode": {
+          "name": "automation_mode",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

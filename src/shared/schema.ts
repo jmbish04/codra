@@ -1,6 +1,19 @@
 import { z } from 'zod';
 
 export const reviewTriggers = ['auto', 'mention', 'retry', 'sync'] as const;
+
+/**
+ * Which checks a review job runs. Persisted on jobs.scope; NULL in the DB is the
+ * legacy shape (code review only). Lets a job be self-contained — it runs
+ * exactly its checks regardless of later repo-toggle changes.
+ */
+export const jobScopeSchema = z.object({
+  codeReview: z.boolean(),
+  docstring: z.boolean(),
+  toolbox: z.boolean(),
+});
+export type JobScope = z.infer<typeof jobScopeSchema>;
+export const LEGACY_JOB_SCOPE: JobScope = { codeReview: true, docstring: false, toolbox: false };
 export const jobStatuses = ['queued', 'running', 'done', 'failed', 'superseded', 'merged', 'closed'] as const;
 
 /**
@@ -214,6 +227,7 @@ export const jobSummarySchema = z.object({
   prCreatedAt: z.string().nullable().default(null),
   commitSha: z.string(),
   trigger: z.enum(reviewTriggers),
+  scope: jobScopeSchema.nullable().optional(),
   status: z.enum(jobStatuses),
   verdict: z.enum(reviewVerdicts).nullable(),
   fileCount: z.number().int(),
@@ -306,6 +320,8 @@ export const repoConfigRecordSchema = z.object({
   fallbackModels: z.array(z.string()).nullable(),
   sizeOverrides: z.any().nullable(),
   enabled: z.boolean(),
+  docstringEnabled: z.boolean(),
+  toolboxEnabled: z.boolean(),
 });
 
 export const statsSchema = z.object({

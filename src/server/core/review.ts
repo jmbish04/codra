@@ -1,14 +1,14 @@
 import { logger } from './logger';
 import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHubWebhookPayload, type IssueCommentWebhookPayload, type PullRequestWebhookPayload } from '@shared/github';
-import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, normalizeModelId, type BestPracticeCheck, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
+import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, LEGACY_JOB_SCOPE, normalizeModelId, type BestPracticeCheck, type JobScope, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview, recordFileReviewCost } from '@server/db/file-reviews';
 import { assertD1MigrationsCurrent } from '@server/db/migration-check';
 import { getPricingSnapshot, buildCostBreakdown, sumBreakdown, type PricingSnapshot, type UsageAmounts } from '@server/core/guardian-pricing';
 import { getProjectContext } from '@server/core/project-context';
 import { withTimeout } from '@server/core/timeout';
 import { getResolvedModelConfig } from '@server/db/model-configs';
-import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, countAutoReviewsForPr, failJob, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, MAX_AUTO_REVIEWS_PER_PR, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
-import { parseFileReviewResponse } from '@server/core/model-output';
+import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, countAutoReviewsForPr, failJob, findActiveJobsForPr, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, MAX_AUTO_REVIEWS_PER_PR, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
+import { parseFileReviewResponse } from './model-output';
 import { filterReviewableFiles, parseUnifiedDiff, renderFileDiff } from './diff';
 import { planReviewers, selectFilePlanForBudget } from '@server/core/reviewer-plan';
 import { REVIEWERS, buildReviewerSystemPrompt, type ReviewerId } from '@server/prompts/reviewers';
@@ -39,7 +39,7 @@ import { detectTestTargets } from '@server/core/test-detection';
 import { runAndReportPrTests } from '@server/core/test-runner';
 import { runDocsReview } from '@server/core/docs-review';
 import { listSecretsStoreSecrets, ensureSecretBindings, type SecretBindingSpec } from '@server/core/secrets-store';
-import { evaluateDocsGaps, buildJulesPrompt } from '@server/core/jules-docs-gap';
+import { evaluateDocsGaps, buildJulesPrompt, collectTargetFiles } from '@server/core/jules-docs-gap';
 import { stageJulesSession } from '@server/db/jules-sessions';
 import { ensureDeployWorkflow } from '@server/core/deploy-workflow';
 import { emitReviewDatapoint, logReviewStep } from '@server/core/review-telemetry';
@@ -187,6 +187,17 @@ export function isBotSender(
     || (botUsername ? login === botUsername.toLowerCase() : false);
 }
 
+/** Which checks a request targets. `review` = code review (+ any repo-enabled
+ *  extras); `docstring`/`toolbox` = that single on-demand audit. */
+export type ReviewMode = 'review' | 'docstring' | 'toolbox';
+
+/** The three per-repo auto-toggles, as resolved by loadRepoConfig. */
+export type RepoCheckFlags = {
+  enabled: boolean;
+  docstringEnabled: boolean;
+  toolboxEnabled: boolean;
+};
+
 export type ReviewRequest = {
   installationId: string;
   owner: string;
@@ -200,13 +211,39 @@ export type ReviewRequest = {
   headRef: string | null;
   baseRef: string | null;
   trigger: 'auto' | 'mention';
+  mode: ReviewMode;
+  scope: JobScope;
 };
+
+/** Parse the verb after the mention trigger. `audit docstring`/`docstring` →
+ *  docstring; `audit toolbox`/`toolbox` → toolbox; anything else (incl. bare
+ *  mention and `review`) → review. */
+function parseMentionMode(body: string, trigger: string): ReviewMode {
+  const idx = body.indexOf(trigger);
+  const rest = (idx >= 0 ? body.slice(idx + trigger.length) : body).toLowerCase();
+  if (/\bdocstring\b/.test(rest)) return 'docstring';
+  if (/\btoolbox\b/.test(rest)) return 'toolbox';
+  return 'review';
+}
+
+/** A job's scope, defaulting legacy (null) rows to code-review-only. */
+function jobScope(job: { scope?: JobScope | null }): JobScope {
+  return job.scope ?? LEGACY_JOB_SCOPE;
+}
+
+function scopeForMode(mode: ReviewMode, flags: RepoCheckFlags): JobScope {
+  if (mode === 'docstring') return { codeReview: false, docstring: true, toolbox: false };
+  if (mode === 'toolbox') return { codeReview: false, docstring: false, toolbox: true };
+  // review: code review always, plus any extras the repo has enabled.
+  return { codeReview: true, docstring: flags.docstringEnabled, toolbox: flags.toolboxEnabled };
+}
 
 export function extractReviewRequest(input: {
   eventName: GitHubWebhookEventName;
   payload: GitHubWebhookPayload;
   botUsername: string;
   config: RepoConfig;
+  flags: RepoCheckFlags;
 }): ReviewRequest | null {
   if (input.eventName === 'pull_request') {
     const payload = input.payload as PullRequestWebhookPayload;
@@ -217,6 +254,16 @@ export function extractReviewRequest(input: {
       return null;
     }
     if (isBotSender(payload.sender, input.botUsername)) {
+      return null;
+    }
+
+    // Auto runs exactly the checks the repo has toggled on. No toggle → no job.
+    const scope: JobScope = {
+      codeReview: input.flags.enabled,
+      docstring: input.flags.docstringEnabled,
+      toolbox: input.flags.toolboxEnabled,
+    };
+    if (!scope.codeReview && !scope.docstring && !scope.toolbox) {
       return null;
     }
 
@@ -233,6 +280,8 @@ export function extractReviewRequest(input: {
       headRef: payload.pull_request.head.ref,
       baseRef: payload.pull_request.base.ref,
       trigger: 'auto' as const,
+      mode: 'review',
+      scope,
     };
   }
 
@@ -248,6 +297,9 @@ export function extractReviewRequest(input: {
       return null;
     }
 
+    // On-demand mentions run regardless of the repo toggles.
+    const mode = parseMentionMode(payload.comment.body, mentionTrigger);
+
     return {
       installationId: String(payload.installation?.id ?? ''),
       owner: payload.repository.owner.login,
@@ -261,6 +313,8 @@ export function extractReviewRequest(input: {
       headRef: null,
       baseRef: null,
       trigger: 'mention' as const,
+      mode,
+      scope: scopeForMode(mode, input.flags),
     };
   }
 
@@ -388,16 +442,16 @@ async function resolveQueuedJob(
     repo: payload.repository.name,
   });
 
-  if (repoConfig.enabled === false) {
-    logger.info(`Job ignored: repository ${payload.repository.owner.login}/${payload.repository.name} is disabled`);
-    return null;
-  }
-
   const extracted = extractReviewRequest({
     eventName,
     payload,
     botUsername: env.BOT_USERNAME,
     config: repoConfig.parsedJson,
+    flags: {
+      enabled: repoConfig.enabled,
+      docstringEnabled: repoConfig.docstringEnabled,
+      toolboxEnabled: repoConfig.toolboxEnabled,
+    },
   });
 
   if (!extracted) {
@@ -449,6 +503,18 @@ async function resolveQueuedJob(
     return null;
   }
 
+  // Loop guard: only an explicit `@codra-app review` restarts an in-flight
+  // review. New commits, other comments, and on-demand audits never tear down a
+  // running review — that endless restart loop is exactly what we're killing.
+  const isExplicitReview = resolved.trigger === 'mention' && resolved.mode === 'review';
+  const activeJobs = await findActiveJobsForPr(env, {
+    owner: resolved.owner, repo: resolved.repo, prNumber: resolved.prNumber,
+  });
+  if (activeJobs.length > 0 && !isExplicitReview) {
+    logger.info(`In-flight review exists for ${resolved.owner}/${resolved.repo} PR #${resolved.prNumber}; not restarting for ${resolved.trigger}/${resolved.mode}.`);
+    return null;
+  }
+
   if (resolved.trigger === 'auto') {
     const autoCount = await countAutoReviewsForPr(env, {
       installationId: resolved.installationId,
@@ -473,15 +539,20 @@ async function resolveQueuedJob(
     headRef: resolved.headRef,
     baseRef: resolved.baseRef,
     configSnapshot: repoConfig.parsedJson,
+    scope: resolved.scope,
   });
 
-  await supersedeOlderJobs(env, {
-    installationId: resolved.installationId,
-    owner: resolved.owner,
-    repo: resolved.repo,
-    prNumber: resolved.prNumber,
-    newJobId: job.id,
-  });
+  // Supersede older jobs ONLY on an explicit review restart. Every other path
+  // either has no active job (no-op) or was already bounced by the loop guard.
+  if (isExplicitReview) {
+    await supersedeOlderJobs(env, {
+      installationId: resolved.installationId,
+      owner: resolved.owner,
+      repo: resolved.repo,
+      prNumber: resolved.prNumber,
+      newJobId: job.id,
+    });
+  }
 
   return { job, phase: 'prepare' };
 }
@@ -520,11 +591,20 @@ async function runPreparePhase(
     }
   }
 
-  // Post a status comment to the PR so the team knows Codra is active
+  // Post a status comment to the PR so the team knows Codra is active. Word it
+  // to match what this job actually runs — a code review, or an on-demand audit.
   if (!job.statusCommentId) {
     try {
+      const scope = jobScope(job);
+      const auditNames = [
+        scope.docstring && 'DocString Enforcer',
+        scope.toolbox && 'Toolbox Watcher',
+      ].filter(Boolean).join(' + ');
+      const { heading, activity } = scope.codeReview
+        ? { heading: '\u{1F50D} Code Review', activity: 'reviewing this pull request' }
+        : { heading: `\u{1F9F0} ${auditNames || 'Audit'}`, activity: `running ${auditNames || 'checks'} on this pull request` };
       const monitorLink = env.APP_URL ? `\n\n<a href="${env.APP_URL}/jobs/${job.id}" target="_blank" rel="noopener noreferrer">👉 Click here to monitor progress</a>` : '';
-      const statusBody = `## \u{1F50D} Code Review\n\nCodra is reviewing this pull request. A summary will be posted here when the review is complete.${monitorLink}`;
+      const statusBody = `## ${heading}\n\nCodra is ${activity}. A summary will be posted here when it is complete.${monitorLink}`;
       const comment = await github.createIssueComment(job.owner, job.repo, job.prNumber, statusBody);
       await updateJobStatusComment(env, job.id, comment.id);
     } catch (err) {
@@ -537,13 +617,17 @@ async function runPreparePhase(
   await completePreparationStep(env, job.id, files.length);
   await heartbeatJobLease(env, job.id, leaseOwner, JOB_LEASE_SECONDS);
 
-  if (files.length === 0) {
+  // No reviewable files: finalize immediately, UNLESS this job also carries a
+  // docstring/toolbox check — those run in the review phase and don't depend on
+  // the code diff, so an all-lockfile (or on-demand audit) PR must still proceed.
+  const scope = jobScope(job);
+  if (files.length === 0 && !scope.docstring && !scope.toolbox) {
     await updateJobStep(env, job.id, 'Reviewing Files', { status: 'done' });
     await enqueueJobPhase(env, job.id, 'finalize');
     return;
   }
 
-  if (checkRunId) {
+  if (checkRunId && files.length > 0) {
     await github.updateCheckRun(job.owner, job.repo, checkRunId, {
       title: `Reviewing (0/${files.length})`,
       summary: 'Codra is analyzing changed files.',
@@ -561,12 +645,15 @@ async function runReviewPhase(
 ) {
   await checkSuperseded(env, job.id);
 
+  const scope = jobScope(job);
+
   if (!hasCompletedStep(job, 'Preparation')) {
     await runPreparePhase(env, job, leaseOwner, github);
     return;
   }
 
-  if (!hasCompletedStep(job, 'Standardization')) {
+  // Toolbox Watcher.
+  if (scope.toolbox && !hasCompletedStep(job, 'Standardization')) {
     try {
       await updateJobStep(env, job.id, 'Standardization', { status: 'running' });
       const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
@@ -578,7 +665,8 @@ async function runReviewPhase(
     }
   }
 
-  if (!hasCompletedStep(job, 'Docs Gap')) {
+  // DocString Enforcer.
+  if (scope.docstring && !hasCompletedStep(job, 'Docs Gap')) {
     try {
       await updateJobStep(env, job.id, 'Docs Gap', { status: 'running' });
       const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
@@ -592,7 +680,8 @@ async function runReviewPhase(
     }
   }
 
-  if (!hasCompletedStep(job, 'Deploy Workflow')) {
+  // Deploy Workflow is a code-review extra — skip it on audit-only jobs.
+  if (scope.codeReview && !hasCompletedStep(job, 'Deploy Workflow')) {
     try {
       await updateJobStep(env, job.id, 'Deploy Workflow', { status: 'running' });
       const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
@@ -604,6 +693,14 @@ async function runReviewPhase(
       logger.error('Failed to ensure deploy workflow', err);
       await updateJobStep(env, job.id, 'Deploy Workflow', { status: 'failed', error: String(err) });
     }
+  }
+
+  // Audit-only job (docstring/toolbox mention): its checks ran above; skip the
+  // per-file code review and finalize by closing the check run.
+  if (!scope.codeReview) {
+    await updateJobStep(env, job.id, 'Reviewing Files', { status: 'done' });
+    await enqueueJobPhase(env, job.id, 'finalize');
+    return;
   }
 
   await updateJobStep(env, job.id, 'Reviewing Files', { status: 'running' });
@@ -1644,6 +1741,51 @@ async function runFinalizePhase(
   formatter: FormatterService,
 ) {
   await checkSuperseded(env, job.id);
+
+  // Audit-only job (docstring/toolbox mention): the requested check already ran
+  // in the review phase and posts its own artifacts. There is no per-file review
+  // to summarize, so finalize minimally — close the check run and mark done.
+  // Skipping this would loop forever: the file-completeness check below sees the
+  // PR's reviewable files with zero reviews and re-enqueues the review phase,
+  // which immediately bounces back here.
+  const finalizeScope = jobScope(job);
+  if (!finalizeScope.codeReview) {
+    await updateJobStep(env, job.id, 'Completing', { status: 'running' });
+    const ran = [
+      finalizeScope.docstring && 'DocString Enforcer',
+      finalizeScope.toolbox && 'Toolbox Watcher',
+    ].filter(Boolean).join(' + ') || 'checks';
+    if (job.checkRunId) {
+      await github.updateCheckRun(job.owner, job.repo, job.checkRunId, {
+        status: 'completed',
+        conclusion: 'neutral',
+        title: `${ran} run`,
+        summary: `Codra ran ${ran} for this pull request.`,
+      }).catch((err) => logger.warn('Audit check-run update failed (ignored)', err));
+    }
+    await completeJob(env, job.id, {
+      verdict: 'approve',
+      fileCount: 0,
+      commentCount: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCostUsd: 0,
+      summaryMarkdown: `Codra ran ${ran} on this pull request.`,
+      reviewId: null,
+      summaryModel: null,
+      errorMessage: null,
+    });
+    if (job.statusCommentId) {
+      await github.updateIssueComment(
+        job.owner, job.repo, job.statusCommentId,
+        `## Codra\n\nRan **${ran}** on this pull request.`,
+      ).catch((err) => logger.warn('Audit status-comment update failed (ignored)', err));
+    }
+    await notifyJobsChanged(env, { jobId: job.id, status: 'done' }).catch(() => {});
+    logger.info(`Audit-only job completed (${ran}): ${job.owner}/${job.repo} PR #${job.prNumber}`);
+    return;
+  }
+
   await updateJobStep(env, job.id, 'Generating Summary', { status: 'running' });
 
   const pr = await github.getPullRequest(job.owner, job.repo, job.prNumber);
@@ -2223,6 +2365,8 @@ async function evaluateAndStageJulesDocsTask(
     router: "Match the repository's existing routing setup — inspect how routes/pages are already registered (e.g. react-router, Next.js app router, file-based routing) and follow that exact pattern; do NOT assume a framework.",
   });
 
+  const targetFiles = collectTargetFiles(report);
+
   const comment = await github.createIssueComment(job.owner, job.repo, job.prNumber,
     `📚 **Codra found documentation gaps**\n\n${report.summary}\n\nOnce this PR is **merged**, Codra will open a Jules agent session to address them. (Nothing happens if the PR is closed without merging.)`,
   ).catch(() => null);
@@ -2232,6 +2376,7 @@ async function evaluateAndStageJulesDocsTask(
     triggeringPrNumber: job.prNumber, triggeringJobId: job.id,
     prompt, gapSummary: report.summary,
     prCommentId: comment?.id ?? null,
+    targetFiles,
   });
 }
 

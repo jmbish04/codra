@@ -27,4 +27,15 @@ export const julesSessions = sqliteTable('jules_sessions', {
   // back to its Jules session so codra can direct corrections to it.
   created_pr_number: integer('created_pr_number'),
   created_pr_url: text('created_pr_url'),
+  // Session origin/category. INTERNAL_CODRA = Codra created it; EXTERNAL_* =
+  // a non-Codra Jules PR (CI-present vs not). Stamped INTERNAL_CODRA here.
+  category: text('category').notNull().default('INTERNAL_CODRA'),
+  // Cat-3 subcategory. Only 'docs' today; column exists so routing/dedup can
+  // disambiguate future internal kinds.
+  kind: text('kind').notNull().default('docs'),
+  // Source paths Codra scoped the task to (docstring gaps). Persisted so later
+  // verification can check Jules touched the right files.
+  target_files: text('target_files', { mode: 'json' }).$type<string[]>().notNull().default(sql`'[]'`),
+  // Telemetry from SessionResource.automationMode (AUTO_CREATE_PR etc). Not a routing key.
+  automation_mode: text('automation_mode'),
 });

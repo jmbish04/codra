@@ -6,7 +6,7 @@ import { loadRepoConfig } from '@server/core/config';
 import { extractReviewRequest, cancelReviewsForClosedPr } from '@server/core/review';
 import { verifyGitHubWebhookSignature } from '@server/core/verify';
 import { jsonError } from '@server/core/http';
-import { countAutoReviewsForPr, findExistingJobForHead, insertJob, MAX_AUTO_REVIEWS_PER_PR, supersedeOlderJobs } from '@server/db/jobs';
+import { countAutoReviewsForPr, findActiveJobsForPr, findExistingJobForHead, insertJob, MAX_AUTO_REVIEWS_PER_PR } from '@server/db/jobs';
 import { recordWebhookDelivery, finalizeWebhookDelivery, type DeliveryOutcome } from '@server/db/webhook-deliveries';
 import { getWorkerApiKey } from '@server/utils/secrets';
 import { notifyJobsChanged } from '@server/core/jobs-feed';
@@ -198,15 +198,20 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
         repo: payload.repository.name,
       });
 
-      if (repoConfig.enabled === false) {
-        return finish(202, { ok: true, ignored: true, reason: 'repository_disabled' }, 'ignored_repo_disabled');
-      }
-
+      // No blanket `enabled === false` gate: on-demand @codra-app mentions must
+      // work even when every auto-toggle is off. extractReviewRequest returns
+      // null for an auto event whose repo has no check enabled, so a disabled
+      // repo still produces no auto job.
       const extracted = extractReviewRequest({
         eventName,
         payload,
         botUsername: c.env.BOT_USERNAME,
         config: repoConfig.parsedJson,
+        flags: {
+          enabled: repoConfig.enabled,
+          docstringEnabled: repoConfig.docstringEnabled,
+          toolboxEnabled: repoConfig.toolboxEnabled,
+        },
       });
 
       if (extracted?.trigger === 'mention' && eventName === 'issue_comment' && 'comment' in payload && payload.comment?.id) {
@@ -241,6 +246,19 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
           }, 'job_created', { action: 'review', prNumber: extracted.prNumber, jobId: existingJob.id });
         }
 
+        // This fast path only handles auto (PR) events — mentions have no
+        // commitSha here and fall through to the queue/resolveQueuedJob path.
+        // Loop guard: an auto commit never restarts an in-flight review.
+        const activeJobs = await findActiveJobsForPr(c.env, {
+          owner: extracted.owner, repo: extracted.repo, prNumber: extracted.prNumber,
+        });
+        if (activeJobs.length > 0) {
+          return finish(202, {
+            ok: true, duplicate: true, reason: 'review_in_flight',
+            message: `A review is already running for PR #${extracted.prNumber}. Comment ${c.env.BOT_USERNAME ? '@' + c.env.BOT_USERNAME + ' review' : 'the review trigger'} to restart it.`,
+          }, 'job_created', { action: 'review', prNumber: extracted.prNumber, jobId: activeJobs[0].id });
+        }
+
         if (extracted.trigger === 'auto') {
           const autoCount = await countAutoReviewsForPr(c.env, {
             installationId: extracted.installationId,
@@ -268,14 +286,7 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
           headRef: extracted.headRef,
           baseRef: extracted.baseRef,
           configSnapshot: repoConfig.parsedJson,
-        });
-
-        await supersedeOlderJobs(c.env, {
-          installationId: extracted.installationId,
-          owner: extracted.owner,
-          repo: extracted.repo,
-          prNumber: extracted.prNumber,
-          newJobId: job.id,
+          scope: extracted.scope,
         });
 
         // Enqueue the job for the review pipeline (runReviewJob). This is the

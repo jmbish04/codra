@@ -5,6 +5,8 @@ import { getRepoConfigRecord, syncRepoConfig } from '@server/db/repo-configs';
 type CachedConfig = {
   parsedJson: RepoConfig;
   enabled: boolean;
+  docstringEnabled: boolean;
+  toolboxEnabled: boolean;
 };
 
 const REPO_CONFIG_CACHE_PREFIX = `config:${REPO_CONFIG_CACHE_VERSION}:db:`;
@@ -68,7 +70,14 @@ export async function loadRepoConfig(
   const key = await cacheKey(env, input.owner, input.repo);
   const cached = await env.APP_KV.get(key, 'json');
   if (cached) {
-    return cached as CachedConfig;
+    // Older cache entries predate the docstring/toolbox flags — default them off.
+    const c = cached as Partial<CachedConfig> & Pick<CachedConfig, 'parsedJson' | 'enabled'>;
+    return {
+      parsedJson: c.parsedJson,
+      enabled: c.enabled,
+      docstringEnabled: c.docstringEnabled ?? false,
+      toolboxEnabled: c.toolboxEnabled ?? false,
+    };
   }
 
   // Check DB for existing config
@@ -76,6 +85,8 @@ export async function loadRepoConfig(
 
   let parsedJson = existing?.parsedJson ?? defaultRepoConfig;
   const enabled = existing?.enabled ?? true;
+  const docstringEnabled = existing?.docstringEnabled ?? false;
+  const toolboxEnabled = existing?.toolboxEnabled ?? false;
 
   // If there's no DB override, use the GLOBAL config
   if (!hasRepoModelOverride(existing)) {
@@ -89,6 +100,8 @@ export async function loadRepoConfig(
   const finalConfig: CachedConfig = {
     parsedJson,
     enabled,
+    docstringEnabled,
+    toolboxEnabled,
   };
 
   await env.APP_KV.put(key, JSON.stringify(finalConfig), { expirationTtl: 60 * 10 });

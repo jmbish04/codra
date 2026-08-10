@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5ae810b2-0d23-4c0c-a8ec-691131314801",
-  "prevId": "7dda949c-cce2-45f2-8e82-d04aef2111b9",
+  "id": "67019888-114d-4fc2-ad5f-f187150784df",
+  "prevId": "bc06b059-d0e5-4cb0-9008-3f0ea1367d73",
   "tables": {
     "repositories": {
       "name": "repositories",
@@ -356,6 +356,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "best_practice_docs": {
+          "name": "best_practice_docs",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "batch_submitted_at": {
           "name": "batch_submitted_at",
           "type": "text",
@@ -690,6 +697,13 @@
         "cache_write_tokens": {
           "name": "cache_write_tokens",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "best_practice_checks": {
+          "name": "best_practice_checks",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -2817,6 +2831,37 @@
         },
         "created_pr_url": {
           "name": "created_pr_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'INTERNAL_CODRA'"
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'docs'"
+        },
+        "target_files": {
+          "name": "target_files",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "automation_mode": {
+          "name": "automation_mode",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

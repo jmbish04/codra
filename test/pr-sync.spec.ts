@@ -10,11 +10,11 @@ describe('open-PR sync', () => {
     const env = createTestEnv();
     await seedEnabledRepo(env, { installationId: 123, owner: 'acme', repo: 'core-remodel' });
 
-    // Relative to now so it stays inside sync's rolling 2-day age window — a
-    // hardcoded date silently ages out of the window and fails over time.
-    const recentlyCreatedAt = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    // Relative to now: pr-sync only pulls PRs newer than SYNC_MAX_PR_AGE_DAYS
+    // (a rolling window), so a hardcoded date becomes stale and gets skipped.
+    const recent = new Date(Date.now() - 3_600_000).toISOString();
     vi.spyOn(GitHubClient.prototype, 'listOpenPullRequests').mockResolvedValue([
-      { number: 210, title: 'Feat X', authorLogin: 'alice', headSha: 'aa11', headRef: 'feat-x', baseSha: 'bb22', baseRef: 'main', createdAt: recentlyCreatedAt },
+      { number: 210, title: 'Feat X', authorLogin: 'alice', headSha: 'aa11', headRef: 'feat-x', baseSha: 'bb22', baseRef: 'main', createdAt: recent },
     ]);
 
     const first = await syncOpenPullRequests(env);
