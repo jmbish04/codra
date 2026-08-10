@@ -13,6 +13,7 @@ import {
   listInfrastructures,
 } from '@server/db/best-practices';
 import { getSecretStoreBinding } from '@server/utils/secrets';
+import { fetchCloudflareDocResult } from '@server/services/cloudflare-docs';
 import {
   createCodemodeRuntime,
   DynamicWorkerExecutor,
@@ -108,6 +109,12 @@ export class GitHubLikeMCP extends McpAgent<any> {
           },
         ],
       }),
+    );
+    this.server.tool(
+      "search_cloudflare_docs",
+      "Search official Cloudflare documentation. Token-free (no AI); returns documentation text for a query. Use this to pull authoritative docs for a Cloudflare topic or a flagged best-practice violation.",
+      { query: z.string().describe("What to look up in the Cloudflare docs") } as any,
+      async ({ query }: { query: string }) => asText(await fetchCloudflareDocResult(query)),
     );
 
     this.server.tool(
