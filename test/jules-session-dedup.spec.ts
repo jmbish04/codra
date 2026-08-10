@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import {
   stageJulesSession, markJulesLaunched, markJulesFolded, findOutstandingCodraDocsSession, getJulesSessionById,
@@ -8,7 +8,14 @@ import { getDb } from '@server/db/client';
 import { julesSessions } from '@server/db/schemas';
 import { createTestEnv } from './helpers';
 import { collectTargetFiles } from '@server/core/jules-docs-gap';
-import { foldIntoOutstandingDocsSession } from '@server/core/jules';
+import { foldIntoOutstandingDocsSession, launchStagedJulesSessions } from '@server/core/jules';
+
+// The launch→fold wiring test exercises the REAL sendJulesLogged path, so the
+// SDK's outbound message is stubbed; everything else stays the actual module.
+vi.mock('@server/services/jules', async (importActual) => ({
+  ...(await importActual<typeof import('@server/services/jules')>()),
+  sendJulesMessage: vi.fn(async () => {}),
+}));
 
 describe('jules_sessions ledger columns', () => {
   let env: Env;
@@ -226,7 +233,12 @@ describe('foldIntoOutstandingDocsSession', () => {
 
     expect(folded).toBe(true);
     expect(sends).toHaveLength(1);
-    expect(sends[0]).toMatchObject({ sessionId: 'sess-A', kind: 'improve', text: 'second' });
+    // The follow-up is a reframed summary of the new gaps, not the raw kickoff
+    // prompt (whose "this pull request" would alias the running session's PR).
+    expect(sends[0]).toMatchObject({
+      sessionId: 'sess-A', kind: 'improve',
+      text: 'Additional documentation gaps found in a later PR (#2) for o/r. Please also address these in this session:\n\ng2',
+    });
     const after = await getJulesSessionById(env, next.id);
     expect(after?.state).toBe('skipped');
   });
@@ -276,5 +288,37 @@ describe('foldIntoOutstandingDocsSession', () => {
     expect(folded).toBe(false);
     const after = await getJulesSessionById(env, next.id);
     expect(after?.state).not.toBe('skipped');
+  });
+});
+
+describe('launchStagedJulesSessions folds instead of launching a duplicate', () => {
+  let env: Env;
+  beforeEach(() => { env = createTestEnv({ JULES_API_KEY: { get: async () => 'K' } } as any); });
+
+  function fakeGithub() {
+    return {
+      getRepo: async () => ({ default_branch: 'main' }),
+      createIssueComment: vi.fn(async () => ({ id: 1 })),
+      updateIssueComment: vi.fn(async () => ({ id: 1 })),
+    } as any;
+  }
+
+  it('folds a new docs task into the running session and does not launch', async () => {
+    // A docs session already running for the repo (launched, no PR yet).
+    const running = await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 1, prompt: 'p', gapSummary: 'g', targetFiles: ['src/a.ts'] });
+    await markJulesLaunched(env, running.id, { sessionId: 'sess-A', sessionUrl: 'u', sessionState: 'IN_PROGRESS' });
+    // A new staged docs task from a later merged PR.
+    const next = await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 2, prompt: 'p2', gapSummary: 'g2', targetFiles: ['src/b.ts'] });
+
+    const startSpy = vi.fn(async () => { throw new Error('should not launch a duplicate'); });
+    const deps = { isRepoConnected: async () => true, startJulesSession: startSpy } as any;
+
+    const launched = await launchStagedJulesSessions(env, fakeGithub(), { owner: 'o', repo: 'r', prNumber: 2 }, deps);
+
+    expect(startSpy).not.toHaveBeenCalled();       // no duplicate launch
+    expect(launched).toBe(0);                       // nothing launched (folded)
+    const after = await getJulesSessionById(env, next.id);
+    expect(after?.state).toBe('skipped');           // folded row marked skipped
+    expect(after?.session_id).toBe('sess-A');       // and linked to the session that got the work
   });
 });

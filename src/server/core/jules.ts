@@ -1,6 +1,6 @@
 import { logger } from '@server/core/logger';
 import { getSecretStoreBinding } from '@server/utils/secrets';
-import { listStagedJulesSessions, markJulesLaunched, markJulesOutcome, listLaunchedSessionsWithoutPr, findOutstandingCodraDocsSession, type JulesSessionRow } from '@server/db/jules-sessions';
+import { listStagedJulesSessions, markJulesLaunched, markJulesOutcome, markJulesFolded, listLaunchedSessionsWithoutPr, findOutstandingCodraDocsSession, type JulesSessionRow } from '@server/db/jules-sessions';
 import { isRepoConnected as realIsRepoConnected, startJulesSession as realStartJulesSession, getJulesSession } from '@server/services/jules';
 import { logLaunch, sendJulesLogged } from '@server/services/jules-interactions';
 import { setJulesSessionCreatedPr } from '@server/db/jules-interactions';
@@ -33,14 +33,20 @@ export async function foldIntoOutstandingDocsSession(
   if (!outstanding?.session_id) return false;
 
   const res = await send(env, apiKey, {
-    sessionId: outstanding.session_id, kind: 'improve', text: row.prompt,
+    sessionId: outstanding.session_id, kind: 'improve',
+    // Not `row.prompt`: that is a full kickoff prompt whose "this pull request"
+    // would alias the running session's own PR. Send only the new gaps.
+    text: `Additional documentation gaps found in a later PR (#${ctx.prNumber}) for ${ctx.owner}/${ctx.repo}. Please also address these in this session:\n\n${row.gap_summary}`,
     repository: `${ctx.owner}/${ctx.repo}`, prNumber: ctx.prNumber,
   });
   // A failed send must not claim success: leave the row staged and let the caller launch a fresh session.
   if (!res.ok) return false;
-  await markJulesOutcome(env, row.id, {
-    state: 'skipped', errorMsg: `Folded into outstanding session ${outstanding.session_id}`,
-  }).catch(() => {});
+  await markJulesFolded(env, row.id, {
+    sessionId: outstanding.session_id,
+    sessionUrl: outstanding.session_url ?? null,
+    sessionRowId: outstanding.id,
+    mergeTargetFiles: row.target_files ?? [],
+  });
 
   const body = `📚 An existing Jules docs session is still running, so Codra sent these documentation gaps to it instead of opening a new one.\n\n- Session: ${outstanding.session_url ?? outstanding.session_id}`;
   if (row.pr_comment_id != null) await github.updateIssueComment(ctx.owner, ctx.repo, row.pr_comment_id, body).catch(() => {});
@@ -88,10 +94,18 @@ export async function launchStagedJulesSessions(
     const branch = ctx.defaultBranch ?? (await github.getRepo(ctx.owner, ctx.repo).then((r) => r.default_branch).catch(() => 'main'));
 
     let launched = 0;
+    let foldedCount = 0;
     for (const row of staged) {
       try {
         // ponytail: lock-free dedup — two PRs merging concurrently can both miss the outstanding session and both launch; acceptable per the no-blocking-loops design.
-        if (await foldIntoOutstandingDocsSession(env, apiKey, github, ctx, row)) continue;
+        // A transient fold failure must degrade to a normal launch, never mark the row `error` (which would never be reprocessed).
+        let folded = false;
+        try {
+          folded = await foldIntoOutstandingDocsSession(env, apiKey, github, ctx, row);
+        } catch (err) {
+          logger.warn('fold check failed; launching normally', { row: row.id, error: err instanceof Error ? err.message : String(err) });
+        }
+        if (folded) { foldedCount++; continue; }
         const s = await deps.startJulesSession(apiKey, { owner: ctx.owner, repo: ctx.repo, branch, prompt: row.prompt, title: 'Codra: documentation improvements' });
         await markJulesLaunched(env, row.id, { sessionId: s.id, sessionUrl: s.url, sessionState: s.state });
         await logLaunch(env, { sessionId: s.id, repository: `${ctx.owner}/${ctx.repo}`, prNumber: ctx.prNumber, text: row.prompt }).catch(() => {});
@@ -104,6 +118,7 @@ export async function launchStagedJulesSessions(
         await markJulesOutcome(env, row.id, { state: 'error', errorMsg: String(err) }).catch(() => {});
       }
     }
+    logger.info('launch summary', { launched, folded: foldedCount });
     return launched;
   } catch (err) {
     logger.error('launchStagedJulesSessions failed', err instanceof Error ? err : new Error(String(err)));
