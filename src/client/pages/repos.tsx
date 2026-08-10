@@ -36,14 +36,23 @@ const EMPTY_MODEL_ROUTE: ModelRouteConfig = {
 
 type GlobalModelConfig = RepoConfig['model'];
 
+/**
+ * Docstring for repoId
+ */
 function repoId(repo: Pick<RepoConfigRecord, 'owner' | 'repo'>) {
   return `${repo.owner}/${repo.repo}`;
 }
 
+/**
+ * Docstring for hasStoredModelStrategy
+ */
 function hasStoredModelStrategy(repo: RepoConfigRecord) {
   return repo.mainModel !== null || repo.fallbackModels !== null || repo.sizeOverrides !== null;
 }
 
+/**
+ * Docstring for normalizeRoute
+ */
 function normalizeRoute(config: GlobalModelConfig | ModelRouteConfig | null | undefined): ModelRouteConfig {
   return {
     main: typeof config?.main === 'string' && config.main.trim() ? config.main : null,
@@ -54,10 +63,16 @@ function normalizeRoute(config: GlobalModelConfig | ModelRouteConfig | null | un
   };
 }
 
+/**
+ * Docstring for getGlobalRoute
+ */
 function getGlobalRoute(globalConfig: GlobalModelConfig | ModelRouteConfig | null): ModelRouteConfig {
   return normalizeRoute(globalConfig);
 }
 
+/**
+ * Docstring for getStoredRepoRoute
+ */
 function getStoredRepoRoute(repo: RepoConfigRecord): ModelRouteConfig | null {
   if (!hasStoredModelStrategy(repo)) return null;
 
@@ -68,10 +83,16 @@ function getStoredRepoRoute(repo: RepoConfigRecord): ModelRouteConfig | null {
   };
 }
 
+/**
+ * Docstring for stringArraysEqual
+ */
 function stringArraysEqual(a: string[] = [], b: string[] = []) {
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
+/**
+ * Docstring for tiersEqual
+ */
 function tiersEqual(a: ModelRouteConfig['size_overrides'] = [], b: ModelRouteConfig['size_overrides'] = []) {
   return a.length === b.length && a.every((tier, index) => {
     const other = b[index];
@@ -84,6 +105,9 @@ function tiersEqual(a: ModelRouteConfig['size_overrides'] = [], b: ModelRouteCon
   });
 }
 
+/**
+ * Docstring for routesEqual
+ */
 function routesEqual(a: ModelRouteConfig, b: ModelRouteConfig) {
   return (
     a.main === b.main &&
@@ -92,6 +116,9 @@ function routesEqual(a: ModelRouteConfig, b: ModelRouteConfig) {
   );
 }
 
+/**
+ * Docstring for hasMeaningfulCustomStrategy
+ */
 function hasMeaningfulCustomStrategy(repo: RepoConfigRecord, globalConfig: GlobalModelConfig | ModelRouteConfig | null) {
   const storedRoute = getStoredRepoRoute(repo);
   if (!storedRoute) return false;
@@ -102,6 +129,9 @@ function hasMeaningfulCustomStrategy(repo: RepoConfigRecord, globalConfig: Globa
   );
 }
 
+/**
+ * Docstring for getRepoRoute
+ */
 function getRepoRoute(repo: RepoConfigRecord, globalConfig: GlobalModelConfig | ModelRouteConfig | null): ModelRouteConfig {
   if (!hasMeaningfulCustomStrategy(repo, globalConfig)) {
     return getGlobalRoute(globalConfig);
@@ -110,6 +140,9 @@ function getRepoRoute(repo: RepoConfigRecord, globalConfig: GlobalModelConfig | 
   return getStoredRepoRoute(repo) ?? getGlobalRoute(globalConfig);
 }
 
+/**
+ * Docstring for formatLastActivity
+ */
 function formatLastActivity(value: string | Date | null) {
   if (!value) return null;
   return new Date(value).toLocaleDateString();
@@ -137,6 +170,9 @@ function pendingKey(id: string, flag: RepoFlag) {
   return `${id}::${flag}`;
 }
 
+/**
+ * Docstring for pluralize
+ */
 function pluralize(n: number, singular: string, plural = `${singular}s`) {
   return n === 1 ? singular : plural;
 }
@@ -307,6 +343,9 @@ function RepoModelModal({
     }
   };
 
+  /**
+   * Docstring for handleReset
+   */
   const handleReset = async () => {
     if (!repo) return;
     setSaving('reset');
@@ -477,6 +516,9 @@ export function ReposPage() {
     [repos, editingRepoId],
   );
 
+  /**
+   * Docstring for loadRepos
+   */
   const loadRepos = () => {
     setLoading(true);
     Promise.all([
@@ -507,6 +549,9 @@ export function ReposPage() {
 
   useEffect(() => { loadRepos(); }, []);
 
+  /**
+   * Docstring for mergeRepo
+   */
   const mergeRepo = (targetId: string, updates: Partial<RepoConfigRecord>) => {
     setRepos(current =>
       current.map(repo =>
@@ -515,6 +560,9 @@ export function ReposPage() {
     );
   };
 
+  /**
+   * Docstring for handleToggleFlag
+   */
   const handleToggleFlag = async (repo: RepoConfigRecord, flag: RepoFlag, value: boolean) => {
     const targetId = repoId(repo);
     const key = pendingKey(targetId, flag);
@@ -541,6 +589,9 @@ export function ReposPage() {
     }
   };
 
+  /**
+   * Docstring for handleReset
+   */
   const handleReset = async () => {
     if (resetting) return;
     setResetting(true);
@@ -562,6 +613,9 @@ export function ReposPage() {
     }
   };
 
+  /**
+   * Docstring for handleModelApplied
+   */
   const handleModelApplied = (repo: RepoConfigRecord, route: ModelRouteConfig) => {
     mergeRepo(repoId(repo), {
       mainModel: route.main,
@@ -570,6 +624,9 @@ export function ReposPage() {
     });
   };
 
+  /**
+   * Docstring for handleModelReset
+   */
   const handleModelReset = (repo: RepoConfigRecord) => {
     mergeRepo(repoId(repo), {
       mainModel: null,
@@ -578,6 +635,9 @@ export function ReposPage() {
     });
   };
 
+  /**
+   * Docstring for handleSync
+   */
   const handleSync = async () => {
     if (syncing) return;
     setSyncing(true);

@@ -12,10 +12,16 @@ type CachedConfig = {
 const REPO_CONFIG_CACHE_PREFIX = `config:${REPO_CONFIG_CACHE_VERSION}:db:`;
 const REPO_CONFIG_REVISION_KEY = `config:${REPO_CONFIG_CACHE_VERSION}:db_revision`;
 
+/**
+ * Docstring for getRepoConfigCacheRevision
+ */
 async function getRepoConfigCacheRevision(env: Pick<Env, 'APP_KV'>) {
   return (await env.APP_KV.get(REPO_CONFIG_REVISION_KEY)) ?? '0';
 }
 
+/**
+ * Docstring for cacheKey
+ */
 async function cacheKey(env: Pick<Env, 'APP_KV'>, owner: string, repo: string) {
   const revision = await getRepoConfigCacheRevision(env);
   return `${REPO_CONFIG_CACHE_PREFIX}${revision}:${owner}/${repo}`;
@@ -29,6 +35,9 @@ const EMPTY_GLOBAL_CONFIG: RepoConfig['model'] = {
   size_overrides: [],
 };
 
+/**
+ * Docstring for hasRepoModelOverride
+ */
 function hasRepoModelOverride(existing: Awaited<ReturnType<typeof getRepoConfigRecord>> | null) {
   return Boolean(
     existing?.mainModel ||
@@ -37,6 +46,9 @@ function hasRepoModelOverride(existing: Awaited<ReturnType<typeof getRepoConfigR
   );
 }
 
+/**
+ * Docstring for getGlobalConfig
+ */
 export async function getGlobalConfig(env: Pick<Env, 'APP_KV'>): Promise<RepoConfig['model']> {
   const cached = await env.APP_KV.get(GLOBAL_CONFIG_KEY, 'json');
   if (cached) {
@@ -49,20 +61,32 @@ export async function getGlobalConfig(env: Pick<Env, 'APP_KV'>): Promise<RepoCon
   return EMPTY_GLOBAL_CONFIG;
 }
 
+/**
+ * Docstring for updateGlobalConfig
+ */
 export async function updateGlobalConfig(env: Pick<Env, 'APP_KV'>, config: RepoConfig['model']) {
   await env.APP_KV.put(GLOBAL_CONFIG_KEY, JSON.stringify(normalizeRepoModelConfig(config)));
   await invalidateAllRepoConfigCache(env);
 }
 
+/**
+ * Docstring for invalidateRepoConfigCache
+ */
 export async function invalidateRepoConfigCache(env: Pick<Env, 'APP_KV'>, owner: string, repo: string) {
   await env.APP_KV.delete(await cacheKey(env, owner, repo));
 }
 
+/**
+ * Docstring for invalidateAllRepoConfigCache
+ */
 export async function invalidateAllRepoConfigCache(env: Pick<Env, 'APP_KV'>) {
   await env.APP_KV.put(REPO_CONFIG_REVISION_KEY, String(Date.now()));
 }
 
 
+/**
+ * Docstring for loadRepoConfig
+ */
 export async function loadRepoConfig(
   env: Pick<Env, 'APP_KV' | 'DB'>,
   input: { installationId: string; owner: string; repo: string },

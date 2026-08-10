@@ -19,6 +19,9 @@ export type JobLeaseClaim =
   | { status: 'terminal'; row: any }
   | { status: 'missing' };
 
+/**
+ * Docstring for hexToBytes
+ */
 function hexToBytes(hex: string) {
   const bytes = new Uint8Array(hex.length / 2);
   for (let index = 0; index < bytes.length; index += 1) {
@@ -27,6 +30,9 @@ function hexToBytes(hex: string) {
   return bytes;
 }
 
+/**
+ * Docstring for bytesToHex
+ */
 export function bytesToHex(value: any) {
   if (typeof value === 'string') {
     return value.startsWith('\\x') ? value.slice(2).toLowerCase() : value.toLowerCase();
@@ -37,6 +43,9 @@ export function bytesToHex(value: any) {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Docstring for latestTimestamp
+ */
 function latestTimestamp(...values: Array<string | null | undefined>) {
   const now = Date.now();
   return values.reduce<string | null>((latest, value) => {
@@ -47,6 +56,9 @@ function latestTimestamp(...values: Array<string | null | undefined>) {
   }, null);
 }
 
+/**
+ * Docstring for mapJob
+ */
 export function mapJob(row: any) {
   const lastQueueMessageAt = row.last_queue_message_at ? new Date(row.last_queue_message_at).getTime() : null;
   const nextRetryAt =
@@ -104,6 +116,9 @@ export function mapJob(row: any) {
   };
 }
 
+/**
+ * Docstring for mergeRow
+ */
 function mergeRow(res: { jobs: typeof jobs.$inferSelect; repositories: typeof repositories.$inferSelect }) {
   return {
     ...res.jobs,
@@ -113,6 +128,9 @@ function mergeRow(res: { jobs: typeof jobs.$inferSelect; repositories: typeof re
   };
 }
 
+/**
+ * Docstring for insertJob
+ */
 export async function insertJob(
   env: Pick<Env, 'DB'>,
   input: {
@@ -160,6 +178,9 @@ export async function insertJob(
   return mapJob({ ...row, owner: input.owner, repo: input.repo, installation_id: input.installationId });
 }
 
+/**
+ * Docstring for listJobs
+ */
 export async function listJobs(
   env: Pick<Env, 'DB'>,
   query: {
@@ -210,6 +231,9 @@ export async function listJobs(
   };
 }
 
+/**
+ * Docstring for getJobForProcessing
+ */
 export async function getJobForProcessing(env: Pick<Env, 'DB'>, jobId: string) {
   if (!jobId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
     return null;
@@ -319,6 +343,9 @@ export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) 
   };
 }
 
+/**
+ * Docstring for getJobDetail
+ */
 export async function getJobDetail(env: Pick<Env, 'DB'>, jobId: string) {
   if (!jobId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
     return null;
@@ -406,6 +433,9 @@ export async function getJobDetail(env: Pick<Env, 'DB'>, jobId: string) {
   });
 }
 
+/**
+ * Docstring for startJobProcessing
+ */
 export async function startJobProcessing(env: Pick<Env, 'DB'>, jobId: string, stepName: string) {
   const db = getDb(env);
   const now = new Date().toISOString();
@@ -434,6 +464,9 @@ export async function startJobProcessing(env: Pick<Env, 'DB'>, jobId: string, st
   return !!updated;
 }
 
+/**
+ * Docstring for claimJobLease
+ */
 export async function claimJobLease(
   env: Pick<Env, 'DB'>,
   jobId: string,
@@ -489,6 +522,9 @@ export async function claimJobLease(
   };
 }
 
+/**
+ * Docstring for heartbeatJobLease
+ */
 export async function heartbeatJobLease(
   env: Pick<Env, 'DB'>,
   jobId: string,
@@ -509,6 +545,9 @@ export async function heartbeatJobLease(
     ));
 }
 
+/**
+ * Docstring for releaseJobLease
+ */
 export async function releaseJobLease(env: Pick<Env, 'DB'>, jobId: string, leaseOwner: string) {
   const db = getDb(env);
   await db.update(jobs)
@@ -522,6 +561,9 @@ export async function releaseJobLease(env: Pick<Env, 'DB'>, jobId: string, lease
     ));
 }
 
+/**
+ * Docstring for recordJobBatch
+ */
 export async function recordJobBatch(
   env: Pick<Env, 'DB'>,
   jobId: string,
@@ -536,6 +578,9 @@ export async function recordJobBatch(
   }).where(eq(jobs.id, jobId));
 }
 
+/**
+ * Docstring for clearJobBatch
+ */
 export async function clearJobBatch(env: Pick<Env, 'DB'>, jobId: string) {
   const db = getDb(env);
   await db.update(jobs).set({
@@ -546,6 +591,9 @@ export async function clearJobBatch(env: Pick<Env, 'DB'>, jobId: string) {
   }).where(eq(jobs.id, jobId));
 }
 
+/**
+ * Docstring for markJobContinuationQueued
+ */
 export async function markJobContinuationQueued(env: Pick<Env, 'DB'>, jobId: string, delaySeconds = 0) {
   const db = getDb(env);
   const now = new Date().toISOString();
@@ -557,16 +605,25 @@ export async function markJobContinuationQueued(env: Pick<Env, 'DB'>, jobId: str
     .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running')));
 }
 
+/**
+ * Docstring for updateJobCheckRun
+ */
 export async function updateJobCheckRun(env: Pick<Env, 'DB'>, jobId: string, checkRunId: number) {
   const db = getDb(env);
   await db.update(jobs).set({ check_run_id: checkRunId }).where(eq(jobs.id, jobId));
 }
 
+/**
+ * Docstring for updateJobStatusComment
+ */
 export async function updateJobStatusComment(env: Pick<Env, 'DB'>, jobId: string, statusCommentId: number) {
   const db = getDb(env);
   await db.update(jobs).set({ status_comment_id: statusCommentId }).where(eq(jobs.id, jobId));
 }
 
+/**
+ * Docstring for completeJob
+ */
 export async function completeJob(
   env: Pick<Env, 'DB'>,
   jobId: string,
@@ -626,6 +683,9 @@ export async function completeJob(
   }).where(and(eq(jobs.id, jobId), notInArray(jobs.status, ['merged', 'closed'])));
 }
 
+/**
+ * Docstring for failJob
+ */
 export async function failJob(env: Pick<Env, 'DB'>, jobId: string, errorMessage: string) {
   const db = getDb(env);
   const now = new Date().toISOString();
@@ -651,16 +711,25 @@ export async function failJob(env: Pick<Env, 'DB'>, jobId: string, errorMessage:
   }).where(and(eq(jobs.id, jobId), notInArray(jobs.status, ['merged', 'closed'])));
 }
 
+/**
+ * Docstring for markJobCheckRunCompleted
+ */
 export async function markJobCheckRunCompleted(env: Pick<Env, 'DB'>, jobId: string) {
   const db = getDb(env);
   await db.update(jobs).set({ check_run_completed_at: new Date().toISOString() }).where(eq(jobs.id, jobId));
 }
 
+/**
+ * Docstring for updateJobFileCount
+ */
 export async function updateJobFileCount(env: Pick<Env, 'DB'>, jobId: string, fileCount: number) {
   const db = getDb(env);
   await db.update(jobs).set({ file_count: fileCount }).where(eq(jobs.id, jobId));
 }
 
+/**
+ * Docstring for completePreparationStep
+ */
 export async function completePreparationStep(env: Pick<Env, 'DB'>, jobId: string, fileCount: number) {
   const db = getDb(env);
   const now = new Date().toISOString();
@@ -843,6 +912,9 @@ export async function markPrClosed(
   return { cancelledActiveIds: active.map((j) => j.id) };
 }
 
+/**
+ * Docstring for findExistingJobForHead
+ */
 export async function findExistingJobForHead(
   env: Pick<Env, 'DB'>,
   input: { owner: string; repo: string; prNumber: number; commitSha: string; trigger: 'auto' | 'mention' },
@@ -865,6 +937,9 @@ export async function findExistingJobForHead(
   return res ? mapJob(mergeRow(res)) : null;
 }
 
+/**
+ * Docstring for updateJobStep
+ */
 export async function updateJobStep(
   env: Pick<Env, 'DB'>,
   jobId: string,
@@ -910,6 +985,9 @@ export async function updateJobStep(
   }).where(eq(jobs.id, jobId));
 }
 
+/**
+ * Docstring for recoverStaleJobs
+ */
 export async function recoverStaleJobs(
   env: Pick<Env, 'DB'>,
   thresholdMinutes = 20,
@@ -930,6 +1008,9 @@ export async function recoverStaleJobs(
   return rows.length;
 }
 
+/**
+ * Docstring for recoverExpiredJobLeases
+ */
 export async function recoverExpiredJobLeases(
   env: Pick<Env, 'DB'>,
   maxRecoveryCount = 3,
@@ -995,6 +1076,9 @@ export async function recoverExpiredJobLeases(
   return { requeuedJobIds, failedJobs };
 }
 
+/**
+ * Docstring for getTerminalJobsNeedingCheckRunCompletion
+ */
 export async function getTerminalJobsNeedingCheckRunCompletion(
   env: Pick<Env, 'DB'>,
   limit = 25,
@@ -1015,6 +1099,9 @@ export async function getTerminalJobsNeedingCheckRunCompletion(
   return rows.map(r => mergeRow(r));
 }
 
+/**
+ * Docstring for supersedeOlderJobs
+ */
 export async function supersedeOlderJobs(
   env: Pick<Env, 'DB'>,
   input: {
@@ -1079,6 +1166,9 @@ export async function countAutoReviewsForPr(
   return row?.count ?? 0;
 }
 
+/**
+ * Docstring for forceRestartJob
+ */
 export async function forceRestartJob(
   env: Pick<Env, 'DB'>,
   jobId: string,

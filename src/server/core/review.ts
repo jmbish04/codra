@@ -81,6 +81,9 @@ function isRetryableEngineError(err: unknown): boolean {
   return isRetryableOpenCodeError(err) || isRetryableComputerEngineError(err);
 }
 
+/**
+ * Docstring for isRetryableFileReviewErrorMessage
+ */
 function isRetryableFileReviewErrorMessage(message: string | null | undefined) {
   if (!message) return false;
   const lower = message.toLowerCase();
@@ -101,12 +104,18 @@ function isRetryableFileReviewErrorMessage(message: string | null | undefined) {
   );
 }
 
+/**
+ * Docstring for retryableModelFailureDelaySeconds
+ */
 function retryableModelFailureDelaySeconds(failureCount: number | null | undefined) {
   if (!failureCount || failureCount < 1) return RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS[0];
   const index = Math.min(failureCount - 1, RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS.length - 1);
   return RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS[index];
 }
 
+/**
+ * Docstring for getRetryableModelFailureDelaySeconds
+ */
 function getRetryableModelFailureDelaySeconds(error: unknown) {
   const record = error && typeof error === 'object' ? error as { retryAfterSeconds?: unknown } : null;
   const retryAfterSeconds =
@@ -116,10 +125,16 @@ function getRetryableModelFailureDelaySeconds(error: unknown) {
   return retryAfterSeconds ?? RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS[0];
 }
 
+/**
+ * Docstring for shouldRetryExistingFileReview
+ */
 function shouldRetryExistingFileReview(review: { file_status: string; error_msg: string | null }) {
   return review.file_status === 'failed' && isRetryableFileReviewErrorMessage(review.error_msg);
 }
 
+/**
+ * Docstring for countsAsHandledFileReview
+ */
 function countsAsHandledFileReview(review: { file_status: string; error_msg: string | null }) {
   // A seeded 'pending' placeholder is NOT a completed review — it still needs to
   // be reviewed. (Treating it as handled skips the file entirely.)
@@ -127,8 +142,14 @@ function countsAsHandledFileReview(review: { file_status: string; error_msg: str
   return !shouldRetryExistingFileReview(review);
 }
 
+/**
+ * Docstring for configuredModelSet
+ */
 function configuredModelSet(config: RepoConfig) {
   const models = new Set<string>();
+  /**
+   * Docstring for addModel
+   */
   const addModel = (model: string | null | undefined) => {
     if (model) models.add(normalizeModelId(model));
   };
@@ -147,10 +168,16 @@ function configuredModelSet(config: RepoConfig) {
   return models;
 }
 
+/**
+ * Docstring for canInheritParentFileReview
+ */
 function canInheritParentFileReview(config: RepoConfig, review: { model_used: string }) {
   return configuredModelSet(config).has(normalizeModelId(review.model_used));
 }
 
+/**
+ * Docstring for resolveModelProviderName
+ */
 async function resolveModelProviderName(env: Pick<Env, 'DB'>, modelId: string | null | undefined) {
   if (!modelId || modelId === 'unconfigured') return null;
 
@@ -165,6 +192,9 @@ async function resolveModelProviderName(env: Pick<Env, 'DB'>, modelId: string | 
   }
 }
 
+/**
+ * Docstring for shouldTriggerFromPullRequest
+ */
 function shouldTriggerFromPullRequest(action: PullRequestWebhookPayload['action'], config: RepoConfig['review']) {
   return (config.on as string[]).includes(action);
 }
@@ -229,6 +259,9 @@ function jobScope(job: { scope?: JobScope | null }): JobScope {
   return job.scope ?? LEGACY_JOB_SCOPE;
 }
 
+/**
+ * Docstring for scopeForMode
+ */
 function scopeForMode(mode: ReviewMode, flags: RepoCheckFlags): JobScope {
   if (mode === 'docstring') return { codeReview: false, docstring: true, toolbox: false };
   if (mode === 'toolbox') return { codeReview: false, docstring: false, toolbox: true };
@@ -236,6 +269,9 @@ function scopeForMode(mode: ReviewMode, flags: RepoCheckFlags): JobScope {
   return { codeReview: true, docstring: flags.docstringEnabled, toolbox: flags.toolboxEnabled };
 }
 
+/**
+ * Docstring for extractReviewRequest
+ */
 export function extractReviewRequest(input: {
   eventName: GitHubWebhookEventName;
   payload: GitHubWebhookPayload;
@@ -319,6 +355,9 @@ export function extractReviewRequest(input: {
   return null;
 }
 
+/**
+ * Docstring for runReviewJob
+ */
 export async function runReviewJob(env: Env, message: ReviewJobMessage): Promise<ReviewJobRunResult> {
   const resolved = await resolveQueuedJob(env, message);
   if (!resolved) {
@@ -395,6 +434,9 @@ export async function runReviewJob(env: Env, message: ReviewJobMessage): Promise
   }
 }
 
+/**
+ * Docstring for resolveQueuedJob
+ */
 async function resolveQueuedJob(
   env: Env,
   message: ReviewJobMessage,
@@ -555,6 +597,9 @@ async function resolveQueuedJob(
   return { job, phase: 'prepare' };
 }
 
+/**
+ * Docstring for runPreparePhase
+ */
 async function runPreparePhase(
   env: Env,
   job: PersistedReviewJob,
@@ -634,6 +679,9 @@ async function runPreparePhase(
   await enqueueJobPhase(env, job.id, 'review');
 }
 
+/**
+ * Docstring for runReviewPhase
+ */
 async function runReviewPhase(
   env: Env,
   job: PersistedReviewJob,
@@ -707,6 +755,9 @@ async function runReviewPhase(
   const config = (job.configSnapshot ?? defaultRepoConfig) as RepoConfig;
   const failureModelId = config.model?.main ?? 'unconfigured';
   let failureModelProviderPromise: Promise<string | null> | null = null;
+  /**
+   * Docstring for resolveFailureModelProvider
+   */
   const resolveFailureModelProvider = () => {
     failureModelProviderPromise ??= resolveModelProviderName(env, failureModelId);
     return failureModelProviderPromise;
@@ -833,6 +884,9 @@ async function runReviewPhase(
   // abort point for this loop; this heartbeat only ever refreshes the lease
   // and pings the check-run, and never throws into the review path.
   const heartbeatState = { last: Date.now() };
+  /**
+   * Docstring for maybeHeartbeat
+   */
   const maybeHeartbeat = async () => {
     if (Date.now() - heartbeatState.last < 30_000) return;
     heartbeatState.last = Date.now();
@@ -878,6 +932,9 @@ async function runReviewPhase(
       }
     }
 
+    /**
+     * Docstring for reviewTask
+     */
     const reviewTask = async () => {
       if (!inherited) {
         await reviewAndPersistFile(env, job, file, pr, config, totalLineCount, model, pricing, projectContext, sharedContext, filePlan, resolveFailureModelProvider, maybeHeartbeat, existingReview);
@@ -1373,6 +1430,9 @@ async function delegateToEngine(
   }
 }
 
+/**
+ * Docstring for reviewAndPersistFile
+ */
 async function reviewAndPersistFile(
   env: Env,
   job: PersistedReviewJob,
@@ -1724,6 +1784,9 @@ async function reviewAndPersistFile(
   }
 }
 
+/**
+ * Docstring for runFinalizePhase
+ */
 async function runFinalizePhase(
   env: Env,
   job: PersistedReviewJob,
@@ -2057,6 +2120,9 @@ async function runFinalizePhase(
 // Throws JOB_SUPERSEDED if a newer commit/job has taken over this PR, or the PR
 // was merged/closed, so the current invocation stops before spending more model
 // calls on stale code.
+/**
+ * Docstring for checkSuperseded
+ */
 async function checkSuperseded(env: Env, jobId: string) {
   const currentJob = await getJobForProcessing(env, jobId);
   if (currentJob && ['superseded', 'merged', 'closed'].includes(currentJob.status)) {
@@ -2228,11 +2294,17 @@ async function runChangelogPhase(
   await github.updateIssueComment(job.owner, job.repo, job.statusCommentId, body);
 }
 
+/**
+ * Docstring for heartbeatAndCheckSuperseded
+ */
 async function heartbeatAndCheckSuperseded(env: Env, jobId: string, leaseOwner: string) {
   await heartbeatJobLease(env, jobId, leaseOwner, JOB_LEASE_SECONDS);
   await checkSuperseded(env, jobId);
 }
 
+/**
+ * Docstring for enqueueJobPhase
+ */
 async function enqueueJobPhase(
   env: Env,
   jobId: string,
@@ -2250,10 +2322,16 @@ async function enqueueJobPhase(
   );
 }
 
+/**
+ * Docstring for hasCompletedStep
+ */
 function hasCompletedStep(job: PersistedReviewJob, stepName: string) {
   return job.steps.some((step) => step.name === stepName && step.status === 'done');
 }
 
+/**
+ * Docstring for failJobAndCheckRun
+ */
 async function failJobAndCheckRun(
   env: Env,
   job: PersistedReviewJob,
@@ -2330,6 +2408,9 @@ type HousekeepingChange = {
   existingSha?: string;
 };
 
+/**
+ * Docstring for evaluateAndStageJulesDocsTask
+ */
 async function evaluateAndStageJulesDocsTask(
   env: Env, job: PersistedReviewJob, github: GitHubService, model: ModelService, config: RepoConfig,
 ) {
@@ -2363,6 +2444,9 @@ async function evaluateAndStageJulesDocsTask(
   });
 }
 
+/**
+ * Docstring for standardizeRepository
+ */
 async function standardizeRepository(
   env: Env,
   job: PersistedReviewJob,
