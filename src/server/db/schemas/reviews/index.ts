@@ -28,6 +28,8 @@ export const fileReviews = sqliteTable('file_reviews', {
   engine_used: text('engine_used'),
   cache_read_tokens: integer('cache_read_tokens'),
   cache_write_tokens: integer('cache_write_tokens'),
+  // JSON: BestPracticeCheck[] — per-file best-practice pass/violation results.
+  best_practice_checks: text('best_practice_checks'),
 });
 
 // Per-usage-type cost breakdown for a single file review. One row per usage

@@ -50,5 +50,7 @@ export const jobs = sqliteTable('jobs', {
   batch_request_id: text('batch_request_id'),
   batch_model: text('batch_model'),
   batch_file_paths: text('batch_file_paths', { mode: 'json' }),
+  // JSON: { violated: string[], checks: {practice,passed,violated}[], docs: CloudflareDocResult[] }
+  best_practice_docs: text('best_practice_docs'),
   batch_submitted_at: text('batch_submitted_at'),
 });
