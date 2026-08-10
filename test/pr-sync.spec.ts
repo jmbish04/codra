@@ -10,8 +10,11 @@ describe('open-PR sync', () => {
     const env = createTestEnv();
     await seedEnabledRepo(env, { installationId: 123, owner: 'acme', repo: 'core-remodel' });
 
+    // Relative to now so it stays inside sync's rolling 2-day age window — a
+    // hardcoded date silently ages out of the window and fails over time.
+    const recentlyCreatedAt = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     vi.spyOn(GitHubClient.prototype, 'listOpenPullRequests').mockResolvedValue([
-      { number: 210, title: 'Feat X', authorLogin: 'alice', headSha: 'aa11', headRef: 'feat-x', baseSha: 'bb22', baseRef: 'main', createdAt: '2026-07-24T00:00:00Z' },
+      { number: 210, title: 'Feat X', authorLogin: 'alice', headSha: 'aa11', headRef: 'feat-x', baseSha: 'bb22', baseRef: 'main', createdAt: recentlyCreatedAt },
     ]);
 
     const first = await syncOpenPullRequests(env);
