@@ -190,6 +190,27 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
             cancelled > 0 ? { action: 'review_cancelled', prNumber } : { prNumber },
           );
         }
+
+        // Jules opens PRs as the authenticating user (not a bot), so the isBotSender
+        // gate does not catch them. Recognize Codra's own Jules docs PRs and divert
+        // them out of the paid standard review; link the PR to its session.
+        const { classifyAndLinkJulesPr } = await import('@server/core/jules-pr');
+        const link = await classifyAndLinkJulesPr(c.env, {
+          owner: payload.repository.owner.login,
+          repo: payload.repository.name,
+          prNumber: prPayload.pull_request.number,
+          prUrl,
+          body: prPayload.pull_request.body,
+          headRef: prPayload.pull_request.head?.ref ?? '',
+        }).catch(() => ({ diverted: false }));
+        if (link.diverted) {
+          return finish(
+            202,
+            { ok: true, message: 'jules_pr_diverted' },
+            'jules_pr_diverted',
+            { prNumber: prPayload.pull_request.number },
+          );
+        }
       }
 
       const repoConfig = await loadRepoConfig(c.env, {

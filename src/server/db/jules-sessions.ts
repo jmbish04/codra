@@ -136,6 +136,15 @@ export async function getJulesSessionById(
   return row ?? null;
 }
 
+/** Fetch a session row by the Jules session id it was assigned at launch. */
+export async function findJulesSessionBySessionId(
+  env: Pick<Env, 'DB'>, sessionId: string,
+): Promise<JulesSessionRow | null> {
+  const db = getDb(env);
+  const row = await db.select().from(julesSessions).where(eq(julesSessions.session_id, sessionId)).get();
+  return row ?? null;
+}
+
 /** Refresh the live session state (and url) pulled from Jules. Best-effort. */
 export async function updateJulesLiveState(
   env: Pick<Env, 'DB'>, id: string, v: { sessionState: string; sessionUrl?: string | null },

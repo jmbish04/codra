@@ -21,6 +21,7 @@ export type DeliveryOutcome =
   | 'review_cancelled'           // PR closed/merged → an active review was cancelled
   | 'queued'                     // handed to REVIEW_QUEUE for deferred handling
   | 'no_action'                  // valid + supported but produced no job
+  | 'jules_pr_diverted'          // diverted Codra Jules PR from standard review
   | 'error';                     // exception during processing (500)
 
 export async function recordWebhookDelivery(
