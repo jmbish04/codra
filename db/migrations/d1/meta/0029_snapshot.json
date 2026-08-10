@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3a93396a-ec4b-4512-9b66-4b3e262e7fe8",
+  "id": "5ae810b2-0d23-4c0c-a8ec-691131314801",
   "prevId": "7dda949c-cce2-45f2-8e82-d04aef2111b9",
   "tables": {
     "repositories": {
@@ -183,6 +183,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "status": {
@@ -835,6 +842,22 @@
           "notNull": true,
           "autoincrement": false,
           "default": true
+        },
+        "docstring_enabled": {
+          "name": "docstring_enabled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "toolbox_enabled": {
+          "name": "toolbox_enabled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "main_model": {
           "name": "main_model",
@@ -2794,37 +2817,6 @@
         },
         "created_pr_url": {
           "name": "created_pr_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "category": {
-          "name": "category",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'INTERNAL_CODRA'"
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'docs'"
-        },
-        "target_files": {
-          "name": "target_files",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
-        },
-        "automation_mode": {
-          "name": "automation_mode",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

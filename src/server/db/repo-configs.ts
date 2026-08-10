@@ -18,6 +18,8 @@ function mapRepo(row: any) {
     fallbackModels: parseJsonColumn(row.fallback_models, null),
     sizeOverrides: parseJsonColumn(row.size_overrides, null),
     enabled: Boolean(row.enabled),
+    docstringEnabled: Boolean(row.docstring_enabled),
+    toolboxEnabled: Boolean(row.toolbox_enabled),
   });
 }
 
@@ -89,24 +91,49 @@ export async function syncRepoConfig(
     .onConflictDoNothing();
 }
 
-export async function updateRepoConfigEnabled(
+/**
+ * Update any subset of the three per-repo auto-toggles (Code Review / DocString
+ * Enforcer / Toolbox Watcher). Only the provided flags are written.
+ */
+export async function updateRepoConfigFlags(
   env: Pick<Env, 'DB'>,
   input: {
     owner: string;
     repo: string;
-    enabled: boolean;
+    enabled?: boolean;
+    docstringEnabled?: boolean;
+    toolboxEnabled?: boolean;
   },
 ) {
   const db = getDb(env);
   const repoRow = await db.select({ id: repositories.id }).from(repositories)
     .where(and(eq(repositories.owner, input.owner), eq(repositories.repo, input.repo)))
     .limit(1).get();
+  if (!repoRow) return;
 
-  if (repoRow) {
-    await db.update(repoConfigs)
-      .set({ enabled: input.enabled, updated_at: sql`CURRENT_TIMESTAMP` })
-      .where(eq(repoConfigs.repository_id, repoRow.id));
-  }
+  const set: Record<string, unknown> = { updated_at: sql`CURRENT_TIMESTAMP` };
+  if (input.enabled !== undefined) set.enabled = input.enabled;
+  if (input.docstringEnabled !== undefined) set.docstring_enabled = input.docstringEnabled;
+  if (input.toolboxEnabled !== undefined) set.toolbox_enabled = input.toolboxEnabled;
+
+  await db.update(repoConfigs).set(set).where(eq(repoConfigs.repository_id, repoRow.id));
+}
+
+/**
+ * Reset button: turn all three auto-toggles off for every repo in one statement.
+ * Users then re-enable per repo. Returns the number of repo configs affected.
+ */
+export async function resetAllRepoConfigs(env: Pick<Env, 'DB'>): Promise<number> {
+  const db = getDb(env);
+  const rows = await db.update(repoConfigs)
+    .set({
+      enabled: false,
+      docstring_enabled: false,
+      toolbox_enabled: false,
+      updated_at: sql`CURRENT_TIMESTAMP`,
+    })
+    .returning({ id: repoConfigs.id });
+  return rows.length;
 }
 
 export async function listRepoConfigs(env: Pick<Env, 'DB'>) {
@@ -131,13 +158,22 @@ export async function listRepoConfigs(env: Pick<Env, 'DB'>) {
     fallback_models: repoConfigs.fallback_models,
     size_overrides: repoConfigs.size_overrides,
     enabled: repoConfigs.enabled,
+    docstring_enabled: repoConfigs.docstring_enabled,
+    toolbox_enabled: repoConfigs.toolbox_enabled,
     last_job_created_at: lastJobsSq.last_job_created_at,
     last_job_verdict: lastJobsSq.last_job_verdict,
   })
   .from(repoConfigs)
   .innerJoin(repositories, eq(repoConfigs.repository_id, repositories.id))
   .leftJoin(lastJobsSq, eq(lastJobsSq.repository_id, repositories.id))
-  .orderBy(repositories.owner, repositories.repo)
+  // Most recently active repos first (user likely wants reviews on what they're
+  // working on now); never-reviewed repos sort last, then alphabetically.
+  .orderBy(
+    sql`${lastJobsSq.last_job_created_at} IS NULL`,
+    sql`${lastJobsSq.last_job_created_at} DESC`,
+    repositories.owner,
+    repositories.repo,
+  )
   .all();
 
   return rows.map(mapRepo);
@@ -165,6 +201,8 @@ export async function getRepoConfigRecord(env: Pick<Env, 'DB'>, owner: string, r
     fallback_models: repoConfigs.fallback_models,
     size_overrides: repoConfigs.size_overrides,
     enabled: repoConfigs.enabled,
+    docstring_enabled: repoConfigs.docstring_enabled,
+    toolbox_enabled: repoConfigs.toolbox_enabled,
     last_job_created_at: lastJobsSq.last_job_created_at,
     last_job_verdict: lastJobsSq.last_job_verdict,
   })

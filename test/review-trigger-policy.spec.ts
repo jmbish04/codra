@@ -26,6 +26,20 @@ async function seedJob(env: Env, repositoryId: number, prNumber: number, trigger
   return row.id;
 }
 
+const ALL_ON = { enabled: true, docstringEnabled: true, toolboxEnabled: true };
+const CODE_ONLY = { enabled: true, docstringEnabled: false, toolboxEnabled: false };
+const ALL_OFF = { enabled: false, docstringEnabled: false, toolboxEnabled: false };
+
+function commentPayload(body: string) {
+  return {
+    action: 'created',
+    installation: { id: 123 },
+    repository: { owner: { login: 'test-owner' }, name: 'app' },
+    issue: { number: 7, pull_request: {} },
+    comment: { id: 1, body },
+  } as any;
+}
+
 function pullRequestPayload(sender?: { login: string; type?: string }) {
   return {
     action: 'opened',
@@ -73,6 +87,7 @@ describe('extractReviewRequest bot guard', () => {
       payload: pullRequestPayload({ login: 'codra-app[bot]', type: 'Bot' }),
       botUsername: 'codra-app',
       config: defaultRepoConfig,
+      flags: ALL_ON,
     });
     expect(result).toBeNull();
   });
@@ -83,8 +98,78 @@ describe('extractReviewRequest bot guard', () => {
       payload: pullRequestPayload({ login: 'alice', type: 'User' }),
       botUsername: 'codra-app',
       config: defaultRepoConfig,
+      flags: CODE_ONLY,
     });
     expect(result?.trigger).toBe('auto');
+  });
+});
+
+describe('extractReviewRequest scope + mode', () => {
+  const base = { botUsername: 'codra-app', config: defaultRepoConfig } as const;
+
+  it('auto scope mirrors the enabled repo toggles', () => {
+    const result = extractReviewRequest({
+      ...base,
+      eventName: 'pull_request',
+      payload: pullRequestPayload({ login: 'alice', type: 'User' }),
+      flags: { enabled: true, docstringEnabled: false, toolboxEnabled: true },
+    });
+    expect(result?.scope).toEqual({ codeReview: true, docstring: false, toolbox: true });
+  });
+
+  it('returns null for an auto event when every toggle is off', () => {
+    const result = extractReviewRequest({
+      ...base,
+      eventName: 'pull_request',
+      payload: pullRequestPayload({ login: 'alice', type: 'User' }),
+      flags: ALL_OFF,
+    });
+    expect(result).toBeNull();
+  });
+
+  it('bare mention → review mode, code review even when toggles are off', () => {
+    const result = extractReviewRequest({
+      ...base,
+      eventName: 'issue_comment',
+      payload: commentPayload('@codra-app'),
+      flags: ALL_OFF,
+    });
+    expect(result?.trigger).toBe('mention');
+    expect(result?.mode).toBe('review');
+    expect(result?.scope).toEqual({ codeReview: true, docstring: false, toolbox: false });
+  });
+
+  it('@codra-app review carries repo extras', () => {
+    const result = extractReviewRequest({
+      ...base,
+      eventName: 'issue_comment',
+      payload: commentPayload('please @codra-app review this'),
+      flags: { enabled: false, docstringEnabled: true, toolboxEnabled: false },
+    });
+    expect(result?.mode).toBe('review');
+    expect(result?.scope).toEqual({ codeReview: true, docstring: true, toolbox: false });
+  });
+
+  it('@codra-app audit docstring → docstring-only scope regardless of toggles', () => {
+    const result = extractReviewRequest({
+      ...base,
+      eventName: 'issue_comment',
+      payload: commentPayload('@codra-app audit docstring'),
+      flags: ALL_OFF,
+    });
+    expect(result?.mode).toBe('docstring');
+    expect(result?.scope).toEqual({ codeReview: false, docstring: true, toolbox: false });
+  });
+
+  it('@codra-app audit toolbox → toolbox-only scope', () => {
+    const result = extractReviewRequest({
+      ...base,
+      eventName: 'issue_comment',
+      payload: commentPayload('@codra-app audit toolbox'),
+      flags: ALL_OFF,
+    });
+    expect(result?.mode).toBe('toolbox');
+    expect(result?.scope).toEqual({ codeReview: false, docstring: false, toolbox: true });
   });
 });
 
