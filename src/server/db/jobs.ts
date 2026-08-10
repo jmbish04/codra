@@ -321,7 +321,7 @@ export async function getReviewSuggestions(env: Pick<Env, 'DB'>, jobId: string) 
     suggestionCount: suggestions.length,
     fileCount: files.length,
     filesWithComments: files.filter((f) => f.commentCount > 0).length,
-    bestPractices: parseJsonColumn<{ violated: string[]; checks: Array<{ practice: string; passed: number; violated: number }>; docs: Array<{ query: string; source: 'cloudflare-docs'; content: string }> } | null>(jobRow.best_practice_docs, null as any),
+    bestPractices: parseJsonColumn<BestPracticeDocsPayload | null>(jobRow.best_practice_docs, null),
     files,
     suggestions,
   };
