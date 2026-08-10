@@ -35,10 +35,10 @@ export async function classifyAndLinkJulesPr(
   env: Pick<Env, 'DB'>,
   pr: { owner: string; repo: string; prNumber: number; prUrl: string; body: string | null; headRef: string },
 ): Promise<ClassifyJulesPrResult> {
-  try {
-    const taskId = detectJulesTaskId({ body: pr.body, headRef: pr.headRef });
-    if (!taskId) return { kind: 'none' };
+  const taskId = detectJulesTaskId({ body: pr.body, headRef: pr.headRef });
+  if (!taskId) return { kind: 'none' };
 
+  try {
     const session = await findJulesSessionBySessionId(env, taskId);
     // Divert only a Codra session that belongs to THIS repo and is either not yet
     // linked to a PR or already linked to this same PR (idempotent re-delivery).
@@ -61,8 +61,11 @@ export async function classifyAndLinkJulesPr(
     logger.info('diverted codra jules pr from standard review', { owner: pr.owner, repo: pr.repo, prNumber: pr.prNumber, taskId });
     return { kind: 'diverted' };
   } catch (err) {
+    // A taskId was already detected (recognized Jules PR) — a DB error here must
+    // fail toward 'external' (still gated/routed), never 'none' (which would let
+    // a recognized Jules PR slip through to a standard paid review).
     logger.warn('classifyAndLinkJulesPr failed; not diverting', { error: err instanceof Error ? err.message : String(err) });
-    return { kind: 'none' };
+    return { kind: 'external', taskId };
   }
 }
 

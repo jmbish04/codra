@@ -217,4 +217,49 @@ describe('Webhook Handling Suite', () => {
       expect(queue.sent[0].payload).toBeUndefined();
       expect(queue.sent[0].eventName).toBe('pull_request');
   });
+
+  it('never standard-reviews an external Jules PR when externalJulesEnabled is off', async () => {
+    // No Codra session is staged for this task id, and the repo's default
+    // config has externalJulesEnabled: false — the external-routing branch
+    // must return 'external_jules_no_action' and never fall through to
+    // extractReviewRequest/insertJob (which would defeat the cost gate).
+    const rawPayload = createMockPRWebhook({
+      action: 'opened',
+      repository: { name: `repo-${Date.now()}-external-jules`, owner: { login: 'test-owner' } },
+      pull_request: {
+        number: 42,
+        title: 'External Jules PR',
+        body: 'PR created automatically by Jules for task https://jules.google.com/task/999999',
+        user: { login: 'someone-else' },
+        head: { sha: 'e'.repeat(40), ref: 'jules-x-999999' },
+        base: { sha: 'f'.repeat(40), ref: 'main' },
+        draft: false,
+      },
+    });
+    const body = JSON.stringify(rawPayload);
+    const signature = await signPayload(await getWorkerApiKey(env), body);
+
+    const response = await app.request(
+      'http://codra.test/webhook',
+      {
+        method: 'POST',
+        headers: {
+          'x-github-event': 'pull_request',
+          'x-github-delivery': `external-jules-${Date.now()}`,
+          'x-hub-signature-256': signature,
+          'content-type': 'application/json',
+        },
+        body,
+      },
+      env,
+    );
+
+    const json = await response.json() as any;
+    expect(response.status).toBe(202);
+    expect(json.ok).toBe(true);
+    expect(json.message).toBe('external_jules_no_action');
+
+    const queue = env.REVIEW_QUEUE as any;
+    expect(queue.sent).toHaveLength(0);
+  });
 });

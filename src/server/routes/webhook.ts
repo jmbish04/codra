@@ -157,6 +157,10 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
         for (const prRef of detail.pull_requests) {
           try {
             const pr = await gh.getPullRequest(p.repository.owner.login, p.repository.name, prRef.number);
+            // The PR may have moved on since this CI run started — only review
+            // when the failing commit is still the PR head; otherwise wait for
+            // the new commit's own CI-completion webhook.
+            if (detail.head_sha && pr.head.sha !== detail.head_sha) continue;
             const link = await classifyAndLinkJulesPr(c.env, {
               owner: p.repository.owner.login, repo: p.repository.name, prNumber: prRef.number,
               prUrl: `https://github.com/${p.repository.owner.login}/${p.repository.name}/pull/${prRef.number}`,
@@ -266,21 +270,32 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
 
         // External Jules PR (no Codra session): route to review only when the
         // repo opted in AND CI is absent — otherwise wait for the CI-completion
-        // webhook to fire the review on failure.
-        if (link.kind === 'external' && repoConfig.externalJulesEnabled) {
-          const gh = new GitHubClient(c.env, installationId);
-          const hasCI = await gh.hasConfiguredCI(payload.repository.owner.login, payload.repository.name).catch(() => true);
-          if (!hasCI) {
-            await enqueueExternalReview(c.env, gh, {
-              owner: payload.repository.owner.login,
-              repo: payload.repository.name,
-              prNumber: prPayload.pull_request.number,
-              installationId,
-              configSnapshot: repoConfig.parsedJson,
-              deliveryId,
-              requestId: c.get('requestId'),
-            });
+        // webhook to fire the review on failure. This branch always returns —
+        // an external Jules PR must never fall through to the standard review.
+        if (link.kind === 'external') {
+          if (repoConfig.externalJulesEnabled) {
+            const gh = new GitHubClient(c.env, installationId);
+            const hasCI = await gh.hasConfiguredCI(payload.repository.owner.login, payload.repository.name).catch(() => true);
+            if (!hasCI) {
+              const jobId = await enqueueExternalReview(c.env, gh, {
+                owner: payload.repository.owner.login,
+                repo: payload.repository.name,
+                prNumber: prPayload.pull_request.number,
+                installationId,
+                configSnapshot: repoConfig.parsedJson,
+                deliveryId,
+                requestId: c.get('requestId'),
+              });
+              return finish(
+                202,
+                { ok: true, message: jobId ? 'queued' : 'no_action' },
+                jobId ? 'job_created' : 'no_action',
+                jobId ? { action: 'review', prNumber: prPayload.pull_request.number, jobId } : { prNumber: prPayload.pull_request.number },
+              );
+            }
           }
+          // opted-out, or CI present (wait for the CI-failure webhook): never standard-review an external Jules PR
+          return finish(202, { ok: true, message: 'external_jules_no_action' }, 'no_action', { prNumber: prPayload.pull_request.number });
         }
       }
 
