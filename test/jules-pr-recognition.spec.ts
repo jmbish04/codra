@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { detectJulesTaskId, classifyAndLinkJulesPr } from '@server/core/jules-pr';
 import { stageJulesSession, markJulesLaunched, findJulesSessionBySessionId, getJulesSessionById } from '@server/db/jules-sessions';
 import { setJulesSessionCreatedPr } from '@server/db/jules-interactions';
+import { getDb } from '@server/db/client';
+import { julesSessions } from '@server/db/schemas';
+import { eq } from 'drizzle-orm';
 import { createTestEnv } from './helpers';
 
 describe('detectJulesTaskId', () => {
@@ -115,5 +118,23 @@ describe('classifyAndLinkJulesPr', () => {
     expect(res2.kind).toBe('diverted');
     const after2 = await getJulesSessionById(env, s.id);
     expect(after2?.created_pr_number).toBe(42);
+  });
+
+  it('does not divert a stale launched session (guessed old task id)', async () => {
+    const s = await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 1, prompt: 'p', gapSummary: 'g' });
+    await markJulesLaunched(env, s.id, { sessionId: '6837743215401320221', sessionUrl: 'u', sessionState: 'IN_PROGRESS' });
+    // Age the session past the 7-day divert window.
+    await getDb(env).update(julesSessions)
+      .set({ updated_at: new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString() })
+      .where(eq(julesSessions.session_id, '6837743215401320221'));
+
+    const res = await classifyAndLinkJulesPr(env, {
+      owner: 'o', repo: 'r', prNumber: 7, prUrl: 'u',
+      body: 'x https://jules.google.com/task/6837743215401320221 y', headRef: 'jules-docs-gaps-6837743215401320221',
+    });
+
+    expect(res.kind).toBe('external'); // too old to divert → not treated as Codra's
+    const after = await getJulesSessionById(env, s.id);
+    expect(after?.created_pr_number).toBeNull(); // link not corrupted
   });
 });

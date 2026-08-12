@@ -10,6 +10,21 @@ export type ClassifyJulesPrResult =
   | { kind: 'external'; taskId: string }
   | { kind: 'none' };
 
+// Defense-in-depth against a guessed task id: a launched session is only
+// divert-eligible for a window after launch. Generous (7d) so a slow legit
+// Jules run is never rejected, but an ancient stale session id can't be reused
+// to skip review. The session id itself is an unguessable ~19-digit int, so
+// this is belt-and-suspenders on top of the owner/repo + unlinked guards.
+//
+// ponytail: KNOWN RESIDUAL — this does NOT stop hijacking a *recent, unlinked*
+// session (attacker with the task id opens a PR before Jules opens its real
+// one). Accepted: the id is never published (D1-only), so an external attacker
+// can't obtain it, and divert only skips Codra's review (never merges). The
+// airtight fix if the threat model escalates is an SDK check that the session
+// actually opened THIS PR (getJulesSession(...).pullRequestUrl) — deferred
+// because it adds a webhook SDK call + a PR-open race that wastes reviews.
+const DIVERT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 /**
  * The Jules task id for a PR Jules opened, or null if this isn't a Jules PR.
  * Jules opens PRs as the authenticating user (not a bot), so we detect by
@@ -44,15 +59,22 @@ export async function classifyAndLinkJulesPr(
     // linked to a PR or already linked to this same PR (idempotent re-delivery).
     // Owner/repo binding blocks a cross-repo task-id spoof; the created_pr_number
     // check blocks reusing an old completed task id to bypass review.
+    // Launch recency: parse the session's updated_at (ISO, set by markJulesLaunched).
+    // Fail CLOSED — an unparseable/missing timestamp, or a future/negative age
+    // (clock skew), is NOT "recent", so it does not qualify for divert.
+    const launchedAt = Date.parse(session?.updated_at ?? '');
+    const ageMs = Date.now() - launchedAt;
+    const launchedRecently = Number.isFinite(launchedAt) && ageMs >= 0 && ageMs <= DIVERT_MAX_AGE_MS;
     const eligible = session
       && session.category === 'INTERNAL_CODRA'
       && session.owner === pr.owner
       && session.repo === pr.repo
-      && (session.created_pr_number == null || session.created_pr_number === pr.prNumber);
+      && (session.created_pr_number == null || session.created_pr_number === pr.prNumber)
+      && launchedRecently;
     if (!eligible) {
       logger.info('jules pr not linked to a codra session', {
         owner: pr.owner, repo: pr.repo, prNumber: pr.prNumber, taskId,
-        matched: Boolean(session), reason: !session ? 'no-session' : 'not-eligible',
+        matched: Boolean(session), reason: !session ? 'no-session' : !launchedRecently ? 'stale-session' : 'not-eligible',
       });
       return { kind: 'external', taskId };
     }
