@@ -401,6 +401,19 @@ export class GitHubClient {
     });
   }
 
+  /**
+   * PR numbers associated with a commit SHA. Used when a check_run/workflow_run
+   * webhook omits `pull_requests` (GitHub does this for fork PRs and checks
+   * created before the PR link existed). Best-effort → [] on failure.
+   */
+  async listPullRequestNumbersForCommit(owner: string, repo: string, sha: string): Promise<number[]> {
+    return withRetry(`listPullRequestNumbersForCommit ${owner}/${repo}@${sha}`, async () => {
+      const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/commits/${encodeURIComponent(sha)}/pulls`);
+      const rows = (await response.json()) as { number: number }[];
+      return rows.map((r) => r.number);
+    }).catch(() => []);
+  }
+
   /** Combined commit status + check-runs conclusion for a ref. */
   async getRefCiStatus(owner: string, repo: string, ref: string): Promise<{ hasChecks: boolean; failing: boolean }> {
     return withRetry(`getRefCiStatus ${owner}/${repo}@${ref}`, async () => {
