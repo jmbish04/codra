@@ -52,9 +52,11 @@ export async function classifyAndLinkJulesPr(
     // Owner/repo binding blocks a cross-repo task-id spoof; the created_pr_number
     // check blocks reusing an old completed task id to bypass review.
     // Launch recency: parse the session's updated_at (ISO, set by markJulesLaunched).
-    // Unparseable → don't reject on age (fall back to the other guards).
+    // Fail CLOSED — an unparseable/missing timestamp, or a future/negative age
+    // (clock skew), is NOT "recent", so it does not qualify for divert.
     const launchedAt = Date.parse(session?.updated_at ?? '');
-    const launchedRecently = Number.isNaN(launchedAt) || (Date.now() - launchedAt) <= DIVERT_MAX_AGE_MS;
+    const ageMs = Date.now() - launchedAt;
+    const launchedRecently = Number.isFinite(launchedAt) && ageMs >= 0 && ageMs <= DIVERT_MAX_AGE_MS;
     const eligible = session
       && session.category === 'INTERNAL_CODRA'
       && session.owner === pr.owner
