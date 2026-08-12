@@ -148,7 +148,7 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
         if (p.action !== 'completed' || !detail || (detail.conclusion !== 'failure' && detail.conclusion !== 'timed_out')) {
           return finish(202, { ok: true, ignored: true }, 'no_action');
         }
-        if (!installationId || !detail.pull_requests?.length) {
+        if (!installationId) {
           return finish(202, { ok: true, message: 'ci_failure_noted' }, 'no_action');
         }
 
@@ -161,22 +161,36 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
 
         const { classifyAndLinkJulesPr, enqueueExternalReview } = await import('@server/core/jules-pr');
         const gh = new GitHubClient(c.env, installationId);
+
+        // GitHub omits `pull_requests` for fork PRs and checks created before the
+        // PR link existed — fall back to resolving PRs by the failing commit SHA.
+        let prNumbers = (detail.pull_requests ?? []).map((prRef) => prRef.number);
+        if (prNumbers.length === 0 && detail.head_sha) {
+          prNumbers = await gh.listPullRequestNumbersForCommit(p.repository.owner.login, p.repository.name, detail.head_sha);
+        }
+        if (prNumbers.length === 0) {
+          return finish(202, { ok: true, message: 'ci_failure_noted' }, 'no_action');
+        }
+
         let queuedJobId: string | undefined;
-        for (const prRef of detail.pull_requests) {
+        for (const prNumber of prNumbers) {
           try {
-            const pr = await gh.getPullRequest(p.repository.owner.login, p.repository.name, prRef.number);
+            const pr = await gh.getPullRequest(p.repository.owner.login, p.repository.name, prNumber);
+            // The SHA-fallback endpoint returns closed/merged PRs too — never
+            // review one (a delayed CI failure on a just-merged commit).
+            if (pr.state && pr.state !== 'open') continue;
             // The PR may have moved on since this CI run started — only review
             // when the failing commit is still the PR head; otherwise wait for
             // the new commit's own CI-completion webhook.
             if (detail.head_sha && pr.head.sha !== detail.head_sha) continue;
             const link = await classifyAndLinkJulesPr(c.env, {
-              owner: p.repository.owner.login, repo: p.repository.name, prNumber: prRef.number,
-              prUrl: `https://github.com/${p.repository.owner.login}/${p.repository.name}/pull/${prRef.number}`,
+              owner: p.repository.owner.login, repo: p.repository.name, prNumber,
+              prUrl: `https://github.com/${p.repository.owner.login}/${p.repository.name}/pull/${prNumber}`,
               body: pr.body, headRef: pr.head.ref,
             });
             if (link.kind !== 'external') continue;
             const jobId = await enqueueExternalReview(c.env, gh, {
-              owner: p.repository.owner.login, repo: p.repository.name, prNumber: prRef.number,
+              owner: p.repository.owner.login, repo: p.repository.name, prNumber,
               installationId, configSnapshot: ciRepoConfig.parsedJson, deliveryId, requestId: c.get('requestId'),
             });
             if (jobId) queuedJobId = jobId;

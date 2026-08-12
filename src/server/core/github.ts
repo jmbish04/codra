@@ -401,6 +401,19 @@ export class GitHubClient {
     });
   }
 
+  /**
+   * PR numbers associated with a commit SHA. Used when a check_run/workflow_run
+   * webhook omits `pull_requests` (GitHub does this for fork PRs and checks
+   * created before the PR link existed). Best-effort → [] on failure.
+   */
+  async listPullRequestNumbersForCommit(owner: string, repo: string, sha: string): Promise<number[]> {
+    return withRetry(`listPullRequestNumbersForCommit ${owner}/${repo}@${sha}`, async () => {
+      const response = await this.requestAndCheck(`${repoApiPath(owner, repo)}/commits/${encodeURIComponent(sha)}/pulls`);
+      const rows = (await response.json()) as { number: number }[];
+      return rows.map((r) => r.number);
+    }).catch(() => []);
+  }
+
   /** Combined commit status + check-runs conclusion for a ref. */
   async getRefCiStatus(owner: string, repo: string, ref: string): Promise<{ hasChecks: boolean; failing: boolean }> {
     return withRetry(`getRefCiStatus ${owner}/${repo}@${ref}`, async () => {
@@ -419,11 +432,14 @@ export class GitHubClient {
 
   /** Does the repo have ≥1 enabled Actions workflow? (CI-presence, race-free.) */
   async hasConfiguredCI(owner: string, repo: string): Promise<boolean> {
+    // Do NOT swallow errors here: the caller fails safe with `.catch(() => true)`
+    // (assume CI present → wait, never eager-review). Swallowing to `false` would
+    // defeat that and trigger a review on a transient API failure.
     return withRetry(`hasConfiguredCI ${owner}/${repo}`, async () => {
       const res = await this.requestAndCheck(`${repoApiPath(owner, repo)}/actions/workflows`);
       const body = (await res.json()) as { total_count: number; workflows: { state: string }[] };
       return (body.workflows ?? []).some((w) => w.state === 'active');
-    }).catch(() => false);
+    });
   }
 
   async listOpenPullRequests(owner: string, repo: string) {
