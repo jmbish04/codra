@@ -268,6 +268,17 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
           headRef: prPayload.pull_request.head?.ref ?? '',
         }).catch(() => ({ kind: 'none' as const }));
         if (link.kind === 'diverted') {
+          const verifyGh = new GitHubClient(c.env, installationId);
+          const { verifyDivertedJulesPr } = await import('@server/core/jules-pr-verify');
+          c.executionCtx.waitUntil(
+            verifyDivertedJulesPr(c.env, verifyGh, {
+              session: link.session,
+              owner: payload.repository.owner.login,
+              repo: payload.repository.name,
+              prNumber: prPayload.pull_request.number,
+              headSha: prPayload.pull_request.head.sha,
+            }).catch((err) => console.error('Jules PR verification failed:', err)),
+          );
           return finish(
             202,
             { ok: true, message: 'jules_pr_diverted' },

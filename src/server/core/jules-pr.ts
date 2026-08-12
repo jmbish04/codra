@@ -1,4 +1,4 @@
-import { findJulesSessionBySessionId } from '@server/db/jules-sessions';
+import { findJulesSessionBySessionId, type JulesSessionRow } from '@server/db/jules-sessions';
 import { setJulesSessionCreatedPr } from '@server/db/jules-interactions';
 import { logger } from '@server/core/logger';
 import { countAutoReviewsForPr, findActiveJobsForPr, findExistingJobForHead, insertJob, MAX_AUTO_REVIEWS_PER_PR } from '@server/db/jobs';
@@ -6,7 +6,7 @@ import { LEGACY_JOB_SCOPE, type RepoConfig } from '@shared/schema';
 import type { GitHubClient } from '@server/core/github';
 
 export type ClassifyJulesPrResult =
-  | { kind: 'diverted' }
+  | { kind: 'diverted'; session: JulesSessionRow }
   | { kind: 'external'; taskId: string }
   | { kind: 'none' };
 
@@ -56,10 +56,12 @@ export async function classifyAndLinkJulesPr(
       });
       return { kind: 'external', taskId };
     }
+    // `eligible` already proved `session` truthy; re-check narrows the type for TS.
+    if (!session) return { kind: 'external', taskId };
 
     await setJulesSessionCreatedPr(env, taskId, { number: pr.prNumber, url: pr.prUrl });
     logger.info('diverted codra jules pr from standard review', { owner: pr.owner, repo: pr.repo, prNumber: pr.prNumber, taskId });
-    return { kind: 'diverted' };
+    return { kind: 'diverted', session };
   } catch (err) {
     // A taskId was already detected (recognized Jules PR) — a DB error here must
     // fail toward 'external' (still gated/routed), never 'none' (which would let
