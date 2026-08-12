@@ -15,6 +15,14 @@ export type ClassifyJulesPrResult =
 // Jules run is never rejected, but an ancient stale session id can't be reused
 // to skip review. The session id itself is an unguessable ~19-digit int, so
 // this is belt-and-suspenders on top of the owner/repo + unlinked guards.
+//
+// ponytail: KNOWN RESIDUAL — this does NOT stop hijacking a *recent, unlinked*
+// session (attacker with the task id opens a PR before Jules opens its real
+// one). Accepted: the id is never published (D1-only), so an external attacker
+// can't obtain it, and divert only skips Codra's review (never merges). The
+// airtight fix if the threat model escalates is an SDK check that the session
+// actually opened THIS PR (getJulesSession(...).pullRequestUrl) — deferred
+// because it adds a webhook SDK call + a PR-open race that wastes reviews.
 const DIVERT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
