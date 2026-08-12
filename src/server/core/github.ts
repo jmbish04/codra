@@ -436,15 +436,26 @@ export class GitHubClient {
     // (assume CI present → wait, never eager-review). Swallowing to `false` would
     // defeat that and trigger a review on a transient API failure.
     return withRetry(`hasConfiguredCI ${owner}/${repo}`, async () => {
-      // GitHub Actions workflows.
-      const res = await this.requestAndCheck(`${repoApiPath(owner, repo)}/actions/workflows`);
-      const body = (await res.json()) as { total_count: number; workflows: { state: string }[] };
-      if ((body.workflows ?? []).some((w) => w.state === 'active')) return true;
+      // GitHub Actions workflows (per_page=100 so an active workflow past the
+      // default page isn't missed). A 404/403 means Actions are disabled or the
+      // app can't read them — treat as "no Actions" and fall through to the
+      // 3rd-party check; other errors propagate so the caller's fail-safe holds.
+      try {
+        const res = await this.requestAndCheck(`${repoApiPath(owner, repo)}/actions/workflows?per_page=100`);
+        const body = (await res.json()) as { total_count: number; workflows: { state: string }[] };
+        if ((body.workflows ?? []).some((w) => w.state === 'active')) return true;
+      } catch (err) {
+        if (!(err instanceof GitHubError && (err.status === 404 || err.status === 403))) throw err;
+      }
 
       // Required status checks on the base branch — covers 3rd-party CI
       // (CircleCI, Buildkite, …) that reports via check-runs/statuses rather
-      // than Actions. A 404 just means the branch has no protection; other
-      // errors propagate so the caller's fail-safe still applies.
+      // than Actions. A 404 means the branch has no protection; other errors
+      // propagate so the caller's fail-safe still applies.
+      // ponytail: KNOWN LIMIT — a repo that runs 3rd-party CI but has NO branch
+      // protection is undetectable race-free (its checks may not be posted at PR
+      // open), so it reads as "no CI" → reviewed on open. Accepted; the airtight
+      // alternative (read live PR checks) reintroduces the open-time race.
       if (baseBranch) {
         try {
           const rc = await this.requestAndCheck(
