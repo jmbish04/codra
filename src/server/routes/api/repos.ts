@@ -12,6 +12,7 @@ const repoConfigPatchSchema = z
     enabled: z.boolean().optional(),
     docstringEnabled: z.boolean().optional(),
     toolboxEnabled: z.boolean().optional(),
+    externalJulesEnabled: z.boolean().optional(),
     review: repoConfigSchema.shape.review.optional(),
     model: repoConfigSchema.shape.model.optional(),
   })
@@ -21,6 +22,7 @@ const repoConfigPatchSchema = z
       patch.enabled !== undefined ||
       patch.docstringEnabled !== undefined ||
       patch.toolboxEnabled !== undefined ||
+      patch.externalJulesEnabled !== undefined ||
       patch.review !== undefined ||
       patch.model !== undefined,
     'Repository config patch cannot be empty.',
@@ -141,7 +143,8 @@ export function createReposRouter() {
     const hasFlagPatch =
       patch.enabled !== undefined ||
       patch.docstringEnabled !== undefined ||
-      patch.toolboxEnabled !== undefined;
+      patch.toolboxEnabled !== undefined ||
+      patch.externalJulesEnabled !== undefined;
 
     if (!hasConfigPatch && hasFlagPatch) {
       await updateRepoConfigFlags(c.env, {
@@ -150,6 +153,7 @@ export function createReposRouter() {
         enabled: patch.enabled,
         docstringEnabled: patch.docstringEnabled,
         toolboxEnabled: patch.toolboxEnabled,
+        externalJulesEnabled: patch.externalJulesEnabled,
       });
       await invalidateRepoConfigCache(c.env, owner, repo);
       return c.json({ ok: true });

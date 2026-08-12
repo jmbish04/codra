@@ -20,6 +20,7 @@ function mapRepo(row: any) {
     enabled: Boolean(row.enabled),
     docstringEnabled: Boolean(row.docstring_enabled),
     toolboxEnabled: Boolean(row.toolbox_enabled),
+    externalJulesEnabled: Boolean(row.external_jules_enabled),
   });
 }
 
@@ -92,8 +93,9 @@ export async function syncRepoConfig(
 }
 
 /**
- * Update any subset of the three per-repo auto-toggles (Code Review / DocString
- * Enforcer / Toolbox Watcher). Only the provided flags are written.
+ * Update any subset of the per-repo auto-toggles (Code Review / DocString
+ * Enforcer / Toolbox Watcher / External Jules PR review). Only the provided
+ * flags are written.
  */
 export async function updateRepoConfigFlags(
   env: Pick<Env, 'DB'>,
@@ -103,6 +105,7 @@ export async function updateRepoConfigFlags(
     enabled?: boolean;
     docstringEnabled?: boolean;
     toolboxEnabled?: boolean;
+    externalJulesEnabled?: boolean;
   },
 ) {
   const db = getDb(env);
@@ -115,12 +118,13 @@ export async function updateRepoConfigFlags(
   if (input.enabled !== undefined) set.enabled = input.enabled;
   if (input.docstringEnabled !== undefined) set.docstring_enabled = input.docstringEnabled;
   if (input.toolboxEnabled !== undefined) set.toolbox_enabled = input.toolboxEnabled;
+  if (input.externalJulesEnabled !== undefined) set.external_jules_enabled = input.externalJulesEnabled;
 
   await db.update(repoConfigs).set(set).where(eq(repoConfigs.repository_id, repoRow.id));
 }
 
 /**
- * Reset button: turn all three auto-toggles off for every repo in one statement.
+ * Reset button: turn all auto-toggles off for every repo in one statement.
  * Users then re-enable per repo. Returns the number of repo configs affected.
  */
 export async function resetAllRepoConfigs(env: Pick<Env, 'DB'>): Promise<number> {
@@ -130,6 +134,7 @@ export async function resetAllRepoConfigs(env: Pick<Env, 'DB'>): Promise<number>
       enabled: false,
       docstring_enabled: false,
       toolbox_enabled: false,
+      external_jules_enabled: false,
       updated_at: sql`CURRENT_TIMESTAMP`,
     })
     .returning({ id: repoConfigs.id });
@@ -160,6 +165,7 @@ export async function listRepoConfigs(env: Pick<Env, 'DB'>) {
     enabled: repoConfigs.enabled,
     docstring_enabled: repoConfigs.docstring_enabled,
     toolbox_enabled: repoConfigs.toolbox_enabled,
+    external_jules_enabled: repoConfigs.external_jules_enabled,
     last_job_created_at: lastJobsSq.last_job_created_at,
     last_job_verdict: lastJobsSq.last_job_verdict,
   })
@@ -203,6 +209,7 @@ export async function getRepoConfigRecord(env: Pick<Env, 'DB'>, owner: string, r
     enabled: repoConfigs.enabled,
     docstring_enabled: repoConfigs.docstring_enabled,
     toolbox_enabled: repoConfigs.toolbox_enabled,
+    external_jules_enabled: repoConfigs.external_jules_enabled,
     last_job_created_at: lastJobsSq.last_job_created_at,
     last_job_verdict: lastJobsSq.last_job_verdict,
   })

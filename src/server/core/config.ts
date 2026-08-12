@@ -7,6 +7,7 @@ type CachedConfig = {
   enabled: boolean;
   docstringEnabled: boolean;
   toolboxEnabled: boolean;
+  externalJulesEnabled: boolean;
 };
 
 const REPO_CONFIG_CACHE_PREFIX = `config:${REPO_CONFIG_CACHE_VERSION}:db:`;
@@ -70,13 +71,14 @@ export async function loadRepoConfig(
   const key = await cacheKey(env, input.owner, input.repo);
   const cached = await env.APP_KV.get(key, 'json');
   if (cached) {
-    // Older cache entries predate the docstring/toolbox flags — default them off.
+    // Older cache entries predate newer per-repo flags — default them off.
     const c = cached as Partial<CachedConfig> & Pick<CachedConfig, 'parsedJson' | 'enabled'>;
     return {
       parsedJson: c.parsedJson,
       enabled: c.enabled,
       docstringEnabled: c.docstringEnabled ?? false,
       toolboxEnabled: c.toolboxEnabled ?? false,
+      externalJulesEnabled: c.externalJulesEnabled ?? false,
     };
   }
 
@@ -87,6 +89,7 @@ export async function loadRepoConfig(
   const enabled = existing?.enabled ?? true;
   const docstringEnabled = existing?.docstringEnabled ?? false;
   const toolboxEnabled = existing?.toolboxEnabled ?? false;
+  const externalJulesEnabled = existing?.externalJulesEnabled ?? false;
 
   // If there's no DB override, use the GLOBAL config
   if (!hasRepoModelOverride(existing)) {
@@ -102,6 +105,7 @@ export async function loadRepoConfig(
     enabled,
     docstringEnabled,
     toolboxEnabled,
+    externalJulesEnabled,
   };
 
   await env.APP_KV.put(key, JSON.stringify(finalConfig), { expirationTtl: 60 * 10 });

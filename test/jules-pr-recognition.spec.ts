@@ -47,7 +47,7 @@ describe('classifyAndLinkJulesPr', () => {
       body: 'x https://jules.google.com/task/6837743215401320221 y', headRef: 'jules-docs-gaps-6837743215401320221',
     });
 
-    expect(res.diverted).toBe(true);
+    expect(res.kind).toBe('diverted');
     const after = await getJulesSessionById(env, s.id);
     expect(after?.created_pr_number).toBe(42);
     expect(after?.created_pr_url).toBe('https://github.com/o/r/pull/42');
@@ -57,18 +57,19 @@ describe('classifyAndLinkJulesPr', () => {
     const res = await classifyAndLinkJulesPr(env, {
       owner: 'o', repo: 'r', prNumber: 5, prUrl: 'u', body: 'normal', headRef: 'feature/x',
     });
-    expect(res.diverted).toBe(false);
+    expect(res.kind).toBe('none');
   });
 
-  it('does not divert when the task id matches no Codra session (external)', async () => {
+  it('classifies as external when the task id matches no Codra session', async () => {
     const res = await classifyAndLinkJulesPr(env, {
       owner: 'o', repo: 'r', prNumber: 6, prUrl: 'u',
       body: 'https://jules.google.com/task/999999', headRef: 'jules-x-999999',
     });
-    expect(res.diverted).toBe(false);
+    expect(res.kind).toBe('external');
+    expect(res.kind === 'external' && res.taskId).toBe('999999');
   });
 
-  it('does not divert a task id from a different repo (spoof)', async () => {
+  it('classifies as external for a task id from a different repo (spoof)', async () => {
     const s = await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 1, prompt: 'p', gapSummary: 'g' });
     await markJulesLaunched(env, s.id, { sessionId: '6837743215401320221', sessionUrl: 'u', sessionState: 'IN_PROGRESS' });
 
@@ -77,12 +78,12 @@ describe('classifyAndLinkJulesPr', () => {
       body: 'x https://jules.google.com/task/6837743215401320221 y', headRef: 'jules-docs-gaps-6837743215401320221',
     });
 
-    expect(res.diverted).toBe(false);
+    expect(res.kind).toBe('external');
     const original = await getJulesSessionById(env, s.id);
     expect(original?.created_pr_number).toBeNull();
   });
 
-  it('does not divert an already-linked session for a different PR', async () => {
+  it('classifies as external for an already-linked session on a different PR', async () => {
     const s = await stageJulesSession(env, { owner: 'o', repo: 'r', triggeringPrNumber: 1, prompt: 'p', gapSummary: 'g' });
     await markJulesLaunched(env, s.id, { sessionId: '6837743215401320221', sessionUrl: 'u', sessionState: 'IN_PROGRESS' });
     await setJulesSessionCreatedPr(env, '6837743215401320221', { number: 42, url: 'u' });
@@ -92,7 +93,7 @@ describe('classifyAndLinkJulesPr', () => {
       body: 'x https://jules.google.com/task/6837743215401320221 y', headRef: 'jules-docs-gaps-6837743215401320221',
     });
 
-    expect(res.diverted).toBe(false);
+    expect(res.kind).toBe('external');
   });
 
   it('diverts idempotently on re-delivery of the same PR', async () => {
@@ -105,12 +106,12 @@ describe('classifyAndLinkJulesPr', () => {
     };
 
     const res1 = await classifyAndLinkJulesPr(env, prPayload);
-    expect(res1.diverted).toBe(true);
+    expect(res1.kind).toBe('diverted');
     const after1 = await getJulesSessionById(env, s.id);
     expect(after1?.created_pr_number).toBe(42);
 
     const res2 = await classifyAndLinkJulesPr(env, prPayload);
-    expect(res2.diverted).toBe(true);
+    expect(res2.kind).toBe('diverted');
     const after2 = await getJulesSessionById(env, s.id);
     expect(after2?.created_pr_number).toBe(42);
   });

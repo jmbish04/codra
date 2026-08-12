@@ -26,9 +26,9 @@ async function seedJob(env: Env, repositoryId: number, prNumber: number, trigger
   return row.id;
 }
 
-const ALL_ON = { enabled: true, docstringEnabled: true, toolboxEnabled: true };
-const CODE_ONLY = { enabled: true, docstringEnabled: false, toolboxEnabled: false };
-const ALL_OFF = { enabled: false, docstringEnabled: false, toolboxEnabled: false };
+const ALL_ON = { enabled: true, docstringEnabled: true, toolboxEnabled: true, externalJulesEnabled: true };
+const CODE_ONLY = { enabled: true, docstringEnabled: false, toolboxEnabled: false, externalJulesEnabled: false };
+const ALL_OFF = { enabled: false, docstringEnabled: false, toolboxEnabled: false, externalJulesEnabled: false };
 
 function commentPayload(body: string) {
   return {
@@ -112,7 +112,7 @@ describe('extractReviewRequest scope + mode', () => {
       ...base,
       eventName: 'pull_request',
       payload: pullRequestPayload({ login: 'alice', type: 'User' }),
-      flags: { enabled: true, docstringEnabled: false, toolboxEnabled: true },
+      flags: { enabled: true, docstringEnabled: false, toolboxEnabled: true, externalJulesEnabled: false },
     });
     expect(result?.scope).toEqual({ codeReview: true, docstring: false, toolbox: true });
   });
@@ -144,7 +144,7 @@ describe('extractReviewRequest scope + mode', () => {
       ...base,
       eventName: 'issue_comment',
       payload: commentPayload('please @codra-app review this'),
-      flags: { enabled: false, docstringEnabled: true, toolboxEnabled: false },
+      flags: { enabled: false, docstringEnabled: true, toolboxEnabled: false, externalJulesEnabled: false },
     });
     expect(result?.mode).toBe('review');
     expect(result?.scope).toEqual({ codeReview: true, docstring: true, toolbox: false });

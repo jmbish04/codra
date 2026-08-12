@@ -142,9 +142,65 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
         return finish(202, { ok: true, message: 'kb_updated' }, 'kb_updated', { action: 'kb_update' });
       }
 
+      if (eventName === 'check_run' || eventName === 'check_suite' || eventName === 'workflow_run') {
+        const p = payload as import('@shared/github').CheckWebhookPayload;
+        const detail = p.check_run ?? p.check_suite ?? p.workflow_run;
+        if (p.action !== 'completed' || !detail || (detail.conclusion !== 'failure' && detail.conclusion !== 'timed_out')) {
+          return finish(202, { ok: true, ignored: true }, 'no_action');
+        }
+        if (!installationId || !detail.pull_requests?.length) {
+          return finish(202, { ok: true, message: 'ci_failure_noted' }, 'no_action');
+        }
+
+        const ciRepoConfig = await loadRepoConfig(c.env, {
+          installationId, owner: p.repository.owner.login, repo: p.repository.name,
+        });
+        if (!ciRepoConfig.externalJulesEnabled) {
+          return finish(202, { ok: true, message: 'ci_failure_noted' }, 'no_action');
+        }
+
+        const { classifyAndLinkJulesPr, enqueueExternalReview } = await import('@server/core/jules-pr');
+        const gh = new GitHubClient(c.env, installationId);
+        let queuedJobId: string | undefined;
+        for (const prRef of detail.pull_requests) {
+          try {
+            const pr = await gh.getPullRequest(p.repository.owner.login, p.repository.name, prRef.number);
+            // The PR may have moved on since this CI run started — only review
+            // when the failing commit is still the PR head; otherwise wait for
+            // the new commit's own CI-completion webhook.
+            if (detail.head_sha && pr.head.sha !== detail.head_sha) continue;
+            const link = await classifyAndLinkJulesPr(c.env, {
+              owner: p.repository.owner.login, repo: p.repository.name, prNumber: prRef.number,
+              prUrl: `https://github.com/${p.repository.owner.login}/${p.repository.name}/pull/${prRef.number}`,
+              body: pr.body, headRef: pr.head.ref,
+            });
+            if (link.kind !== 'external') continue;
+            const jobId = await enqueueExternalReview(c.env, gh, {
+              owner: p.repository.owner.login, repo: p.repository.name, prNumber: prRef.number,
+              installationId, configSnapshot: ciRepoConfig.parsedJson, deliveryId, requestId: c.get('requestId'),
+            });
+            if (jobId) queuedJobId = jobId;
+          } catch (err) {
+            console.error('Failed to route CI-failure PR to external review:', err);
+          }
+        }
+        return finish(
+          202,
+          { ok: true, message: queuedJobId ? 'queued' : 'ci_failure_noted' },
+          queuedJobId ? 'job_created' : 'no_action',
+          queuedJobId ? { action: 'review', jobId: queuedJobId } : undefined,
+        );
+      }
+
       if (!installationId) {
         return finish(202, { ok: true, ignored: true }, 'ignored_no_installation');
       }
+
+      const repoConfig = await loadRepoConfig(c.env, {
+        installationId,
+        owner: payload.repository.owner.login,
+        repo: payload.repository.name,
+      });
 
       // A PR that was merged/closed should cancel any review codra still has
       // queued or running for it, with a comment linking the cancelled job.
@@ -202,7 +258,7 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
         // Jules opens PRs as the authenticating user (not a bot), so the isBotSender
         // gate does not catch them. Recognize Codra's own Jules docs PRs and divert
         // them out of the paid standard review; link the PR to its session.
-        const { classifyAndLinkJulesPr } = await import('@server/core/jules-pr');
+        const { classifyAndLinkJulesPr, enqueueExternalReview } = await import('@server/core/jules-pr');
         const link = await classifyAndLinkJulesPr(c.env, {
           owner: payload.repository.owner.login,
           repo: payload.repository.name,
@@ -210,8 +266,8 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
           prUrl,
           body: prPayload.pull_request.body,
           headRef: prPayload.pull_request.head?.ref ?? '',
-        }).catch(() => ({ diverted: false }));
-        if (link.diverted) {
+        }).catch(() => ({ kind: 'none' as const }));
+        if (link.kind === 'diverted') {
           return finish(
             202,
             { ok: true, message: 'jules_pr_diverted' },
@@ -219,13 +275,37 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
             { prNumber: prPayload.pull_request.number },
           );
         }
-      }
 
-      const repoConfig = await loadRepoConfig(c.env, {
-        installationId,
-        owner: payload.repository.owner.login,
-        repo: payload.repository.name,
-      });
+        // External Jules PR (no Codra session): route to review only when the
+        // repo opted in AND CI is absent — otherwise wait for the CI-completion
+        // webhook to fire the review on failure. This branch always returns —
+        // an external Jules PR must never fall through to the standard review.
+        if (link.kind === 'external') {
+          if (repoConfig.externalJulesEnabled) {
+            const gh = new GitHubClient(c.env, installationId);
+            const hasCI = await gh.hasConfiguredCI(payload.repository.owner.login, payload.repository.name).catch(() => true);
+            if (!hasCI) {
+              const jobId = await enqueueExternalReview(c.env, gh, {
+                owner: payload.repository.owner.login,
+                repo: payload.repository.name,
+                prNumber: prPayload.pull_request.number,
+                installationId,
+                configSnapshot: repoConfig.parsedJson,
+                deliveryId,
+                requestId: c.get('requestId'),
+              });
+              return finish(
+                202,
+                { ok: true, message: jobId ? 'queued' : 'no_action' },
+                jobId ? 'job_created' : 'no_action',
+                jobId ? { action: 'review', prNumber: prPayload.pull_request.number, jobId } : { prNumber: prPayload.pull_request.number },
+              );
+            }
+          }
+          // opted-out, or CI present (wait for the CI-failure webhook): never standard-review an external Jules PR
+          return finish(202, { ok: true, message: 'external_jules_no_action' }, 'no_action', { prNumber: prPayload.pull_request.number });
+        }
+      }
 
       // No blanket `enabled === false` gate: on-demand @codra-app mentions must
       // work even when every auto-toggle is off. extractReviewRequest returns
@@ -240,6 +320,7 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
           enabled: repoConfig.enabled,
           docstringEnabled: repoConfig.docstringEnabled,
           toolboxEnabled: repoConfig.toolboxEnabled,
+          externalJulesEnabled: repoConfig.externalJulesEnabled,
         },
       });
 

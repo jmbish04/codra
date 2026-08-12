@@ -196,6 +196,7 @@ export type RepoCheckFlags = {
   enabled: boolean;
   docstringEnabled: boolean;
   toolboxEnabled: boolean;
+  externalJulesEnabled: boolean;
 };
 
 export type ReviewRequest = {
@@ -451,6 +452,7 @@ async function resolveQueuedJob(
       enabled: repoConfig.enabled,
       docstringEnabled: repoConfig.docstringEnabled,
       toolboxEnabled: repoConfig.toolboxEnabled,
+      externalJulesEnabled: repoConfig.externalJulesEnabled,
     },
   });
 

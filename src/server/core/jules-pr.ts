@@ -1,6 +1,14 @@
 import { findJulesSessionBySessionId } from '@server/db/jules-sessions';
 import { setJulesSessionCreatedPr } from '@server/db/jules-interactions';
 import { logger } from '@server/core/logger';
+import { countAutoReviewsForPr, findActiveJobsForPr, findExistingJobForHead, insertJob, MAX_AUTO_REVIEWS_PER_PR } from '@server/db/jobs';
+import { LEGACY_JOB_SCOPE, type RepoConfig } from '@shared/schema';
+import type { GitHubClient } from '@server/core/github';
+
+export type ClassifyJulesPrResult =
+  | { kind: 'diverted' }
+  | { kind: 'external'; taskId: string }
+  | { kind: 'none' };
 
 /**
  * The Jules task id for a PR Jules opened, or null if this isn't a Jules PR.
@@ -26,11 +34,11 @@ export function detectJulesTaskId(pr: { body: string | null; headRef: string }):
 export async function classifyAndLinkJulesPr(
   env: Pick<Env, 'DB'>,
   pr: { owner: string; repo: string; prNumber: number; prUrl: string; body: string | null; headRef: string },
-): Promise<{ diverted: boolean }> {
-  try {
-    const taskId = detectJulesTaskId({ body: pr.body, headRef: pr.headRef });
-    if (!taskId) return { diverted: false };
+): Promise<ClassifyJulesPrResult> {
+  const taskId = detectJulesTaskId({ body: pr.body, headRef: pr.headRef });
+  if (!taskId) return { kind: 'none' };
 
+  try {
     const session = await findJulesSessionBySessionId(env, taskId);
     // Divert only a Codra session that belongs to THIS repo and is either not yet
     // linked to a PR or already linked to this same PR (idempotent re-delivery).
@@ -46,14 +54,82 @@ export async function classifyAndLinkJulesPr(
         owner: pr.owner, repo: pr.repo, prNumber: pr.prNumber, taskId,
         matched: Boolean(session), reason: !session ? 'no-session' : 'not-eligible',
       });
-      return { diverted: false };
+      return { kind: 'external', taskId };
     }
 
     await setJulesSessionCreatedPr(env, taskId, { number: pr.prNumber, url: pr.prUrl });
     logger.info('diverted codra jules pr from standard review', { owner: pr.owner, repo: pr.repo, prNumber: pr.prNumber, taskId });
-    return { diverted: true };
+    return { kind: 'diverted' };
   } catch (err) {
+    // A taskId was already detected (recognized Jules PR) — a DB error here must
+    // fail toward 'external' (still gated/routed), never 'none' (which would let
+    // a recognized Jules PR slip through to a standard paid review).
     logger.warn('classifyAndLinkJulesPr failed; not diverting', { error: err instanceof Error ? err.message : String(err) });
-    return { diverted: false };
+    return { kind: 'external', taskId };
+  }
+}
+
+/**
+ * Enqueue a normal code-review-only job for an external Jules PR (a Jules PR
+ * with no eligible Codra session). Guards against duplicate/racing jobs the
+ * same way the webhook's own auto-review path does. Never throws — a failure
+ * here must not break the caller's webhook response.
+ */
+export async function enqueueExternalReview(
+  env: Pick<Env, 'DB' | 'REVIEW_QUEUE'>,
+  gh: Pick<GitHubClient, 'getPullRequest'>,
+  input: {
+    owner: string;
+    repo: string;
+    prNumber: number;
+    installationId: string;
+    configSnapshot: RepoConfig | null;
+    deliveryId: string;
+    requestId?: string;
+  },
+): Promise<string | null> {
+  try {
+    const activeJobs = await findActiveJobsForPr(env, { owner: input.owner, repo: input.repo, prNumber: input.prNumber });
+    if (activeJobs.length > 0) return null;
+
+    const pr = await gh.getPullRequest(input.owner, input.repo, input.prNumber);
+
+    const existingJob = await findExistingJobForHead(env, {
+      owner: input.owner, repo: input.repo, prNumber: input.prNumber, commitSha: pr.head.sha, trigger: 'auto',
+    });
+    if (existingJob) return null;
+
+    const autoCount = await countAutoReviewsForPr(env, {
+      installationId: input.installationId, owner: input.owner, repo: input.repo, prNumber: input.prNumber,
+    });
+    if (autoCount >= MAX_AUTO_REVIEWS_PER_PR) return null;
+
+    const job = await insertJob(env, {
+      installationId: input.installationId,
+      owner: input.owner,
+      repo: input.repo,
+      prNumber: input.prNumber,
+      prTitle: pr.title,
+      prAuthor: pr.user.login,
+      commitSha: pr.head.sha,
+      baseSha: pr.base.sha,
+      trigger: 'auto',
+      headRef: pr.head.ref,
+      baseRef: pr.base.ref,
+      configSnapshot: input.configSnapshot,
+      scope: LEGACY_JOB_SCOPE,
+    });
+
+    await env.REVIEW_QUEUE.send({
+      jobId: job.id, deliveryId: input.deliveryId, phase: 'prepare', requestId: input.requestId,
+    });
+    logger.info('enqueued external jules pr review', { owner: input.owner, repo: input.repo, prNumber: input.prNumber, jobId: job.id });
+    return job.id;
+  } catch (err) {
+    logger.warn('enqueueExternalReview failed', {
+      owner: input.owner, repo: input.repo, prNumber: input.prNumber,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
   }
 }

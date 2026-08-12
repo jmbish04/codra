@@ -12,6 +12,7 @@ export const repoConfigs = sqliteTable('repo_configs', {
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
   docstring_enabled: integer('docstring_enabled', { mode: 'boolean' }).notNull().default(false),
   toolbox_enabled: integer('toolbox_enabled', { mode: 'boolean' }).notNull().default(false),
+  external_jules_enabled: integer('external_jules_enabled', { mode: 'boolean' }).notNull().default(false),
   main_model: text('main_model'),
   parsed_json: text('parsed_json', { mode: 'json' }),
   fallback_models: text('fallback_models', { mode: 'json' }).default('[]'),

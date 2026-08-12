@@ -116,7 +116,7 @@ function formatLastActivity(value: string | Date | null) {
 }
 
 /**
- * The three independent per-repo auto-toggles. Single source of truth: `label`
+ * The per-repo auto-toggles. Single source of truth: `label`
  * is the compact switch caption, `full` the sentence-form name used in the reset
  * dialog and toasts. `RepoFlag` is derived from here so adding a flag can't drift.
  */
@@ -124,6 +124,7 @@ const REPO_FLAGS = [
   { key: 'enabled', label: 'Code Review', full: 'Code Review', title: 'Automatically review pull requests' },
   { key: 'docstringEnabled', label: 'DocString', full: 'DocString Enforcer', title: 'Issue a Jules task when docstrings are missing or poor' },
   { key: 'toolboxEnabled', label: 'Toolbox', full: 'Toolbox Watcher', title: 'Open a PR to install missing standard files for the repo type' },
+  { key: 'externalJulesEnabled', label: 'External Jules', full: 'External Jules PR review', title: 'Enable external Jules PR review routing for this repository' },
 ] as const;
 
 type RepoFlag = (typeof REPO_FLAGS)[number]['key'];
@@ -165,7 +166,7 @@ function RepoRow({
   const route = getRepoRoute(repo, globalConfig);
   const custom = hasMeaningfulCustomStrategy(repo, globalConfig);
   const lastActivity = formatLastActivity(repo.lastJobCreatedAt);
-  const anyOn = repo.enabled || repo.docstringEnabled || repo.toolboxEnabled;
+  const anyOn = repo.enabled || repo.docstringEnabled || repo.toolboxEnabled || repo.externalJulesEnabled;
   const id = repoId(repo);
 
   return (
@@ -450,9 +451,9 @@ function ResetConfirmDialog({ open, onOpenChange, repoCount, resetting, onConfir
 
 /**
  * Repository settings page. Lists every repo Codra can access (sorted by last
- * review activity) with three independent per-repo auto-toggles — Code Review,
- * DocString Enforcer, Toolbox Watcher — plus a bulk "Reset all" that turns them
- * all off, and a per-repo model-strategy editor.
+ * review activity) with per-repo auto-toggles — Code Review, DocString
+ * Enforcer, Toolbox Watcher, External Jules PR review — plus a bulk "Reset all"
+ * that turns them all off, and a per-repo model-strategy editor.
  *
  * Local state it owns: `repos` (the list + optimistic toggle merges),
  * `pendingToggles` (in-flight per-switch keys), `resetOpen`/`resetting` (the
@@ -548,7 +549,13 @@ export function ReposPage() {
     try {
       const result = await api.resetRepos();
       setRepos(current =>
-        current.map(repo => ({ ...repo, enabled: false, docstringEnabled: false, toolboxEnabled: false })),
+        current.map(repo => ({
+          ...repo,
+          enabled: false,
+          docstringEnabled: false,
+          toolboxEnabled: false,
+          externalJulesEnabled: false,
+        })),
       );
       setResetOpen(false);
       toast.success('All checks off', {

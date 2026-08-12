@@ -1,4 +1,4 @@
-export const supportedGitHubWebhookEvents = ['pull_request', 'issue_comment', 'star', 'watch', 'fork'] as const;
+export const supportedGitHubWebhookEvents = ['pull_request', 'issue_comment', 'star', 'watch', 'fork', 'check_run', 'check_suite', 'workflow_run'] as const;
 
 export type GitHubWebhookEventName = typeof supportedGitHubWebhookEvents[number];
 
@@ -94,9 +94,19 @@ export type ForkWebhookPayload = {
   };
 };
 
-export type GitHubWebhookPayload = 
-  | PullRequestWebhookPayload 
+export type CheckWebhookPayload = {
+  action: string; // 'completed' etc.
+  installation?: { id: number };
+  repository: { owner: { login: string }; name: string };
+  check_run?: { head_sha: string; conclusion: string | null; pull_requests: { number: number }[] };
+  check_suite?: { head_sha: string; conclusion: string | null; pull_requests: { number: number }[] };
+  workflow_run?: { head_sha: string; conclusion: string | null; pull_requests: { number: number }[] };
+};
+
+export type GitHubWebhookPayload =
+  | PullRequestWebhookPayload
   | IssueCommentWebhookPayload
   | StarWebhookPayload
   | WatchWebhookPayload
-  | ForkWebhookPayload;
+  | ForkWebhookPayload
+  | CheckWebhookPayload;
