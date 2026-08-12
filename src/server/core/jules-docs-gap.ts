@@ -46,7 +46,7 @@ async function isStale(github: DocsGapGithub, owner: string, repo: string, path:
   return Number.isFinite(ageMs) && ageMs > STALE_DAYS * 24 * 60 * 60 * 1000;
 }
 
-async function getChangedFileContents(
+export async function getChangedFileContents(
   github: DocsGapGithub, owner: string, repo: string, prNumber: number, headSha: string,
 ): Promise<{ path: string; content: string }[]> {
   const diff = await github.getPullRequestDiff(owner, repo, prNumber).catch(() => '');

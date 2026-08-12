@@ -48,6 +48,7 @@ describe('classifyAndLinkJulesPr', () => {
     });
 
     expect(res.kind).toBe('diverted');
+    expect(res.kind === 'diverted' && res.session.session_id).toBe('6837743215401320221');
     const after = await getJulesSessionById(env, s.id);
     expect(after?.created_pr_number).toBe(42);
     expect(after?.created_pr_url).toBe('https://github.com/o/r/pull/42');
