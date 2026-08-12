@@ -11,18 +11,25 @@ vi.mock('@server/services/jules', async (importActual) => ({
   sendJulesMessage: vi.fn(async () => {}),
 }));
 
-// a changed .ts file whose exported fn lacks a docstring (still a gap)
+// a changed .ts file whose exported fn (line 1) lacks a docstring (still a gap)
 const GAP_FILE = { path: 'src/a.ts', content: 'export function foo(x) { return x; }\n' };
 // same file, now with a docstring (gap closed)
 const OK_FILE = { path: 'src/a.ts', content: '/** does foo */\nexport function foo(x) { return x; }\n' };
 
 function fakeGh(files: { path: string; content: string }[]) {
   return {
-    getPullRequestDiff: async () => files.map((f) => `diff --git a/${f.path} b/${f.path}\n+++ b/${f.path}\n`).join(''),
+    // Emit a real unified diff so each content line is an added line (1..N),
+    // making the function's declaration line commentable inline.
+    getPullRequestDiff: async () => files.map((f) => {
+      const lines = f.content.replace(/\n$/, '').split('\n');
+      const hunk = lines.map((l) => `+${l}`).join('\n');
+      return `diff --git a/${f.path} b/${f.path}\n--- /dev/null\n+++ b/${f.path}\n@@ -0,0 +1,${lines.length} @@\n${hunk}\n`;
+    }).join(''),
     getRepoFileWithRefOrNull: async (_o: string, _r: string, p: string) => {
       const f = files.find((x) => x.path === p);
       return f ? { content: f.content } : null;
     },
+    createReview: vi.fn(async () => ({})),
     createIssueComment: vi.fn(async () => ({ id: 1 })),
   } as any;
 }
@@ -48,25 +55,31 @@ describe('verifyDivertedJulesPr', () => {
     const gh = fakeGh([OK_FILE]);
     const res = await verifyDivertedJulesPr(env, gh, { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha1' });
     expect(res.verified).toBe(true);
+    expect(gh.createReview).not.toHaveBeenCalled();
     expect(gh.createIssueComment).not.toHaveBeenCalled();
     expect(await correctionCount(env)).toBe(0);
   });
 
   it('does not check files outside the session target_files (no out-of-scope spam)', async () => {
-    // Scope is src/OTHER.ts, but the PR changed src/a.ts (which has a gap).
     const session = await seedSession(env, ['src/OTHER.ts']);
     const gh = fakeGh([GAP_FILE]);
     const res = await verifyDivertedJulesPr(env, gh, { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha1' });
-    expect(res.verified).toBe(true); // nothing in scope → nothing to flag
+    expect(res.verified).toBe(true);
+    expect(gh.createReview).not.toHaveBeenCalled();
     expect(await correctionCount(env)).toBe(0);
   });
 
-  it('flags gaps and sends a correction when a scoped file still lacks docstrings', async () => {
+  it('flags gaps: inline review on the in-diff function line + a Jules correction', async () => {
     const session = await seedSession(env, ['src/a.ts']);
     const gh = fakeGh([GAP_FILE]);
     const res = await verifyDivertedJulesPr(env, gh, { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha1' });
     expect(res.verified).toBe(false);
     expect(res.gaps).toContain('src/a.ts');
+    expect(gh.createReview).toHaveBeenCalledTimes(1);
+    const reviewInput = gh.createReview.mock.calls[0][3];
+    expect(reviewInput.comments).toEqual([
+      expect.objectContaining({ path: 'src/a.ts', line: 1, side: 'RIGHT' }),
+    ]);
     expect(await correctionCount(env)).toBe(1);
   });
 
@@ -76,6 +89,7 @@ describe('verifyDivertedJulesPr', () => {
     const ctx = { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha1' } as const;
     await verifyDivertedJulesPr(env, gh, ctx);
     await verifyDivertedJulesPr(env, gh, ctx);
-    expect(await correctionCount(env)).toBe(1); // second run deduped on commit sha1
+    expect(gh.createReview).toHaveBeenCalledTimes(1); // second run deduped
+    expect(await correctionCount(env)).toBe(1);
   });
 });
