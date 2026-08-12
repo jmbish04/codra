@@ -1,8 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { verifyDivertedJulesPr } from '@server/core/jules-pr-verify';
 import { stageJulesSession, markJulesLaunched } from '@server/db/jules-sessions';
-import { setJulesSessionCreatedPr } from '@server/db/jules-interactions';
+import { setJulesSessionCreatedPr, listInteractions } from '@server/db/jules-interactions';
 import { createTestEnv } from './helpers';
+
+// Stub the Jules SDK outbound so directCorrectionsToJules' send succeeds
+// deterministically (no network); everything else is the real code path.
+vi.mock('@server/services/jules', async (importActual) => ({
+  ...(await importActual<typeof import('@server/services/jules')>()),
+  sendJulesMessage: vi.fn(async () => {}),
+}));
 
 // a changed .ts file whose exported fn lacks a docstring (still a gap)
 const GAP_FILE = { path: 'src/a.ts', content: 'export function foo(x) { return x; }\n' };
@@ -16,7 +23,6 @@ function fakeGh(files: { path: string; content: string }[]) {
       const f = files.find((x) => x.path === p);
       return f ? { content: f.content } : null;
     },
-    createReview: vi.fn(async () => ({})),
     createIssueComment: vi.fn(async () => ({ id: 1 })),
   } as any;
 }
@@ -28,24 +34,48 @@ async function seedSession(env: Env, targetFiles: string[]) {
   return { ...s, session_id: 'sess-1', created_pr_number: 5, category: 'INTERNAL_CODRA', target_files: targetFiles } as any;
 }
 
+async function correctionCount(env: Env) {
+  const rows = await listInteractions(env, { sessionId: 'sess-1', prNumber: 5 });
+  return rows.filter((r) => r.kind === 'correction').length;
+}
+
 describe('verifyDivertedJulesPr', () => {
   let env: Env;
-  beforeEach(() => { env = createTestEnv(); });
+  beforeEach(() => { env = createTestEnv({ JULES_API_KEY: { get: async () => 'K' } } as any); });
 
   it('passes (no feedback) when the scoped docstrings are now present', async () => {
     const session = await seedSession(env, ['src/a.ts']);
     const gh = fakeGh([OK_FILE]);
-    const res = await verifyDivertedJulesPr(env, gh, { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha' });
+    const res = await verifyDivertedJulesPr(env, gh, { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha1' });
     expect(res.verified).toBe(true);
-    expect(gh.createReview).not.toHaveBeenCalled();
+    expect(gh.createIssueComment).not.toHaveBeenCalled();
+    expect(await correctionCount(env)).toBe(0);
   });
 
-  it('flags gaps and posts feedback when a scoped file still lacks docstrings', async () => {
+  it('does not check files outside the session target_files (no out-of-scope spam)', async () => {
+    // Scope is src/OTHER.ts, but the PR changed src/a.ts (which has a gap).
+    const session = await seedSession(env, ['src/OTHER.ts']);
+    const gh = fakeGh([GAP_FILE]);
+    const res = await verifyDivertedJulesPr(env, gh, { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha1' });
+    expect(res.verified).toBe(true); // nothing in scope → nothing to flag
+    expect(await correctionCount(env)).toBe(0);
+  });
+
+  it('flags gaps and sends a correction when a scoped file still lacks docstrings', async () => {
     const session = await seedSession(env, ['src/a.ts']);
     const gh = fakeGh([GAP_FILE]);
-    const res = await verifyDivertedJulesPr(env, gh, { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha' });
+    const res = await verifyDivertedJulesPr(env, gh, { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha1' });
     expect(res.verified).toBe(false);
     expect(res.gaps).toContain('src/a.ts');
-    expect(gh.createReview).toHaveBeenCalled();
+    expect(await correctionCount(env)).toBe(1);
+  });
+
+  it('is idempotent — re-running for the same head commit does not re-send', async () => {
+    const session = await seedSession(env, ['src/a.ts']);
+    const gh = fakeGh([GAP_FILE]);
+    const ctx = { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha1' } as const;
+    await verifyDivertedJulesPr(env, gh, ctx);
+    await verifyDivertedJulesPr(env, gh, ctx);
+    expect(await correctionCount(env)).toBe(1); // second run deduped on commit sha1
   });
 });
