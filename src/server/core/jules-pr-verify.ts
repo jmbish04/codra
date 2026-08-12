@@ -1,11 +1,13 @@
 import type { JulesSessionRow } from '@server/db/jules-sessions';
-import { getChangedFileContents, type DocsGapGithub } from '@server/core/jules-docs-gap';
+import { getChangedFileContents, type DocsGapGithub, type DocsGapModel } from '@server/core/jules-docs-gap';
 import { analyzeChangedFiles } from '@server/core/docstrings';
 import { directCorrectionsToJules } from '@server/core/jules-pr-correction';
-import { listInteractions } from '@server/db/jules-interactions';
+import { listInteractions, recordInteraction } from '@server/db/jules-interactions';
 import { parseUnifiedDiff } from '@server/core/diff';
 import { logger } from '@server/core/logger';
 import type { GitHubReviewComment } from '@server/core/github';
+import { DOCSTRING_QUALITY_SCHEMA } from '@server/models/schemas';
+import { ModelService } from '@server/services/model';
 
 type VerifyGithub = DocsGapGithub & {
   createReview(owner: string, repo: string, pull: number, input: { commitSha: string; event: 'COMMENT'; body: string; comments: GitHubReviewComment[] }): Promise<unknown>;
@@ -23,7 +25,8 @@ type VerifyGithub = DocsGapGithub & {
 export async function verifyDivertedJulesPr(
   env: Pick<Env, 'DB' | 'JULES_API_KEY'>,
   gh: VerifyGithub,
-  input: { session: JulesSessionRow; owner: string; repo: string; prNumber: number; headSha: string },
+  input: { session: JulesSessionRow; owner: string; repo: string; prNumber: number; headSha: string; qualityCheckEnabled?: boolean },
+  model?: DocsGapModel,
 ): Promise<{ verified: boolean; gaps: string[] }> {
   try {
     const scoped = new Set(input.session.target_files ?? []);
@@ -34,8 +37,65 @@ export async function verifyDivertedJulesPr(
     const results = analyzeChangedFiles(relevant).filter((r) => r.functionsMissingDocstrings.length > 0);
 
     if (results.length === 0) {
-      logger.info('jules pr verification passed', { owner: input.owner, repo: input.repo, prNumber: input.prNumber });
-      return { verified: true, gaps: [] };
+      // Opt-in LLM pass requires a session id (for the dedupe cache); without
+      // one, or when disabled / nothing in scope, the free check is the verdict.
+      if (!input.qualityCheckEnabled || relevant.length === 0 || !input.session.session_id) {
+        logger.info('jules pr verification passed', { owner: input.owner, repo: input.repo, prNumber: input.prNumber });
+        return { verified: true, gaps: [] };
+      }
+
+      // Optional, opt-in LLM docstring-quality pass. Only reached once the free
+      // deterministic check already passed (docstrings present but maybe wrong).
+      // Fail-open on any model error: a model outage must not block/spam the PR.
+      const sessionId = input.session.session_id;
+      const marker = `quality-checked commit ${input.headSha}`;
+      try {
+        // Cost cache: skip the model if we already quality-checked THIS commit
+        // (a prior pass leaves a `note` marker; a prior fail leaves a `correction`
+        // carrying the sha). opened/synchronize/redelivery re-fire otherwise.
+        // ponytail: lock-free — two concurrent webhooks for the same commit can
+        // both miss the marker and both run; accepted per the no-locks design.
+        const prior = await listInteractions(env, { sessionId, prNumber: input.prNumber });
+        if (prior.some((i) => (i.text ?? '').includes(marker) || (i.kind === 'correction' && (i.text ?? '').includes(input.headSha)))) {
+          logger.info('jules pr quality check already ran for this commit', { prNumber: input.prNumber, headSha: input.headSha });
+          return { verified: true, gaps: [] };
+        }
+
+        const svc = model ?? new ModelService(env as Env);
+        const modelId = 'claude-3-5-sonnet-latest';
+        const userPrompt = [
+          'Judge whether the docstrings in the following files accurately and completely describe the code.',
+          'Respond only with the requested JSON — no prose.',
+          '',
+          ...relevant.map((f) => `=== ${f.path} ===\n${f.content.slice(0, 12000)}`),
+        ].join('\n');
+        const systemPrompt = 'You judge whether the docstrings in these files accurately and completely describe the code. Respond with strict JSON only matching the schema; report only real quality problems, empty issues if the docstrings are fine.';
+        const res = await svc.callModel(modelId, { systemPrompt, userPrompt }, DOCSTRING_QUALITY_SCHEMA);
+        const parsed = JSON.parse(res.rawText) as { issues?: { path: string; note: string }[] };
+        const issues = (parsed.issues ?? []).filter((i) => scoped.has(i.path));
+
+        // Mark this commit checked (pass or fail) so re-fires skip the model.
+        await recordInteraction(env, {
+          sessionId, repository: `${input.owner}/${input.repo}`, prNumber: input.prNumber,
+          kind: 'note', direction: 'inbound', text: marker,
+        }).catch(() => {});
+
+        if (issues.length === 0) {
+          logger.info('jules pr verification passed', { owner: input.owner, repo: input.repo, prNumber: input.prNumber });
+          return { verified: true, gaps: [] };
+        }
+
+        const gaps = Array.from(new Set(issues.map((i) => i.path)));
+        await directCorrectionsToJules(env, gh, {
+          owner: input.owner, repo: input.repo, prNumber: input.prNumber,
+          comments: issues.map((i) => ({ path: i.path, title: 'Docstring quality', body: `${i.note} (commit ${input.headSha})` })),
+        }).catch((err) => logger.warn('verify directCorrectionsToJules failed', { error: err instanceof Error ? err.message : String(err) }));
+
+        return { verified: false, gaps };
+      } catch (err) {
+        logger.warn('jules pr docstring quality check failed; failing open', { error: err instanceof Error ? err.message : String(err) });
+        return { verified: true, gaps: [] };
+      }
     }
 
     const gaps = results.map((r) => r.fileName);

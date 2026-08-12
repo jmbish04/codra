@@ -92,4 +92,52 @@ describe('verifyDivertedJulesPr', () => {
     expect(gh.createReview).toHaveBeenCalledTimes(1); // second run deduped
     expect(await correctionCount(env)).toBe(1);
   });
+
+  it('quality flag OFF (default): no model call even when docstrings are present', async () => {
+    const session = await seedSession(env, ['src/a.ts']);
+    const gh = fakeGh([OK_FILE]);
+    const model = { callModel: vi.fn(async () => { throw new Error('should not be called'); }) };
+    const res = await verifyDivertedJulesPr(env, gh, { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha1' }, model);
+    expect(res.verified).toBe(true);
+    expect(model.callModel).not.toHaveBeenCalled();
+    expect(await correctionCount(env)).toBe(0);
+  });
+
+  it('quality flag ON + model returns issues: verified false, one correction recorded', async () => {
+    const session = await seedSession(env, ['src/a.ts']);
+    const gh = fakeGh([OK_FILE]);
+    const model = { callModel: vi.fn(async () => ({ rawText: JSON.stringify({ issues: [{ path: 'src/a.ts', note: 'wrong description' }] }) })) };
+    const res = await verifyDivertedJulesPr(env, gh, { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha1', qualityCheckEnabled: true }, model);
+    expect(res.verified).toBe(false);
+    expect(res.gaps).toEqual(['src/a.ts']);
+    expect(await correctionCount(env)).toBe(1);
+  });
+
+  it('quality flag ON + model returns empty issues: verified true, no correction', async () => {
+    const session = await seedSession(env, ['src/a.ts']);
+    const gh = fakeGh([OK_FILE]);
+    const model = { callModel: vi.fn(async () => ({ rawText: JSON.stringify({ issues: [] }) })) };
+    const res = await verifyDivertedJulesPr(env, gh, { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha1', qualityCheckEnabled: true }, model);
+    expect(res.verified).toBe(true);
+    expect(await correctionCount(env)).toBe(0);
+  });
+
+  it('quality flag ON + model throws: fail-open verified true, no correction', async () => {
+    const session = await seedSession(env, ['src/a.ts']);
+    const gh = fakeGh([OK_FILE]);
+    const model = { callModel: vi.fn(async () => { throw new Error('model unavailable'); }) };
+    const res = await verifyDivertedJulesPr(env, gh, { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha1', qualityCheckEnabled: true }, model);
+    expect(res.verified).toBe(true);
+    expect(await correctionCount(env)).toBe(0);
+  });
+
+  it('quality check is cached per commit — a re-run does not call the model again (no re-spend)', async () => {
+    const session = await seedSession(env, ['src/a.ts']);
+    const gh = fakeGh([OK_FILE]);
+    const model = { callModel: vi.fn(async () => ({ rawText: JSON.stringify({ issues: [] }) })) };
+    const ctx = { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha1', qualityCheckEnabled: true } as const;
+    await verifyDivertedJulesPr(env, gh, ctx, model);
+    await verifyDivertedJulesPr(env, gh, ctx, model);
+    expect(model.callModel).toHaveBeenCalledTimes(1); // second run served from the per-commit marker
+  });
 });

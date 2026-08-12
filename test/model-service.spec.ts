@@ -316,7 +316,7 @@ describe('ModelService', () => {
               on_file_types: ['.ts'],
               command: 'npm run lint',
             },
-            jules: { enabled: true },
+            jules: { enabled: true, quality_check: false },
             deployWorkflow: { enabled: true },
             engine: 'auto',
             coordinator: null,

@@ -242,3 +242,28 @@ export const DOCS_GAP_SCHEMA = {
     },
   },
 } as const;
+
+export const DOCSTRING_QUALITY_SCHEMA = {
+  name: 'codra_docstring_quality',
+  description: 'Judge whether the docstrings in the assigned files accurately and completely describe the code.',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['issues'],
+    properties: {
+      issues: {
+        type: 'array',
+        description: 'One entry per file whose docstrings are inaccurate, misleading, or incomplete. Empty array if all are good.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['path', 'note'],
+          properties: {
+            path: { type: 'string' },
+            note: { type: 'string', description: 'What is wrong and what to fix.' },
+          },
+        },
+      },
+    },
+  },
+} as const;
