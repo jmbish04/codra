@@ -176,6 +176,9 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
         for (const prNumber of prNumbers) {
           try {
             const pr = await gh.getPullRequest(p.repository.owner.login, p.repository.name, prNumber);
+            // The SHA-fallback endpoint returns closed/merged PRs too — never
+            // review one (a delayed CI failure on a just-merged commit).
+            if (pr.state && pr.state !== 'open') continue;
             // The PR may have moved on since this CI run started — only review
             // when the failing commit is still the PR head; otherwise wait for
             // the new commit's own CI-completion webhook.

@@ -432,11 +432,14 @@ export class GitHubClient {
 
   /** Does the repo have ≥1 enabled Actions workflow? (CI-presence, race-free.) */
   async hasConfiguredCI(owner: string, repo: string): Promise<boolean> {
+    // Do NOT swallow errors here: the caller fails safe with `.catch(() => true)`
+    // (assume CI present → wait, never eager-review). Swallowing to `false` would
+    // defeat that and trigger a review on a transient API failure.
     return withRetry(`hasConfiguredCI ${owner}/${repo}`, async () => {
       const res = await this.requestAndCheck(`${repoApiPath(owner, repo)}/actions/workflows`);
       const body = (await res.json()) as { total_count: number; workflows: { state: string }[] };
       return (body.workflows ?? []).some((w) => w.state === 'active');
-    }).catch(() => false);
+    });
   }
 
   async listOpenPullRequests(owner: string, repo: string) {
