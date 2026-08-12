@@ -130,4 +130,14 @@ describe('verifyDivertedJulesPr', () => {
     expect(res.verified).toBe(true);
     expect(await correctionCount(env)).toBe(0);
   });
+
+  it('quality check is cached per commit — a re-run does not call the model again (no re-spend)', async () => {
+    const session = await seedSession(env, ['src/a.ts']);
+    const gh = fakeGh([OK_FILE]);
+    const model = { callModel: vi.fn(async () => ({ rawText: JSON.stringify({ issues: [] }) })) };
+    const ctx = { session, owner: 'o', repo: 'r', prNumber: 5, headSha: 'sha1', qualityCheckEnabled: true } as const;
+    await verifyDivertedJulesPr(env, gh, ctx, model);
+    await verifyDivertedJulesPr(env, gh, ctx, model);
+    expect(model.callModel).toHaveBeenCalledTimes(1); // second run served from the per-commit marker
+  });
 });
