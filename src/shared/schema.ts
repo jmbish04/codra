@@ -129,7 +129,9 @@ export const reviewConfigSchema = z.object({
       on_file_types: ['.ts', '.tsx', '.js'],
       command: 'npm run lint && npm run typecheck',
     }),
-  jules: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
+  jules: z
+    .object({ enabled: z.boolean().default(true), quality_check: z.boolean().default(false) })
+    .default({ enabled: true, quality_check: false }),
   deployWorkflow: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
   engine: z.enum(['auto', 'opencode', 'computer', 'native']).default('auto'),
   coordinator: z.string().nullable().default(null),
@@ -163,7 +165,7 @@ export const repoConfigSchema = z.object({
       on_file_types: ['.ts', '.tsx', '.js'],
       command: 'npm run lint && npm run typecheck',
     },
-    jules: { enabled: true },
+    jules: { enabled: true, quality_check: false },
     deployWorkflow: { enabled: true },
     engine: 'auto',
     coordinator: null,

@@ -11,6 +11,7 @@ import { recordWebhookDelivery, finalizeWebhookDelivery, type DeliveryOutcome } 
 import { getWorkerApiKey } from '@server/utils/secrets';
 import { notifyJobsChanged } from '@server/core/jobs-feed';
 import { GitHubClient } from '@server/core/github';
+import { ModelService } from '@server/services/model';
 
 /**
  * handleGitHubWebhook
@@ -291,7 +292,8 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
               repo: payload.repository.name,
               prNumber: prPayload.pull_request.number,
               headSha: prPayload.pull_request.head.sha,
-            }).catch((err) => console.error('Jules PR verification failed:', err)),
+              qualityCheckEnabled: repoConfig.parsedJson.review?.jules?.quality_check ?? false,
+            }, new ModelService(c.env)).catch((err) => console.error('Jules PR verification failed:', err)),
           );
           return finish(
             202,
