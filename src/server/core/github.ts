@@ -431,14 +431,32 @@ export class GitHubClient {
   }
 
   /** Does the repo have ≥1 enabled Actions workflow? (CI-presence, race-free.) */
-  async hasConfiguredCI(owner: string, repo: string): Promise<boolean> {
+  async hasConfiguredCI(owner: string, repo: string, baseBranch?: string): Promise<boolean> {
     // Do NOT swallow errors here: the caller fails safe with `.catch(() => true)`
     // (assume CI present → wait, never eager-review). Swallowing to `false` would
     // defeat that and trigger a review on a transient API failure.
     return withRetry(`hasConfiguredCI ${owner}/${repo}`, async () => {
+      // GitHub Actions workflows.
       const res = await this.requestAndCheck(`${repoApiPath(owner, repo)}/actions/workflows`);
       const body = (await res.json()) as { total_count: number; workflows: { state: string }[] };
-      return (body.workflows ?? []).some((w) => w.state === 'active');
+      if ((body.workflows ?? []).some((w) => w.state === 'active')) return true;
+
+      // Required status checks on the base branch — covers 3rd-party CI
+      // (CircleCI, Buildkite, …) that reports via check-runs/statuses rather
+      // than Actions. A 404 just means the branch has no protection; other
+      // errors propagate so the caller's fail-safe still applies.
+      if (baseBranch) {
+        try {
+          const rc = await this.requestAndCheck(
+            `${repoApiPath(owner, repo)}/branches/${encodeURIComponent(baseBranch)}/protection/required_status_checks`,
+          );
+          const rcBody = (await rc.json()) as { contexts?: string[]; checks?: unknown[] };
+          if ((rcBody.contexts?.length ?? 0) > 0 || (rcBody.checks?.length ?? 0) > 0) return true;
+        } catch (err) {
+          if (!(err instanceof GitHubError && err.status === 404)) throw err;
+        }
+      }
+      return false;
     });
   }
 
