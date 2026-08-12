@@ -308,7 +308,7 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
         if (link.kind === 'external') {
           if (repoConfig.externalJulesEnabled) {
             const gh = new GitHubClient(c.env, installationId);
-            const hasCI = await gh.hasConfiguredCI(payload.repository.owner.login, payload.repository.name).catch(() => true);
+            const hasCI = await gh.hasConfiguredCI(payload.repository.owner.login, payload.repository.name, prPayload.pull_request.base.ref).catch(() => true);
             if (!hasCI) {
               const jobId = await enqueueExternalReview(c.env, gh, {
                 owner: payload.repository.owner.login,

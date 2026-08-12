@@ -431,14 +431,43 @@ export class GitHubClient {
   }
 
   /** Does the repo have ≥1 enabled Actions workflow? (CI-presence, race-free.) */
-  async hasConfiguredCI(owner: string, repo: string): Promise<boolean> {
+  async hasConfiguredCI(owner: string, repo: string, baseBranch?: string): Promise<boolean> {
     // Do NOT swallow errors here: the caller fails safe with `.catch(() => true)`
     // (assume CI present → wait, never eager-review). Swallowing to `false` would
     // defeat that and trigger a review on a transient API failure.
     return withRetry(`hasConfiguredCI ${owner}/${repo}`, async () => {
-      const res = await this.requestAndCheck(`${repoApiPath(owner, repo)}/actions/workflows`);
-      const body = (await res.json()) as { total_count: number; workflows: { state: string }[] };
-      return (body.workflows ?? []).some((w) => w.state === 'active');
+      // GitHub Actions workflows (per_page=100 so an active workflow past the
+      // default page isn't missed). A 404/403 means Actions are disabled or the
+      // app can't read them — treat as "no Actions" and fall through to the
+      // 3rd-party check; other errors propagate so the caller's fail-safe holds.
+      try {
+        const res = await this.requestAndCheck(`${repoApiPath(owner, repo)}/actions/workflows?per_page=100`);
+        const body = (await res.json()) as { total_count: number; workflows: { state: string }[] };
+        if ((body.workflows ?? []).some((w) => w.state === 'active')) return true;
+      } catch (err) {
+        if (!(err instanceof GitHubError && (err.status === 404 || err.status === 403))) throw err;
+      }
+
+      // Required status checks on the base branch — covers 3rd-party CI
+      // (CircleCI, Buildkite, …) that reports via check-runs/statuses rather
+      // than Actions. A 404 means the branch has no protection; other errors
+      // propagate so the caller's fail-safe still applies.
+      // ponytail: KNOWN LIMIT — a repo that runs 3rd-party CI but has NO branch
+      // protection is undetectable race-free (its checks may not be posted at PR
+      // open), so it reads as "no CI" → reviewed on open. Accepted; the airtight
+      // alternative (read live PR checks) reintroduces the open-time race.
+      if (baseBranch) {
+        try {
+          const rc = await this.requestAndCheck(
+            `${repoApiPath(owner, repo)}/branches/${encodeURIComponent(baseBranch)}/protection/required_status_checks`,
+          );
+          const rcBody = (await rc.json()) as { contexts?: string[]; checks?: unknown[] };
+          if ((rcBody.contexts?.length ?? 0) > 0 || (rcBody.checks?.length ?? 0) > 0) return true;
+        } catch (err) {
+          if (!(err instanceof GitHubError && err.status === 404)) throw err;
+        }
+      }
+      return false;
     });
   }
 
