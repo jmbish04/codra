@@ -1,35 +1,67 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRetryableModelError, ModelService } from '@server/services/model';
-import { reviewWithCloudflare, extractCloudflareText } from '@server/models/cloudflare';
 import { reviewWithGoogle } from '@server/models/google';
-import { createTestEnv, saveTestProviderApiKey, seedReviewModels } from './helpers';
+import { createTestEnv, seedReviewModels } from './helpers';
 import { defaultRepoConfig } from '@shared/schema';
+
+/**
+ * A GUARDIAN service-binding stub. `capture` receives the parsed request body of
+ * each `/api/ai-router/run` call; `review` is the JSON the (fake) model returns.
+ */
+function guardianStub(
+  review: Record<string, unknown>,
+  opts: { capture?: (body: any) => void; status?: number } = {},
+) {
+  return {
+    fetch: async (_url: string, init: any) => {
+      if (opts.status && opts.status >= 400) {
+        return new Response('guardian error', { status: opts.status });
+      }
+      opts.capture?.(JSON.parse(String(init.body)));
+      return new Response(
+        JSON.stringify({
+          request_uuid: 't', status: 200, provider: 'ollama', model: 'auto',
+          mode: 'gateway', gateway: null, tokens_in: 1, tokens_out: 1, cost_usd: 0,
+          body: { response: JSON.stringify(review) },
+        }),
+        { status: 200 },
+      );
+    },
+  } as any;
+}
+
+const APPROVE = {
+  findings: [],
+  overall_correctness: 'patch is correct',
+  overall_explanation: 'ok',
+  overall_confidence_score: 0.9,
+  file_verdict: 'approve',
+  file_summary: 'ok',
+};
+
+const largeFile = (lines: number) => ({
+  path: 'src/large.ts',
+  previousPath: null,
+  isNew: false,
+  isDeleted: false,
+  isBinary: false,
+  lineCount: lines,
+  hunks: [
+    {
+      header: `@@ -1,${lines} +1,${lines} @@`,
+      lines: Array.from({ length: lines }, (_, i) => ({
+        kind: 'add' as const,
+        content: `const value${i} = ${i};`,
+        newLineNumber: i + 1,
+        position: i + 1,
+      })),
+    },
+  ],
+});
 
 describe('ModelService', () => {
   afterEach(() => {
     vi.restoreAllMocks();
-  });
-
-  it('routes legacy Kimi K2.5 ids to Kimi K2.6 for new Cloudflare requests', async () => {
-    let requestedModel = '';
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
-      requestedModel = String(url).split('/ai/run/')[1]?.split('?')[0] ?? '';
-      return new Response(
-        JSON.stringify({ result: { response: '{"findings":[]}', usage: { prompt_tokens: 1, completion_tokens: 1 } } }),
-        { status: 200 },
-      );
-    });
-    const env = createTestEnv();
-
-    await seedReviewModels(env);
-    const service = new ModelService(env);
-    const response = await (service as any).callModel('@cf/moonshotai/kimi-k2.5', {
-      systemPrompt: 'system',
-      userPrompt: 'user',
-    });
-
-    expect(requestedModel).toBe('@cf/moonshotai/kimi-k2.6');
-    expect(response.modelUsed).toBe('@cf/moonshotai/kimi-k2.6');
   });
 
   it('appends the default Workers AI fallbacks to a configured strategy', () => {
@@ -38,16 +70,10 @@ describe('ModelService', () => {
       totalLineCount: 500,
       config: {
         ...defaultRepoConfig,
-        model: {
-          main: 'gemma-4-31b-it',
-          fallbacks: [],
-          size_overrides: [],
-        },
+        model: { main: 'gemma-4-31b-it', fallbacks: [], size_overrides: [] },
       },
     });
 
-    // selectModel always appends DEFAULT_WORKERS_AI_FALLBACKS for resilience, so
-    // an empty configured fallback list still resolves to the default chain.
     expect(selected).toEqual({
       primary: 'gemma-4-31b-it',
       fallbacks: [
@@ -60,367 +86,45 @@ describe('ModelService', () => {
 
   it('fails clearly when no model strategy is configured', () => {
     const service = new ModelService(createTestEnv());
-
-    expect(() => (service as any).selectModel({
-      totalLineCount: 1,
-      config: defaultRepoConfig,
-    })).toThrow('No review model strategy is configured');
+    expect(() => (service as any).selectModel({ totalLineCount: 1, config: defaultRepoConfig }))
+      .toThrow('No review model strategy is configured');
   });
 
-  // extractCloudflareText is the batch/synthesize path (throwOnNoContent omitted).
-  // The sync reviewWithCloudflare deliberately throws on reasoning-only responses
-  // so the model service falls back to another provider instead.
-  it('turns Cloudflare reasoning-only responses into inconclusive review JSON', () => {
-    const result = {
-      choices: [
-        { message: { content: null, reasoning: 'Long reasoning that consumed the completion budget.' }, finish_reason: 'length' },
-      ],
-      usage: { prompt_tokens: 1, completion_tokens: 4096 },
-    };
+  it('routes review inference through core-guardian and returns the parsed result', async () => {
+    let body: any = null;
+    const env = createTestEnv({ GUARDIAN: guardianStub(APPROVE, { capture: (b) => { body = b; } }) });
+    await seedReviewModels(env);
+    const service = new ModelService(env);
 
-    const parsed = JSON.parse(extractCloudflareText(result, '@cf/moonshotai/kimi-k2.6'));
-
-    expect(parsed.findings).toEqual([]);
-    expect(parsed.overall_correctness).toBe('patch is incorrect');
-    expect(parsed.overall_explanation).toContain('inconclusive');
-  });
-
-  it('does not parse Cloudflare reasoning as review JSON when final content is missing', () => {
-    const result = {
-      choices: [
-        { message: { content: null, reasoning: 'Reasoning mentioned an object like {"foo":"bar"} but never produced final JSON.' }, finish_reason: 'length' },
-      ],
-      usage: { prompt_tokens: 1, completion_tokens: 8192 },
-    };
-
-    const parsed = JSON.parse(extractCloudflareText(result, '@cf/zai-org/glm-4.7-flash'));
-
-    expect(parsed.findings).toEqual([]);
-    expect(parsed.overall_explanation).toContain('reasoning-only response');
-  });
-
-  it('asks Cloudflare chat models for strict review JSON', async () => {
-    let inputs: any;
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
-      inputs = JSON.parse(String(init?.body));
-      return new Response(
-        JSON.stringify({
-          result: {
-            choices: [
-              {
-                message: {
-                  content: '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}',
-                },
-              },
-            ],
-            usage: { prompt_tokens: 1, completion_tokens: 1 },
-          },
-        }),
-        { status: 200 },
-      );
-    });
-    const env = createTestEnv();
-
-    await reviewWithCloudflare(env, '@cf/zai-org/glm-4.7-flash', {
+    const response = await (service as any).callModel('@cf/moonshotai/kimi-k2.6', {
       systemPrompt: 'system',
       userPrompt: 'user',
     });
 
-    expect(inputs.response_format).toMatchObject({
-      type: 'json_schema',
-      json_schema: {
-        name: 'codra_file_review',
-        strict: true,
-      },
-    });
-    expect(inputs.messages[0].content).toContain('Return only the JSON object');
-    expect(inputs.max_completion_tokens).toBe(8192);
-    expect(inputs.chat_template_kwargs).toBeUndefined();
-    expect(inputs.reasoning_effort).toBeUndefined();
+    // Guardian owns model selection (task = CODE_REVIEW, model = auto).
+    expect(body.project).toBe('codra');
+    expect(body.task).toBe('CODE_REVIEW');
+    expect(body.model).toBe('auto');
+    expect(body.input.response_format).toMatchObject({ type: 'json_schema', json_schema: { name: 'codra_file_review', strict: true } });
+    expect(response.provider).toBe('ollama');
+    expect(response.rawText).toContain('findings');
   });
 
-  it('retries Google once for transient 524 edge timeouts', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ error: { code: 524, message: 'A timeout occurred.' } }),
-          { status: 524, headers: { 'content-type': 'application/json' } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            candidates: [{ content: { parts: [{ text: '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}' }] } }],
-            usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
-      );
-
-    const response = await reviewWithGoogle(
-      { apiKey: 'test-key' },
-      'gemma-4-31b-it',
-      { systemPrompt: 'system', userPrompt: 'user' },
-    );
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(response.rawText).toContain('"findings"');
-  });
-
-  it('does not spend an extra queue slice retrying the same Cloudflare model inline', async () => {
-    let attempts = 0;
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      attempts++;
-      return new Response('temporary provider error', { status: 500 });
-    });
-    const env = createTestEnv();
-
-    await expect(
-      reviewWithCloudflare(env, '@cf/zai-org/glm-4.7-flash', {
-        systemPrompt: 'system',
-        userPrompt: 'user',
-      }),
-    ).rejects.toThrow('temporary provider error');
-    expect(attempts).toBe(1);
-  });
-
-  it('tries the smaller Google fallback after the primary Google model fails', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            error: {
-              code: 500,
-              message: 'Internal error encountered.',
-              status: 'INTERNAL',
-            },
-          }),
-          { status: 500, headers: { 'content-type': 'application/json' } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            error: {
-              code: 500,
-              message: 'Internal error encountered.',
-              status: 'INTERNAL',
-            },
-          }),
-          { status: 500, headers: { 'content-type': 'application/json' } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            candidates: [{ content: { parts: [{ text: '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}' }] } }],
-            usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
-      );
-    const env = createTestEnv();
-    await saveTestProviderApiKey(env);
+  it('truncates an oversized diff before sending it through guardian', async () => {
+    let body: any = null;
+    const env = createTestEnv({ GUARDIAN: guardianStub(APPROVE, { capture: (b) => { body = b; } }) });
     await seedReviewModels(env);
     const service = new ModelService(env);
 
     const response = await service.reviewFile({
-      file: {
-        path: 'src/app.ts',
-        lineCount: 1,
-        hunks: [],
-        isDeleted: false,
-        isBinary: false,
-        isNew: false,
-        previousPath: null,
-      },
+      file: largeFile(900),
       prTitle: 'Test',
       prDescription: null,
-      config: {
-        ...defaultRepoConfig,
-        model: {
-          main: 'gemma-4-31b-it',
-          fallbacks: ['gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'],
-          size_overrides: [],
-        },
-      },
-      totalLineCount: 1,
-    });
-
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(String(fetchMock.mock.calls[0][0])).toContain('/models/gemma-4-31b-it:generateContent');
-    expect(String(fetchMock.mock.calls[1][0])).toContain('/models/gemma-4-31b-it:generateContent');
-    expect(String(fetchMock.mock.calls[2][0])).toContain('/models/gemma-4-26b-a4b-it:generateContent');
-    expect(response.modelUsed).toBe('gemma-4-26b-a4b-it');
-  });
-
-  it('marks exhausted transient provider failures as retryable for the queue', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('[REDACTED]', { status: 500 }));
-    const env = createTestEnv();
-
-    await seedReviewModels(env);
-    const service = new ModelService(env);
-    await expect(
-      service.reviewFile({
-        file: {
-          path: 'test/setup.ts',
-          lineCount: 1,
-          hunks: [],
-          isDeleted: false,
-          isBinary: false,
-          isNew: false,
-          previousPath: null,
-        },
-        prTitle: 'Test',
-        prDescription: null,
-        config: {
-          review: {
-            on: ['opened'],
-            ignore_drafts: true,
-            mention_trigger: '@codra-app',
-            skip_files: [],
-            max_files: 100,
-            large_file_threshold_lines: 200,
-            max_diff_lines_per_file: 800,
-            max_total_diff_chars: 150_000,
-            max_comments: 10,
-            min_severity: 'nit',
-            focus: ['quality'],
-            custom_rules: [],
-            labels: false,
-            exec: {
-              enabled: false,
-              on_file_types: ['.ts'],
-              command: 'npm run lint',
-            },
-            jules: { enabled: true, quality_check: false },
-            deployWorkflow: { enabled: true },
-            engine: 'auto',
-            coordinator: null,
-            risk_tiers: { trivial_max_lines: 10, lite_max_lines: 100 },
-          },
-          model: {
-            main: '@cf/zai-org/glm-4.7-flash',
-            fallbacks: [],
-            size_overrides: [],
-          },
-        },
-        totalLineCount: 1,
-      }),
-    ).rejects.toSatisfy(isRetryableModelError);
-  });
-
-  it('skips Cloudflare for the rest of a job after allocation is exhausted', async () => {
-    let cloudflareCalls = 0;
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
-      if (String(url).includes('api.cloudflare.com')) {
-        cloudflareCalls++;
-        return new Response('Cloudflare daily free allocation exhausted (4006)', { status: 400 });
-      }
-      return new Response(
-        JSON.stringify({
-          candidates: [{ content: { parts: [{ text: '{"findings":[]}' }] } }],
-          usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      );
-    });
-    const env = createTestEnv();
-    await saveTestProviderApiKey(env);
-    await seedReviewModels(env);
-    const service = new ModelService(env, undefined, { jobId: 'job-provider-skip' });
-    const file = {
-      path: 'src/app.ts',
-      lineCount: 1,
-      hunks: [],
-      isDeleted: false,
-      isBinary: false,
-      isNew: false,
-      previousPath: null,
-    };
-    const config = {
-      ...defaultRepoConfig,
-      model: {
-        main: '@cf/zai-org/glm-4.7-flash',
-        fallbacks: ['gemma-4-31b-it'],
-        size_overrides: [],
-      },
-    };
-
-    await service.reviewFile({
-      file,
-      prTitle: 'Test',
-      prDescription: null,
-      config,
-      totalLineCount: 1,
-    });
-    await service.reviewFile({
-      file: { ...file, path: 'src/other.ts' },
-      prTitle: 'Test',
-      prDescription: null,
-      config,
-      totalLineCount: 1,
-    });
-
-    expect(cloudflareCalls).toBe(1);
-    // 1 Cloudflare attempt (file 1, then provider marked unavailable) + 2 Google fallbacks.
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-  });
-
-  it('uses the configured Gemma prompt cap and output token budget on the first attempt', async () => {
-    let requestBody: any = null;
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
-      requestBody = JSON.parse(String(init?.body));
-      return new Response(
-        JSON.stringify({
-          candidates: [{ content: { parts: [{ text: '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}' }] } }],
-          usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      );
-    });
-    const env = createTestEnv();
-    await saveTestProviderApiKey(env);
-    await seedReviewModels(env);
-    const service = new ModelService(env);
-    const largeFile = {
-      path: 'src/large.ts',
-      previousPath: null,
-      isNew: false,
-      isDeleted: false,
-      isBinary: false,
-      lineCount: 900,
-      hunks: [
-        {
-          header: '@@ -1,900 +1,900 @@',
-          lines: Array.from({ length: 900 }, (_, index) => ({
-            kind: 'add' as const,
-            content: `const value${index} = ${index};`,
-            newLineNumber: index + 1,
-            position: index + 1,
-          })),
-        },
-      ],
-    };
-
-    const response = await service.reviewFile({
-      file: largeFile,
-      prTitle: 'Test',
-      prDescription: null,
-      config: {
-        ...defaultRepoConfig,
-        model: {
-          main: 'gemma-4-31b-it',
-          fallbacks: [],
-          size_overrides: [],
-        },
-      },
+      config: { ...defaultRepoConfig, model: { main: 'gemma-4-31b-it', fallbacks: [], size_overrides: [] } },
       totalLineCount: 500,
     });
 
-    const userPrompt = requestBody.contents[0].parts[0].text as string;
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(requestBody.generationConfig.maxOutputTokens).toBe(4096);
+    const userPrompt = body.input.messages[1].content as string;
     expect(userPrompt).toContain('[NOTE: This diff has been truncated from 900 lines to 800 lines for brevity.]');
     expect(userPrompt).toContain('const value799 = 799;');
     expect(userPrompt).not.toContain('const value800 = 800;');
@@ -428,63 +132,40 @@ describe('ModelService', () => {
     expect(response.wasPromptTruncated).toBe(true);
   });
 
-  it('uses a compact Gemma prompt only after a prior transient failure', async () => {
-    let requestBody: any = null;
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
-      requestBody = JSON.parse(String(init?.body));
-      return new Response(
-        JSON.stringify({
-          candidates: [{ content: { parts: [{ text: '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}' }] } }],
-          usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      );
-    });
-    const env = createTestEnv();
-    await saveTestProviderApiKey(env);
+  it('marks a guardian outage as retryable so the queue retries the job', async () => {
+    const env = createTestEnv({ GUARDIAN: guardianStub(APPROVE, { status: 502 }) });
     await seedReviewModels(env);
     const service = new ModelService(env);
-    const largeFile = {
-      path: 'src/large.ts',
-      previousPath: null,
-      isNew: false,
-      isDeleted: false,
-      isBinary: false,
-      lineCount: 900,
-      hunks: [
-        {
-          header: '@@ -1,900 +1,900 @@',
-          lines: Array.from({ length: 900 }, (_, index) => ({
-            kind: 'add' as const,
-            content: `const value${index} = ${index};`,
-            newLineNumber: index + 1,
-            position: index + 1,
-          })),
-        },
-      ],
-    };
 
-    const response = await service.reviewFile({
-      file: largeFile,
-      prTitle: 'Test',
-      prDescription: null,
-      config: {
-        ...defaultRepoConfig,
-        model: {
-          main: 'gemma-4-31b-it',
-          fallbacks: [],
-          size_overrides: [],
-        },
-      },
-      totalLineCount: 900,
-      compactPrompt: true,
-    });
+    await expect(
+      service.reviewFile({
+        file: { path: 'src/app.ts', lineCount: 1, hunks: [], isDeleted: false, isBinary: false, isNew: false, previousPath: null },
+        prTitle: 'Test',
+        prDescription: null,
+        config: { ...defaultRepoConfig, model: { main: '@cf/zai-org/glm-4.7-flash', fallbacks: [], size_overrides: [] } },
+        totalLineCount: 1,
+      }),
+    ).rejects.toSatisfy(isRetryableModelError);
+  });
 
-    const userPrompt = requestBody.contents[0].parts[0].text as string;
-    expect(userPrompt).toContain('[NOTE: This diff has been truncated from 900 lines to 400 lines for brevity.]');
-    expect(userPrompt).toContain('const value399 = 399;');
-    expect(userPrompt).not.toContain('const value400 = 400;');
-    expect(response.reviewedLineCount).toBe(400);
-    expect(response.wasPromptTruncated).toBe(true);
+  it('retries Google once for transient 524 edge timeouts (provider client unit)', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { code: 524, message: 'A timeout occurred.' } }), { status: 524, headers: { 'content-type': 'application/json' } }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}' }] } }],
+            usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+
+    const response = await reviewWithGoogle({ apiKey: 'test-key' }, 'gemma-4-31b-it', { systemPrompt: 'system', userPrompt: 'user' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(response.rawText).toContain('"findings"');
   });
 });

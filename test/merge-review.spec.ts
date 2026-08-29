@@ -9,19 +9,27 @@ import { createTestEnv } from './helpers';
 const KEY = 'test-webhook-secret';
 const authed = { 'X-API-Key': KEY, 'content-type': 'application/json' } as const;
 
-// The stubbed Workers AI REST call returns a non-verdict body, so parseReviewVerdict
-// defaults to not-satisfied — i.e. codra does NOT approve unless a real Kimi says so.
-// That makes the reject + circuit-breaker paths deterministic to test.
+// The guardian stub returns a non-verdict body, so parseReviewVerdict defaults to
+// not-satisfied — i.e. codra does NOT approve unless the judge model says so. That
+// makes the reject + circuit-breaker paths deterministic to test.
+function guardianNonVerdict() {
+  return {
+    fetch: async () =>
+      new Response(
+        JSON.stringify({
+          request_uuid: 't', status: 200, provider: 'ollama', model: 'auto',
+          mode: 'gateway', gateway: null, tokens_in: 1, tokens_out: 1, cost_usd: 0,
+          body: { response: 'no verdict here' },
+        }),
+        { status: 200 },
+      ),
+  } as any;
+}
+
 describe('merge-review gate', () => {
   let env: Env;
   beforeEach(() => {
-    env = createTestEnv();
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
-      new Response(
-        JSON.stringify({ result: { response: 'no verdict here', usage: { prompt_tokens: 1, completion_tokens: 1 } }, success: true }),
-        { status: 200 },
-      ),
-    );
+    env = createTestEnv({ GUARDIAN: guardianNonVerdict() });
   });
   afterEach(() => vi.restoreAllMocks());
 

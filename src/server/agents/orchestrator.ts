@@ -2,8 +2,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { AIChatAgent } from "@cloudflare/ai-chat";
-import { withWorkersAi } from "@server/models/workers-ai";
-import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { routeAgentRequest, callable } from "agents";
 import {
   listBestPractices,
@@ -356,7 +354,7 @@ export class Chat extends AIChatAgent<any> {
     await this.addMcpServer("cloudflare-docs", "https://docs.mcp.cloudflare.com/mcp");
 
     try {
-      const token = await getSecretStoreBinding(this.env, "cf_paid_api_token");
+      const token = await getSecretStoreBinding(this.env, "CF_API_TOKEN");
       if (token && token.trim().length > 0) {
         await this.addMcpServer("cloudflare-api", "https://mcp.cloudflare.com/mcp", {
           transport: {
@@ -403,34 +401,12 @@ export class Chat extends AIChatAgent<any> {
     });
   }
 
-  async onChatMessage() {
-    const result = await withWorkersAi(this.env, "@cf/moonshotai/kimi-k2.7-code", async (model) => streamText({
-      model,
-      system: `
-        You are a helpful assistant with a \`codemode\` tool that runs TypeScript.
-        Inside the sandbox:
-          - await codemode.search("query") to discover connector methods and saved snippets
-          - await codemode.describe("connector.method") for TypeScript docs
-          - await <connector>.<method>(args) to call a method directly
-          - await codemode.run("name", input) to run a saved snippet
-        Connectors: \`github\` (pull requests, issues), \`repoApi\` (repo metadata, releases), and \`cdp\` (a live browser over the Chrome DevTools Protocol — cdp.send, cdp.attachToTarget, cdp.spec).
-        Some actions (like github.create_issue) require approval — the run pauses and resumes after the user approves. Write code as if the call returns normally.
-
-        You also have direct access to the following tools:
-        1. \`cloudflare-docs\`: Search and consult Cloudflare developer documentation.
-        2. \`cloudflare-api\`: Access the entire Cloudflare API to view, verify, create, and manage Cloudflare resources (KV, D1, R2, etc.).
-
-        The current date and time is ${new Date().toISOString()}.
-      `,
-      messages: await convertToModelMessages(this.messages),
-      tools: {
-        codemode: this.#runtime().tool(),
-        ...this.mcp.getAITools(),
-      },
-      stopWhen: stepCountIs(10),
-    }), { sessionAffinity: this.sessionAffinity });
-
-    return result.toUIMessageStreamResponse();
+  async onChatMessage(): Promise<Response> {
+    // TODO(guardian-agents): this interactive chat streams tool-calls through the
+    // Vercel AI SDK. All AI now routes through core-guardian, which does not yet
+    // expose a streaming/tool-calling surface the AI SDK can drive. Deferred —
+    // not in the live automated-review path (model.ts owns that).
+    throw new Error('OrchestratorAgent chat is pending migration to core-guardian streaming/tool-calling; unavailable.');
   }
 
   // ---- Callable methods for the approval / snippet UI -----------------------

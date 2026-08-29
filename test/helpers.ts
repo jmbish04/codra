@@ -129,10 +129,22 @@ export function createTestEnv(overrides: Partial<Record<keyof Env, unknown>> = {
     LLM_CONFIG_ENCRYPTION_KEY: 'test-llm-config-encryption-key',
     BOT_USERNAME: 'codra-app',
     ENVIRONMENT: 'production',
-    cf_paid_api_token: { get: async () => 'test-cf-api-token' },
-    cf_paid_account_id: { get: async () => 'test-cf-account' },
-    cf_free_api_token: { get: async () => '' },
-    cf_free_account_id: { get: async () => '' },
+    CF_API_TOKEN: { get: async () => 'test-cf-api-token' },
+    CF_ACCOUNT_ID: { get: async () => 'test-cf-account' },
+    AI_GATEWAY_TOKEN: { get: async () => 'test-guardian-token' },
+    // Default guardian stub: returns a minimal review JSON. Specs that assert on
+    // AI behaviour override GUARDIAN with their own fetch.
+    GUARDIAN: {
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            request_uuid: 'test', status: 200, provider: 'ollama', model: 'auto',
+            mode: 'gateway', gateway: null, tokens_in: 1, tokens_out: 1, cost_usd: 0,
+            body: { response: '{"findings":[],"file_verdict":"approve","file_summary":"ok"}' },
+          }),
+          { status: 200 },
+        ),
+    } as any,
     CF_DLQ_ID: '',
     RepoAgent: {} as any,
     Chat: {} as any,

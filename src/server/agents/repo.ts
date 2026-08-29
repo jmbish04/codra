@@ -1,10 +1,6 @@
 import { Agent } from "agents";
 import { ReviewAgent } from "./review";
 import { logger } from "../core/logger";
-import { generateText } from "ai";
-import { withWorkersAi } from "@server/models/workers-ai";
-import { GithubConnector } from "./codemode";
-import { createCodemodeRuntime, DynamicWorkerExecutor } from "@cloudflare/codemode";
 
 export class RepoAgent extends Agent<any> {
   async fetch(request: Request) {
@@ -55,37 +51,14 @@ export class RepoAgent extends Agent<any> {
 
       const results = await Promise.all(reviewPromises);
 
-      // Aggregate the results and drop a root-level comment.
-      const github = new GithubConnector(this.ctx, this.env, null as any);
-      const runtime = createCodemodeRuntime({
-        ctx: this.ctx,
-        executor: new DynamicWorkerExecutor({ loader: this.env.LOADER as any }),
-        connectors: [github],
-      });
-
-      const summaryPrompt = `
-        Code reviews for PR #${prNumber} in ${owner}/${repo} have completed.
-        Here are the summaries from the subagents:
-        ${results.map(r => `File: ${r.file}\nSummary: ${r.reviewOutput}`).join("\n\n")}
-        
-        Write a concise, professional root-level PR comment summarizing the overall findings.
-        Provide a prompt and instructions to a code agent or human to implement the recommended fixes.
-        Use the codemode tool 'github.create_issue_comment' to drop this comment on the PR.
-        Assume you have access to the tool via codemode.
-      `;
-
-      await withWorkersAi(this.env, "@cf/moonshotai/kimi-k2.7-code", (model) =>
-        generateText({
-          model,
-          system: "You are the orchestrator of the Codra code review engine. You have a `codemode` tool. Use `github.create_issue_comment(owner, repo, issue_number, body)` to post your summary.",
-          prompt: summaryPrompt,
-          tools: {
-            codemode: runtime.tool(),
-          },
-        }),
+      // TODO(guardian-agents): the codemode tool-calling aggregation (post a
+      // root-level summary comment) is deferred. All AI now routes through
+      // core-guardian, which does not yet expose a tool-calling/streaming surface
+      // the Vercel AI SDK can drive. This agentic path is not in the live review
+      // flow (model.ts owns automated reviews); re-enable once guardian supports it.
+      logger.warn(
+        `RepoAgent AI aggregation for ${owner}/${repo}#${prNumber} is deferred pending core-guardian tool-calling support; ${results.length} file reviews collected but no summary posted`,
       );
-
-      logger.info(`Completed review aggregation for ${owner}/${repo}#${prNumber}`);
     } catch (e) {
       logger.error(`Error processing PR: ${e}`);
     }

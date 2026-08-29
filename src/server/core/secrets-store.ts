@@ -7,14 +7,14 @@ export type SecretsStoreSecret = {
 
 /**
  * List the secrets in a Cloudflare Secrets Store, with their descriptions.
- * Uses the account-level cf_paid_api_token. Returns [] on any failure (the caller
+ * Uses the account-level CF_API_TOKEN. Returns [] on any failure (the caller
  * degrades gracefully rather than blocking a review).
  */
 export async function listSecretsStoreSecrets(env: Env, storeId: string): Promise<SecretsStoreSecret[]> {
   try {
     const [apiToken, accountId] = await Promise.all([
-      env.cf_paid_api_token.get(),
-      env.cf_paid_account_id.get(),
+      env.CF_API_TOKEN.get(),
+      env.CF_ACCOUNT_ID.get(),
     ]);
     if (!apiToken || !accountId || !storeId) return [];
 

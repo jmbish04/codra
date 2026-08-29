@@ -1,5 +1,4 @@
-import { generateText } from 'ai';
-import { withWorkersAi } from '@server/models/workers-ai';
+import { generateViaGuardian, type GuardianEnv } from '@server/services/guardian';
 import { eq } from 'drizzle-orm';
 import { getDb } from '@server/db/client';
 import { repositories } from '@server/db/schemas';
@@ -21,8 +20,6 @@ import {
 } from '@server/services/plan-orchestrator';
 
 const MAX_ITERATIONS = 3;
-// codra's system model — Jules is Gemini 3.1 Pro (1M ctx), so we hand it the full docs.
-const REVIEW_MODEL = '@cf/moonshotai/kimi-k2.7-code';
 const DOCS_FOR_JULES_MAX = 120_000;
 
 /**
@@ -55,11 +52,7 @@ export async function startPlanningSession(
   }
 }
 
-type PollerEnv = Pick<
-  Env,
-  'DB' | 'JULES_API_KEY' | 'PLANNING_ARTIFACTS'
-  | 'cf_free_account_id' | 'cf_free_api_token' | 'cf_paid_account_id' | 'cf_paid_api_token'
->;
+type PollerEnv = Pick<Env, 'DB' | 'JULES_API_KEY' | 'PLANNING_ARTIFACTS'> & GuardianEnv;
 
 /** Cron entry point. No-op when no active tasks — the tick returns immediately. */
 export async function advanceJulesOrchestration(env: PollerEnv): Promise<{ advanced: number }> {
@@ -92,17 +85,15 @@ export async function advanceTaskById(env: PollerEnv, taskId: string): Promise<{
 }
 
 async function reviewWithKimi(
-  env: Pick<Env, 'DB' | 'cf_free_account_id' | 'cf_free_api_token' | 'cf_paid_account_id' | 'cf_paid_api_token'>,
+  env: Pick<Env, 'DB'> & GuardianEnv,
   title: string,
   revisionJson: string,
 ): Promise<{ satisfied: boolean; feedback: string }> {
-  const { text } = await withWorkersAi(env, REVIEW_MODEL, (model) =>
-    generateText({
-      model,
-      system: 'You are the codra orchestrator. Judge plans strictly and reply only with the requested JSON block.',
-      prompt: buildReviewPrompt({ title, revisionJson }),
-    }),
-  );
+  const text = await generateViaGuardian(env, {
+    task: 'PLAN_REVIEW',
+    system: 'You are the codra orchestrator. Judge plans strictly and reply only with the requested JSON block.',
+    prompt: buildReviewPrompt({ title, revisionJson }),
+  });
   return parseReviewVerdict(text);
 }
 

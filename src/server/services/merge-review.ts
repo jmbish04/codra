@@ -1,9 +1,7 @@
-import { generateText } from 'ai';
-import { withWorkersAi } from '@server/models/workers-ai';
+import { generateViaGuardian, type GuardianEnv } from '@server/services/guardian';
 import { buildMergeReviewPrompt, parseReviewVerdict } from '@server/services/plan-orchestrator';
 import { countReviewAttempts, recordReview } from '@server/db/reconciliation-reviews';
 
-const REVIEW_MODEL = '@cf/moonshotai/kimi-k2.7-code';
 const MAX_MERGE_ATTEMPTS = 3;
 
 export type MergeReviewResult = { approved: boolean; feedback: string; attempt: number; reason?: string };
@@ -14,7 +12,7 @@ export type MergeReviewResult = { approved: boolean; feedback: string; attempt: 
  * rejected reconciliation can never loop into an unbounded re-merge.
  */
 export async function reviewReconciliation(
-  env: Pick<Env, 'DB' | 'cf_free_account_id' | 'cf_free_api_token' | 'cf_paid_account_id' | 'cf_paid_api_token'>,
+  env: Pick<Env, 'DB'> & GuardianEnv,
   input: { repositoryId: number; repository: string; reconciliationKey: string; summary: string; prNumber?: number | null },
 ): Promise<MergeReviewResult> {
   const prior = await countReviewAttempts(env, input.reconciliationKey);
@@ -25,13 +23,11 @@ export async function reviewReconciliation(
     return { approved: false, feedback: 'circuit breaker tripped', attempt, reason: 'max_attempts' };
   }
 
-  const { text } = await withWorkersAi(env, REVIEW_MODEL, (model) =>
-    generateText({
-      model,
-      system: 'You are the codra orchestrator. Judge merge reconciliations strictly and reply only with the requested JSON block.',
-      prompt: buildMergeReviewPrompt({ repository: input.repository, summary: input.summary }),
-    }),
-  );
+  const text = await generateViaGuardian(env, {
+    task: 'MERGE_REVIEW',
+    system: 'You are the codra orchestrator. Judge merge reconciliations strictly and reply only with the requested JSON block.',
+    prompt: buildMergeReviewPrompt({ repository: input.repository, summary: input.summary }),
+  });
   const verdict = parseReviewVerdict(text);
 
   await recordReview(env, {

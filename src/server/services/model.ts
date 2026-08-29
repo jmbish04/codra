@@ -1,15 +1,4 @@
-import { reviewWithGoogle } from '../models/google';
-import { reviewWithCloudflare } from '../models/cloudflare';
-import {
-  batchFitsPayloadLimit,
-  isBatchCapableCloudflareModel,
-  pollCloudflareReviewBatch,
-  submitCloudflareReviewBatch,
-  type BatchReviewItem,
-} from '../models/cloudflare-batch';
-import { isWorkersAiQuotaError, resolveWorkersAiAccounts, type CfAiAccount } from '../models/workers-ai';
-import { reviewWithOpenAI } from '../models/openai';
-import { reviewWithAnthropic } from '../models/anthropic';
+import { reviewViaGuardian } from '@server/services/guardian';
 import { buildFileReviewPrompts } from '../prompts/file-review';
 import { buildSummaryPrompt, SUMMARY_SYSTEM_PROMPT } from '../prompts/summary';
 import { parseFileReviewResponse } from '../core/model-output';
@@ -24,8 +13,6 @@ import { normalizeModelId } from '@shared/schema';
 import { getResolvedModelConfig, type ResolvedModelConfig } from '@server/db/model-configs';
 import { decryptLlmApiKey, resolveLlmApiKey } from '@server/core/llm-crypto';
 import { getMatchingBestPractices, convertPlateToMarkdown } from '@server/db/best-practices';
-import { getSecretStoreBinding } from '@server/utils/secrets';
-import { logApiUsage } from '@server/db/api-usage';
 
 const PROVIDER_UNAVAILABLE_TTL_SECONDS = 24 * 60 * 60;
 /**
@@ -218,75 +205,13 @@ export class ModelService {
     config: ResolvedModelConfig,
     input: { systemPrompt: string; userPrompt: string },
     schema: StructuredSchema = REVIEW_SCHEMA,
-    cacheSystem?: boolean,
+    _cacheSystem?: boolean,
   ): Promise<ModelResponse> {
-    if (config.apiFormat === 'cloudflare-workers-ai') {
-      return reviewWithCloudflare(this.env, config.modelName, input, this.tracker, config.providerName, schema);
-    }
-
-    let resolvedBaseUrl = config.baseUrl;
-    if (this.env.AI_GATEWAY_ID) {
-      try {
-        const accountId = await getSecretStoreBinding(this.env, 'cf_paid_account_id');
-        resolvedBaseUrl = `https://gateway.ai.cloudflare.com/v1/${accountId}/${this.env.AI_GATEWAY_ID}`;
-        if (accountId) {
-          if (config.apiFormat === 'openai') {
-            resolvedBaseUrl = `${resolvedBaseUrl}/openai`;
-          } else if (config.apiFormat === 'gemini') {
-            resolvedBaseUrl = `${resolvedBaseUrl}/google-ai-studio`;
-          } else if (config.apiFormat === 'anthropic') {
-            resolvedBaseUrl = `${resolvedBaseUrl}/anthropic`;
-          }
-        }
-      } catch (err) {
-        logger.warn('Failed to resolve cf_paid_account_id for AI Gateway routing', err);
-      }
-    }
-
-    let result: ModelResponse;
-
-    if (config.apiFormat === 'gemini') {
-      result = await reviewWithGoogle(
-        { apiKey: await this.resolveApiKey(config), baseUrl: resolvedBaseUrl, providerName: config.providerName },
-        config.modelName,
-        input,
-        this.tracker,
-        schema,
-      );
-    } else if (config.apiFormat === 'openai') {
-      result = await reviewWithOpenAI(
-        {
-          apiKey: await this.resolveApiKey(config),
-          baseUrl: resolvedBaseUrl || 'https://api.openai.com/v1',
-          providerName: config.providerName,
-        },
-        config.modelName,
-        input,
-        this.tracker,
-        schema,
-      );
-    } else {
-      result = await reviewWithAnthropic(
-        { apiKey: await this.resolveApiKey(config), baseUrl: resolvedBaseUrl, providerName: config.providerName },
-        config.modelName,
-        input,
-        this.tracker,
-        schema,
-        { system: cacheSystem },
-      );
-    }
-
-    // Log the API usage locally in the database
-    await logApiUsage(this.env, {
-      provider: config.providerName,
-      model: config.modelName,
-      promptTokens: result.inputTokens || 0,
-      completionTokens: result.outputTokens || 0,
-      source: 'local',
-      gatewayId: this.env.AI_GATEWAY_ID || '',
-    });
-
-    return result;
+    // All inference routes through core-guardian, which owns provider/model
+    // selection, fallback, metering, and budgets. `config` is now advisory only —
+    // guardian picks the model (task = CODE_REVIEW). Usage is logged inside
+    // reviewViaGuardian against the provider/model guardian actually used.
+    return reviewViaGuardian(this.env, { input, schema, task: 'CODE_REVIEW' });
   }
 
   async callModel(
@@ -295,99 +220,6 @@ export class ModelService {
     schema: StructuredSchema = REVIEW_SCHEMA,
   ): Promise<ModelResponse> {
     return this.callResolvedModel(await this.resolveModel(model), input, schema);
-  }
-
-  /**
-   * Resolves the batch-capable Workers AI model for this config, or null when
-   * the chain's primary model cannot be batched (callers then use the
-   * synchronous chunked path).
-   */
-  async resolveBatchModel(config: RepoConfig, totalLineCount: number): Promise<string | null> {
-    const { primary } = this.selectModel({ totalLineCount, config });
-    if (!isBatchCapableCloudflareModel(primary)) return null;
-
-    try {
-      const resolved = await this.resolveModel(primary);
-      if (resolved.apiFormat !== 'cloudflare-workers-ai') return null;
-      if (await this.isProviderUnavailable(resolved.providerId)) return null;
-      return primary;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Queues every file review as one Workers AI batch. Returns null when the
-   * payload exceeds the 10 MB cap so the caller can fall back to sync review.
-   */
-  /**
-   * Queues a Workers AI batch on the free account first (this account on quota
-   * exhaustion). Returns the request_id plus the account it ran on — the caller
-   * must persist `accountId` and poll with the same account. Null when the
-   * payload exceeds the 10 MB cap.
-   */
-  async submitReviewBatch(
-    model: string,
-    items: BatchReviewItem[],
-  ): Promise<{ requestId: string; accountId: string; accountLabel: string } | null> {
-    const { fits, bytes } = batchFitsPayloadLimit(items);
-    if (!fits) {
-      logger.warn(`Batch payload of ${bytes} bytes exceeds the Workers AI limit; falling back to synchronous review`, {
-        model,
-        requests: items.length,
-      });
-      return null;
-    }
-
-    const accounts = await resolveWorkersAiAccounts(this.env);
-    let lastError: unknown;
-    for (let i = 0; i < accounts.length; i++) {
-      const account = accounts[i];
-      try {
-        const requestId = await submitCloudflareReviewBatch(account, model, items);
-        return { requestId, accountId: account.accountId, accountLabel: account.label };
-      } catch (error) {
-        lastError = error;
-        const status = (error as { status?: number })?.status;
-        const message = error instanceof Error ? error.message : String(error);
-        if (i < accounts.length - 1 && isWorkersAiQuotaError({ status, message })) {
-          logger.info(`Workers AI account '${account.label}' out of quota; retrying batch on the next account`, { model });
-          continue;
-        }
-        throw error;
-      }
-    }
-    throw lastError;
-  }
-
-  /** Rebuilds the account that queued the batch from its persisted accountId. */
-  private async resolveBatchAccount(accountId: string): Promise<CfAiAccount> {
-    const accounts = await resolveWorkersAiAccounts(this.env);
-    const account = accounts.find((a) => a.accountId === accountId);
-    if (!account) {
-      throw new Error(`Batch account ${accountId} is no longer configured; cannot poll this batch.`);
-    }
-    return account;
-  }
-
-  async pollReviewBatch(model: string, requestId: string, accountId: string) {
-    const account = await this.resolveBatchAccount(accountId);
-    const result = await pollCloudflareReviewBatch(account, model, requestId);
-
-    if (result.status === 'complete') {
-      this.tracker?.record(model, result.usage.inputTokens, result.usage.outputTokens);
-      await logApiUsage(this.env, {
-        provider: 'Cloudflare',
-        model,
-        promptTokens: result.usage.inputTokens,
-        completionTokens: result.usage.outputTokens,
-        source: 'local',
-        accountId: account.accountId,
-        accountLabel: account.label,
-      });
-    }
-
-    return result;
   }
 
   /**
