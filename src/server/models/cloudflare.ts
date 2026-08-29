@@ -1,5 +1,6 @@
 import { logger } from '@server/core/logger';
 import { TimeoutError } from '@server/core/timeout';
+import { getSecretStoreBinding } from '@server/utils/secrets';
 import { ProviderRequestError, type ModelResponse, type StructuredSchema } from './types';
 import { REVIEW_SCHEMA } from './schemas';
 
@@ -154,8 +155,91 @@ export function cloudflareAiOptions(env: Pick<Env, 'AI_GATEWAY_ID'>) {
   return env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID } } : {};
 }
 
+/** Quota-exhaustion signal shared by the REST (freebie) and binding paths. */
+function isWorkersAiQuotaExhausted(status: number, body: string) {
+  if (status === 429) return true;
+  const b = body.toLowerCase();
+  return b.includes('4006') || b.includes('daily free allocation') || b.includes('capacity temporarily exceeded');
+}
+
+async function tryGetSecretStore<K extends keyof Env>(env: Pick<Env, K>, name: K): Promise<string | null> {
+  try {
+    const value = await getSecretStoreBinding(env, name);
+    return value && value.trim() ? value.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Runs a Workers-AI chat payload on the free Cloudflare account first (REST API +
+ * CF_FREEBIE_* secret-store creds), so its free daily neuron allocation is spent
+ * before this account's paid usage. Returns the unwrapped model result, or null
+ * to tell the caller to fall back to this account's AI binding — on missing
+ * creds, quota exhaustion, or any freebie-side failure (freebie is opportunistic;
+ * its problems must never break a review).
+ */
+async function runFreebieWorkersAi(
+  env: Pick<Env, 'CF_FREEBIE_API_TOKEN' | 'CF_FREEBIE_ACCOUNT_ID'>,
+  model: string,
+  payload: unknown,
+): Promise<unknown | null> {
+  const [token, accountId] = await Promise.all([
+    tryGetSecretStore(env, 'CF_FREEBIE_API_TOKEN'),
+    tryGetSecretStore(env, 'CF_FREEBIE_ACCOUNT_ID'),
+  ]);
+  if (!token || !accountId) return null;
+
+  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch((error) => {
+    logger.warn('Freebie Workers AI request threw; falling back to account AI binding', {
+      model,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  });
+  if (!res) return null;
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    if (isWorkersAiQuotaExhausted(res.status, body)) {
+      logger.info('Freebie Workers AI quota exhausted; falling back to account AI binding', { model });
+    } else {
+      logger.warn('Freebie Workers AI call failed; falling back to account AI binding', {
+        model,
+        status: res.status,
+        body: body.slice(0, 200),
+      });
+    }
+    return null;
+  }
+
+  const json = await res.json().catch(() => null);
+  logger.info(`Ran ${model} on the free Cloudflare account`);
+  // REST wraps the model output as { result, success, errors }. Unwrap so the
+  // shared extractors see the same top-level shape env.AI.run returns.
+  return isRecord(json) && 'result' in json ? (json as UnknownRecord).result : json;
+}
+
+/**
+ * Runs a Workers-AI chat payload, preferring the free Cloudflare account and
+ * falling back to this account's AI binding (routed through AI Gateway).
+ */
+export async function runCloudflareChat(
+  env: Pick<Env, 'AI' | 'AI_GATEWAY_ID' | 'CF_FREEBIE_API_TOKEN' | 'CF_FREEBIE_ACCOUNT_ID'>,
+  model: string,
+  payload: unknown,
+): Promise<unknown> {
+  const freebie = await runFreebieWorkersAi(env, model, payload);
+  if (freebie !== null) return freebie;
+  return env.AI.run(model as any, payload as any, cloudflareAiOptions(env));
+}
+
 export async function reviewWithCloudflare(
-  env: Pick<Env, 'AI' | 'AI_GATEWAY_ID'>,
+  env: Pick<Env, 'AI' | 'AI_GATEWAY_ID' | 'CF_FREEBIE_API_TOKEN' | 'CF_FREEBIE_ACCOUNT_ID'>,
   model: string,
   input: { systemPrompt: string; userPrompt: string },
   tracker?: { incrementSubrequests(count?: number): void },
@@ -183,7 +267,7 @@ export async function reviewWithCloudflare(
       logger.info(`Calling Cloudflare model: ${model}`);
       const startTime = Date.now();
       const result = await Promise.race([
-        env.AI.run(model as any, buildCloudflareReviewRequest(input, schema), cloudflareAiOptions(env)),
+        runCloudflareChat(env, model, buildCloudflareReviewRequest(input, schema)),
         timeoutPromise,
       ]);
       const durationMs = Date.now() - startTime;

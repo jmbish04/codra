@@ -52,6 +52,10 @@ export async function submitCloudflareReviewBatch(
   model: string,
   items: BatchReviewItem[],
 ): Promise<string> {
+  // ponytail: batch stays on this account's AI binding (not the free account).
+  // Batch is submit-now / poll-later, so a request_id is only pollable from the
+  // account that queued it — routing to the freebie account would mean persisting
+  // per-batch account ownership. Add that only if batch neuron spend matters.
   const response = await env.AI.run(
     model as any,
     { requests: items.map((item) => buildCloudflareReviewRequest(item)) } as any,

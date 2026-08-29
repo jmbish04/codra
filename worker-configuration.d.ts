@@ -17,6 +17,8 @@ interface __BaseEnv_Env {
 	CF_API_TOKEN: SecretsStoreSecret;
 	WORKER_API_KEY: SecretsStoreSecret;
 	AI_GATEWAY_TOKEN: SecretsStoreSecret;
+	CF_FREEBIE_API_TOKEN: SecretsStoreSecret;
+	CF_FREEBIE_ACCOUNT_ID: SecretsStoreSecret;
 	CF_BROWSER_RENDER_TOKEN: SecretsStoreSecret;
 	JULES_API_KEY: SecretsStoreSecret;
 	GEMINI_API_KEY: SecretsStoreSecret;
