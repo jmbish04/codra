@@ -27,8 +27,6 @@ import { createPublicPlanningRouter } from '@server/routes/public-planning';
 import { createAgentRouter } from '@server/routes/api/agent';
 import { createSecretBindingsRouter } from '@server/routes/api/secret-bindings';
 import { createTestConfigRouter } from '@server/routes/api/test-config';
-import { createMcpOAuthRouter } from '@server/routes/api/mcp-oauth';
-import { getSecretStoreBinding } from '@server/utils/secrets';
 
 /**
  * serveIndex
@@ -57,34 +55,8 @@ export function createApp() {
   // Machine-to-machine watcher-daemon endpoints (WORKER_API_KEY guarded, headless).
   app.route('/api/agent', createAgentRouter());
 
-  // RFC 9728: Protected Resource Metadata — Claude probes this first
-  app.get('/.well-known/oauth-protected-resource', (c) => {
-    const origin = new URL(c.req.url).origin;
-    return c.json({
-      resource: `${origin}/mcp`,
-      authorization_servers: [`${origin}`],
-      bearer_methods_supported: ['header'],
-      scopes_supported: [],
-    });
-  });
-
-  // OAuth 2.1 Authorization Server Metadata
-  app.get('/.well-known/oauth-authorization-server', (c) => {
-    const origin = new URL(c.req.url).origin;
-    return c.json({
-      issuer: origin,
-      authorization_endpoint: `${origin}/oauth/authorize`,
-      token_endpoint: `${origin}/oauth/token`,
-      registration_endpoint: `${origin}/oauth/register`,
-      token_endpoint_auth_methods_supported: ['none'],
-      response_types_supported: ['code'],
-      grant_types_supported: ['authorization_code'],
-      code_challenge_methods_supported: ['S256', 'plain'],
-    });
-  });
-
-  // Mount OAuth endpoints
-  app.route('/oauth', createMcpOAuthRouter());
+  // The MCP OAuth surface (/.well-known/oauth-*, /oauth) was removed with the
+  // GitHubLikeMCP server (/mcp) — the Cloudflare Agents SDK is gone.
 
   // Unauthenticated liveness probe for uptime monitors. Returns only
   // operational status (no job contents) and 503 when the pipeline is stuck.

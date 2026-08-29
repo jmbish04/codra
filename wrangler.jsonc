@@ -18,8 +18,8 @@
 			"enabled": true,
 		},
 	},
-	// Workers AI runs over the REST API (both the free and primary accounts) via
-	// cf_free_* / cf_paid_* accounts, so no `ai` binding is needed.
+	// No `ai` binding: all AI inference is proxied through the core-guardian
+		// service binding (GUARDIAN), which owns provider/model selection.
 	"browser": {
 		"binding": "BROWSER",
 	},
