@@ -52,6 +52,9 @@ export const jobs = sqliteTable('jobs', {
   // owns it, and the ordered file paths whose index maps to each response id.
   batch_request_id: text('batch_request_id'),
   batch_model: text('batch_model'),
+  // Cloudflare account id the batch was queued on — a request_id is only
+  // pollable from the account that submitted it.
+  batch_account_id: text('batch_account_id'),
   batch_file_paths: text('batch_file_paths', { mode: 'json' }),
   // JSON: { violated: string[], checks: {practice,passed,violated}[], docs: CloudflareDocResult[] }
   best_practice_docs: text('best_practice_docs'),

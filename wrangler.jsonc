@@ -18,15 +18,8 @@
 			"enabled": true,
 		},
 	},
-	// Workers AI (`env.AI`) binding intentionally REMOVED. All AI inference —
-	// review models AND the codemode Durable Object agents — now routes through
-	// core-guardian (https://core-guardian.hacolby.workers.dev) for metered,
-	// budget-capped, circuit-breaker-gated spend. Guardian holds the Workers AI
-	// binding on its own account; Codra reaches it over HTTP using the
-	// AI_GATEWAY_TOKEN + WORKER_API_KEY secret-store bindings below. See
-	// src/server/core/guardian-ai.ts and AGENTS.md ("AI operations").
-	// DO NOT re-add an `ai` binding — a direct env.AI.run is invisible to the
-	// budget and cannot be killed.
+	// No `ai` binding: all AI inference is proxied through the core-guardian
+		// service binding (GUARDIAN), which owns provider/model selection.
 	"browser": {
 		"binding": "BROWSER",
 	},
@@ -37,22 +30,10 @@
 	],
 	"durable_objects": {
 		"bindings": [
-			{
-				"name": "RepoAgent",
-				"class_name": "RepoAgent"
-			},
-			{
-				"name": "Chat",
-				"class_name": "Chat"
-			},
-			{
-				"name": "ReviewAgent",
-				"class_name": "ReviewAgent"
-			},
-			{
-				"name": "GitHubLikeMCP",
-				"class_name": "GitHubLikeMCP"
-			},
+			// RepoAgent / Chat / ReviewAgent / GitHubLikeMCP removed — the Cloudflare
+			// Agents SDK (Durable Objects) is gone; agentic AI moves to the OpenAI
+			// Agents SDK through core-guardian (no DO wall-time). PrReviewStream and
+			// JobsFeed are plain DurableObjects (SSE fan-out) and stay.
 			{
 				"name": "PrReviewStream",
 				"class_name": "PrReviewStream"
@@ -83,6 +64,15 @@
 			"tag": "v3",
 			"new_sqlite_classes": [
 				"JobsFeed"
+			],
+		},
+		{
+			"tag": "v4",
+			"deleted_classes": [
+				"RepoAgent",
+				"Chat",
+				"ReviewAgent",
+				"GitHubLikeMCP",
 			],
 		},
 	],
@@ -208,6 +198,8 @@
 			"store_id": "8c42fa70938644e0a8a109744467375f",
 			"secret_name": "WORKER_API_KEY",
 		},
+		// core-guardian auth: all AI inference is proxied through the core-guardian
+		// service binding, authenticated with this bearer token.
 		{
 			"binding": "AI_GATEWAY_TOKEN",
 			"store_id": "8c42fa70938644e0a8a109744467375f",
@@ -265,14 +257,6 @@
 			"store_id": "8c42fa70938644e0a8a109744467375f",
 			"secret_name": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
 		},
-		{
-			// ReUI Pro license key — for the in-progress frontend migration to the
-			// ReUI component registry. Read via `await env.REUI_LICENSE_KEY.get()`
-			// when wiring the authenticated registry into the build/runtime.
-			"binding": "REUI_LICENSE_KEY",
-			"store_id": "8c42fa70938644e0a8a109744467375f",
-			"secret_name": "REUI_LICENSE_KEY",
-		},
 	],
 	"d1_databases": [
 		{
@@ -311,11 +295,6 @@
 			"service": "core-github-api-edgraph"
 		},
 		{
-			// All AI inference routes through core-guardian over this service
-			// binding (no public HTTP hop). Codra authenticates with the
-			// AI_GATEWAY_TOKEN (= CLOUDFLARE_AI_GATEWAY_TOKEN) secret-store binding
-			// as a Bearer token; the binding host is ignored (routed by path).
-			// See src/server/core/guardian-ai.ts.
 			"binding": "GUARDIAN",
 			"service": "core-guardian"
 		}

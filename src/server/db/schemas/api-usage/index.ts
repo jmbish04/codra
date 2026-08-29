@@ -10,6 +10,10 @@ export const apiUsage = sqliteTable('api_usage', {
   total_tokens: integer('total_tokens').notNull().default(0),
   source: text('source').notNull(), // 'local' or 'gateway'
   gateway_id: text('gateway_id').notNull().default(''), // e.g. 'codra' or empty string for local
+  // Cloudflare account the call ran on, so free daily neuron usage can be summed
+  // per account. account_label is 'free' | 'paid' | '' (non-CF providers).
+  account_id: text('account_id').notNull().default(''),
+  account_label: text('account_label').notNull().default(''),
   datetime_hour: text('datetime_hour').notNull().default(''), // e.g. '2026-07-14 15:00:00' or empty string for local
   created_at: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => ({

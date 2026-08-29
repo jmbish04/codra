@@ -1,9 +1,7 @@
-import { generateText } from 'ai';
-import { createGuardianWorkersAI } from '@server/ai/guardian-workers-ai';
+import { generateViaGuardian, type GuardianEnv } from '@server/services/guardian';
 import { buildMergeReviewPrompt, parseReviewVerdict } from '@server/services/plan-orchestrator';
 import { countReviewAttempts, recordReview } from '@server/db/reconciliation-reviews';
 
-const REVIEW_MODEL = '@cf/moonshotai/kimi-k2.7-code';
 const MAX_MERGE_ATTEMPTS = 3;
 
 export type MergeReviewResult = { approved: boolean; feedback: string; attempt: number; reason?: string };
@@ -14,7 +12,7 @@ export type MergeReviewResult = { approved: boolean; feedback: string; attempt: 
  * rejected reconciliation can never loop into an unbounded re-merge.
  */
 export async function reviewReconciliation(
-  env: Pick<Env, 'DB' | 'AI_GATEWAY_TOKEN' | 'GUARDIAN'>,
+  env: Pick<Env, 'DB'> & GuardianEnv,
   input: { repositoryId: number; repository: string; reconciliationKey: string; summary: string; prNumber?: number | null },
 ): Promise<MergeReviewResult> {
   const prior = await countReviewAttempts(env, input.reconciliationKey);
@@ -25,9 +23,8 @@ export async function reviewReconciliation(
     return { approved: false, feedback: 'circuit breaker tripped', attempt, reason: 'max_attempts' };
   }
 
-  const workersai = createGuardianWorkersAI(env);
-  const { text } = await generateText({
-    model: workersai(REVIEW_MODEL as any),
+  const text = await generateViaGuardian(env, {
+    task: 'MERGE_REVIEW',
     system: 'You are the codra orchestrator. Judge merge reconciliations strictly and reply only with the requested JSON block.',
     prompt: buildMergeReviewPrompt({ repository: input.repository, summary: input.summary }),
   });

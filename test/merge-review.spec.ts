@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import type { AppEnv } from '@server/env';
 import { createAgentRouter } from '@server/routes/api/agent';
@@ -9,14 +9,29 @@ import { createTestEnv } from './helpers';
 const KEY = 'test-webhook-secret';
 const authed = { 'X-API-Key': KEY, 'content-type': 'application/json' } as const;
 
-// Merge review runs its Kimi judge through core-guardian (createGuardianWorkersAI
-// → the GUARDIAN service binding). The test env's GUARDIAN.fetch stub returns a
-// non-verdict body, so parseReviewVerdict defaults to not-satisfied — codra does
-// NOT approve unless a real Kimi says so. That keeps the reject + circuit-breaker
-// paths deterministic.
+// The guardian stub returns a non-verdict body, so parseReviewVerdict defaults to
+// not-satisfied — i.e. codra does NOT approve unless the judge model says so. That
+// makes the reject + circuit-breaker paths deterministic to test.
+function guardianNonVerdict() {
+  return {
+    fetch: async () =>
+      new Response(
+        JSON.stringify({
+          request_uuid: 't', status: 200, provider: 'ollama', model: 'auto',
+          mode: 'gateway', gateway: null, tokens_in: 1, tokens_out: 1, cost_usd: 0,
+          body: { response: 'no verdict here' },
+        }),
+        { status: 200 },
+      ),
+  } as any;
+}
+
 describe('merge-review gate', () => {
   let env: Env;
-  beforeEach(() => { env = createTestEnv(); });
+  beforeEach(() => {
+    env = createTestEnv({ GUARDIAN: guardianNonVerdict() });
+  });
+  afterEach(() => vi.restoreAllMocks());
 
   it('records each attempt and trips the circuit breaker after the cap', async () => {
     const base = { repositoryId: 1, repository: 'acme/widgets', reconciliationKey: 'reconcile/batch-1', summary: 'staged reconciliation diff' };

@@ -1,7 +1,7 @@
 import { runReviewJob } from '@server/core/review';
 import { createTestEnv, generateMockDiff, hasConfiguredTestDatabaseUrl } from './helpers';
 import { vi } from 'vitest';
-import { findExistingJobForHead, getJobForProcessing, insertJob, recordJobBatch, updateJobFileCount, updateJobStep } from '@server/db/jobs';
+import { findExistingJobForHead, getJobForProcessing, insertJob, updateJobFileCount, updateJobStep } from '@server/db/jobs';
 import { getFileReviewsForJobs, upsertFileReview } from '@server/db/file-reviews';
 import { defaultRepoConfig } from '@shared/schema';
 import { planReviewers } from '@server/core/reviewer-plan';
@@ -407,65 +407,6 @@ dbDescribe('Review Flow Lifecycle', () => {
     const reviews = await getFileReviewsForJobs(env, [retry.id]);
     expect(reviews.find((review) => review.file_path === 'src/app.ts')?.model_used).toBe('test-model');
     reviewSpy.mockRestore();
-  }, REVIEW_FLOW_TIMEOUT_MS);
-
-  it('persists best_practice_checks from completed batch responses', async () => {
-    const { ModelService } = await import('@server/services/model');
-    const repo = `test-repo-${Date.now()}-batch-checks`;
-    const headSha = sha('7');
-    const baseSha = sha('8');
-
-    const job = await insertJob(env, {
-      installationId: '123',
-      owner: 'test-owner',
-      repo,
-      prNumber: 34,
-      prTitle: 'Batch checks',
-      prAuthor: 'author',
-      commitSha: headSha,
-      baseSha,
-      trigger: 'auto',
-      headRef: 'feature',
-      baseRef: 'main',
-      configSnapshot: defaultRepoConfig,
-    });
-    await updateJobFileCount(env, job.id, 1);
-    await updateJobStep(env, job.id, 'Preparation', { status: 'done' });
-    await recordJobBatch(env, job.id, {
-      requestId: 'batch-request-1',
-      model: '@cf/meta/llama-3.1-8b-instruct-fast',
-      filePaths: ['src/app.ts'],
-    });
-    const expectedChecks = [{ practice: 'D1 Bulk Insert Batching', status: 'violation', note: 'chunk writes were sequential' }];
-    const pollSpy = vi.spyOn(ModelService.prototype as any, 'pollReviewBatch').mockResolvedValue({
-      status: 'complete',
-      usage: { inputTokens: 0, outputTokens: 0 },
-      responses: [{
-        index: 0,
-        error: null,
-        rawText: JSON.stringify({
-          findings: [],
-          best_practice_checks: expectedChecks,
-          overall_correctness: 'patch is correct',
-          overall_explanation: 'No findings',
-          overall_confidence_score: 0.9,
-        }),
-      }],
-    });
-
-    await runAndDrain({
-      jobId: job.id,
-      deliveryId: 'delivery-batch-checks',
-      phase: 'review',
-    });
-
-    expect(pollSpy).toHaveBeenCalled();
-    const batchReview = (await getFileReviewsForJobs(env, [job.id])).find((review) => review.file_path === 'src/app.ts');
-    const persistedChecks = typeof batchReview?.best_practice_checks === 'string'
-      ? JSON.parse(batchReview.best_practice_checks)
-      : (batchReview?.best_practice_checks ?? []);
-    expect(persistedChecks).toEqual(expectedChecks);
-    pollSpy.mockRestore();
   }, REVIEW_FLOW_TIMEOUT_MS);
 
   it('resumes an existing queued duplicate job instead of stranding it', async () => {

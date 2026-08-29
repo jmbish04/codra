@@ -2,41 +2,6 @@
 
 Guidance for AI agents working in this repository.
 
-## AI operations: everything routes through core-guardian (MANDATE)
-
-**Codra holds no Workers AI (`env.AI`) binding and makes no direct provider
-calls.** Every AI inference — the review models (OpenAI / Anthropic / Gemini /
-Workers AI) **and** the codemode Durable Object agents — routes through the
-**core-guardian** worker (`https://core-guardian.hacolby.workers.dev`), which
-meters spend, enforces the `codra` project budget, and gates calls behind a
-circuit breaker. This is non-negotiable: a direct provider call or a raw
-`env.AI.run` is invisible to the budget and cannot be killed — the exact
-aggressive-billing exposure this design removes.
-
-- **Transport seam**: [`src/server/core/guardian-ai.ts`](src/server/core/guardian-ai.ts)
-  wraps the org's canonical vendored client
-  ([`src/lib/guardian/guardian-client.ts`](src/lib/guardian/guardian-client.ts)).
-  Review-model calls go through `runGuardianInference(env, apiFormat, model, body)`
-  → `POST /api/ai-router/run` with `project: "codra"`.
-- **Workers AI in the AI SDK**: the codemode DOs use
-  [`createGuardianWorkersAI(env)`](src/server/ai/guardian-workers-ai.ts) instead
-  of `createWorkersAI({ binding: env.AI })`.
-- **Auth**: two existing Secrets Store bindings — `AI_GATEWAY_TOKEN`
-  (= `CLOUDFLARE_AI_GATEWAY_TOKEN`, the AI-router audience) and `WORKER_API_KEY`
-  (usage / budget reads). No new secrets.
-- **DO NOT** add an `ai` binding to [wrangler.jsonc](wrangler.jsonc), import a
-  provider SDK, or `fetch` a provider (or the raw AI Gateway) directly. If a new
-  code path needs inference, route it through guardian. Guardian already has the
-  major providers configured; add the model there, not a bypass here.
-- The contract is the live source of truth:
-  `https://core-guardian.hacolby.workers.dev/openapi.json`.
-
-Codra also **enforces this on every PR it sees** (regardless of review
-settings): the always-on guardian-compliance check
-([`src/server/core/guardian-compliance.ts`](src/server/core/guardian-compliance.ts))
-flags any PR that adds AI inference not routed through core-guardian and comments
-surgical integration steps. See that module's header for the detection rules.
-
 ## Platform: Cloudflare Workers + D1 only
 
 Codra runs entirely on **Cloudflare Workers** with **Cloudflare D1 (SQLite)** as
@@ -94,9 +59,7 @@ driver** anywhere in the runtime.
 
 - **Worker**: Cloudflare Workers, Hono, Wrangler
 - **DB**: Cloudflare D1 (SQLite) via Drizzle ORM
-- **Other bindings**: Cloudflare KV, Queues (+ DLQ), Durable Objects (no Workers
-  AI binding — all inference routes through core-guardian)
-- **AI**: all inference via **core-guardian** (see the AI-operations mandate above)
+- **Other bindings**: Cloudflare KV, Queues (+ DLQ), Workers AI, Durable Objects
 - **Dashboard**: React, Vite, Tailwind, Radix UI, Recharts
 
 ## URLs — never hardcode a base URL

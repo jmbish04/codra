@@ -541,10 +541,6 @@ describe('Dashboard API Suite', () => {
     expect(data.error).not.toContain('"details"');
   });
 
-  // The old "local Workers AI binding" error path was removed with the
-  // core-guardian migration — Codra no longer holds an `env.AI` binding, so
-  // Workers AI never runs locally in Wrangler. Guardian owns that binding.
-
   it('maps upstream provider server errors to bad gateway after retry', async () => {
     const env = createTestEnv();
     const token = await getAuthCookie(env);

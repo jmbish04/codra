@@ -1,13 +1,13 @@
 import { logger } from './logger';
 import { isSupportedGitHubWebhookEvent, type GitHubWebhookEventName, type GitHubWebhookPayload, type IssueCommentWebhookPayload, type PullRequestWebhookPayload } from '@shared/github';
-import { BATCH_STEP_NAME, changelogModelOutputSchema, defaultRepoConfig, LEGACY_JOB_SCOPE, normalizeModelId, type BestPracticeCheck, type JobScope, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
+import { changelogModelOutputSchema, defaultRepoConfig, LEGACY_JOB_SCOPE, normalizeModelId, type BestPracticeCheck, type JobScope, type ParsedReviewComment, type RepoConfig, type ReviewJobMessage } from '@shared/schema';
 import { getFileReviewsForJobs, recordRetryableFileReviewFailure, upsertFileReview, recordFileReviewCost } from '@server/db/file-reviews';
 import { assertD1MigrationsCurrent } from '@server/db/migration-check';
 import { getPricingSnapshot, buildCostBreakdown, sumBreakdown, type PricingSnapshot, type UsageAmounts } from '@server/core/guardian-pricing';
 import { getProjectContext } from '@server/core/project-context';
 import { withTimeout } from '@server/core/timeout';
 import { getResolvedModelConfig } from '@server/db/model-configs';
-import { claimJobLease, clearJobBatch, completeJob, completePreparationStep, countAutoReviewsForPr, failJob, findActiveJobsForPr, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, MAX_AUTO_REVIEWS_PER_PR, recordJobBatch, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
+import { claimJobLease, completeJob, completePreparationStep, countAutoReviewsForPr, failJob, findActiveJobsForPr, findExistingJobForHead, getJobForProcessing, heartbeatJobLease, insertJob, mapJob, markJobCheckRunCompleted, markJobContinuationQueued, markPrClosed, MAX_AUTO_REVIEWS_PER_PR, releaseJobLease, supersedeOlderJobs, updateJobCheckRun, updateJobStatusComment, updateJobStep } from '@server/db/jobs';
 import { parseFileReviewResponse } from './model-output';
 import { filterReviewableFiles, parseUnifiedDiff, renderFileDiff } from './diff';
 import { planReviewers, selectFilePlanForBudget } from '@server/core/reviewer-plan';
@@ -63,16 +63,6 @@ const BUSY_RETRY_SECONDS = 60;
 // bounds the "frozen on the last file(s)" window to ~6min before the job
 // finalizes as a partial review, instead of the ~21min a 15-minute tail caused.
 const RETRYABLE_MODEL_FAILURE_RETRY_DELAYS_SECONDS = [30, 90, 4 * 60];
-/** Workers AI batches typically land within ~5 minutes; poll on a steady beat. */
-const BATCH_POLL_DELAY_SECONDS = 20;
-
-/**
- * The async batch API trades minutes of queue latency for throughput and
- * rate-limit headroom, so it only pays off on large PRs. Smaller reviews finish
- * faster on the parallel synchronous path. Only submit a NEW batch at/above this
- * many pending files. ponytail: a flat threshold; make it config if repos vary.
- */
-const BATCH_MIN_PENDING_FILES = 12;
 
 const MAX_RETRYABLE_FILE_REVIEW_FAILURES = 3;
 
@@ -757,11 +747,7 @@ async function runReviewPhase(
   // native loop's subrequest-budget gate below. Falls through to the
   // unchanged native loop on native resolution OR any delegation failure.
   const engine = await resolveEngine(env, config, Date.now());
-  // Skip delegation while a native batch is already in flight (job.batchRequestId
-  // set from a prior invocation) — a newly-healthy engine taking over here would
-  // orphan that batch (never polled/cleared). Let runBatchReviewPhase below drain
-  // it as usual; delegation resumes on a later invocation once it clears.
-  if (!job.batchRequestId && await delegateToEngine(env, engine, job, pr, config, files, totalLineCount, sharedContext, model, pricing)) {
+  if (await delegateToEngine(env, engine, job, pr, config, files, totalLineCount, sharedContext, model, pricing)) {
     return;
   }
 
@@ -796,18 +782,6 @@ async function runReviewPhase(
       fileSummary: null,
       errorMessage: null,
     });
-  }
-
-  // Multi-reviewer fan-out (see reviewAndPersistFile) isn't wired into the batch
-  // SUBMIT path yet — deferred; only single-reviewer PRs may submit a new
-  // batch. Always call runBatchReviewPhase though, even when plan.length > 1:
-  // it also owns draining (poll/persist/clear) an ALREADY-SUBMITTED batch from
-  // a prior invocation, and skipping the call entirely would leave that batch
-  // dangling forever (never polled, never cleared) if the job's plan grew
-  // past 1 reviewer between invocations (e.g. a config change or a diff
-  // update crossing a risk tier).
-  if (await runBatchReviewPhase(env, job, leaseOwner, github, model, { pr, config, files, pendingFiles, totalLineCount, projectContext, allowNewBatch: plan.length <= 1 })) {
-    return;
   }
 
   const reviewTasks: Array<Promise<void>> = [];
@@ -971,223 +945,6 @@ async function runReviewPhase(
     });
   }
   await enqueueJobPhase(env, job.id, 'review');
-}
-
-/**
- * Workers AI async batch path. Queues every outstanding file review in one call
- * and polls it across later queue invocations, which sidesteps the per-request
- * capacity errors that drive the synchronous path into multi-minute backoff.
- *
- * Returns true when it owns this invocation (submitted or polled), false to let
- * the caller fall back to synchronous chunked review.
- */
-async function runBatchReviewPhase(
-  env: Env,
-  job: PersistedReviewJob,
-  leaseOwner: string,
-  github: GitHubService,
-  model: ModelService,
-  ctx: {
-    pr: Awaited<ReturnType<GitHubService['getPullRequest']>>;
-    config: RepoConfig;
-    files: ReturnType<typeof parseUnifiedDiff>;
-    pendingFiles: ReturnType<typeof parseUnifiedDiff>;
-    totalLineCount: number;
-    projectContext: string;
-    /** False when the current reviewer plan has >1 reviewer (fan-out isn't
-     *  wired into the batch SUBMIT path yet). An already-submitted batch from
-     *  a prior invocation is still polled/persisted/cleared below regardless —
-     *  only the "start a NEW batch" branch is gated on this. */
-    allowNewBatch: boolean;
-  },
-) {
-  const { pr, config, files, pendingFiles, totalLineCount, projectContext, allowNewBatch } = ctx;
-
-  if (job.batchRequestId && job.batchModel) {
-    let result: Awaited<ReturnType<ModelService['pollReviewBatch']>>;
-    try {
-      result = await model.pollReviewBatch(job.batchModel, job.batchRequestId);
-    } catch (error) {
-      if (isRetryableModelError(error)) throw error;
-      // An unrecognised batch response must not strand the job: drop the batch
-      // and let the synchronous path review the outstanding files instead.
-      logger.error('Batch poll failed; abandoning the batch and falling back to synchronous review', error);
-      await clearJobBatch(env, job.id);
-      await updateJobStep(env, job.id, BATCH_STEP_NAME, {
-        status: 'failed',
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
-    }
-
-    if (result.status === 'pending') {
-      await heartbeatAndCheckSuperseded(env, job.id, leaseOwner);
-      if (job.checkRunId) {
-        await github.updateCheckRun(job.owner, job.repo, job.checkRunId, {
-          title: `Reviewing (batch queued)`,
-          summary: 'Codra queued this review on the Workers AI batch API and is waiting for results.',
-        });
-      }
-      await enqueueJobPhase(env, job.id, 'review', BATCH_POLL_DELAY_SECONDS);
-      return true;
-    }
-
-    await persistBatchResponses(env, job, files, result.responses);
-    await clearJobBatch(env, job.id);
-    await updateJobStep(env, job.id, BATCH_STEP_NAME, { status: 'done' });
-    // Re-run the review phase so the existing completeness check decides
-    // whether to finalize or retry any files the batch could not review.
-    await enqueueJobPhase(env, job.id, 'review');
-    return true;
-  }
-
-  if (!allowNewBatch) return false;
-  if (pendingFiles.length === 0) return false;
-
-  // Small/medium PRs review faster on the parallel sync path than on the async
-  // batch queue — only batch when there are enough files to make it worthwhile.
-  if (pendingFiles.length < BATCH_MIN_PENDING_FILES) return false;
-
-  const batchModel = await model.resolveBatchModel(config, totalLineCount);
-  if (!batchModel) return false;
-
-  const prompts = await Promise.all(
-    pendingFiles.map((file) =>
-      model.buildReviewPrompt({
-        file,
-        prTitle: pr.title ?? null,
-        prDescription: pr.body ?? null,
-        config,
-        totalLineCount,
-        projectContext,
-      }),
-    ),
-  );
-
-  let requestId: string | null;
-  try {
-    requestId = await model.submitReviewBatch(
-      batchModel,
-      prompts.map((prompt) => ({ systemPrompt: prompt.systemPrompt, userPrompt: prompt.userPrompt })),
-    );
-  } catch (error) {
-    if (isRetryableModelError(error)) throw error;
-    // The batch API is an optimisation, not a requirement: if submit behaves
-    // unexpectedly, degrade to the proven synchronous path rather than failing
-    // a review that would otherwise succeed.
-    logger.error('Batch submit failed; falling back to synchronous review', error);
-    return false;
-  }
-  if (!requestId) return false;
-
-  await recordJobBatch(env, job.id, {
-    requestId,
-    model: batchModel,
-    filePaths: pendingFiles.map((file) => file.path),
-  });
-  await updateJobStep(env, job.id, BATCH_STEP_NAME, { status: 'running' });
-  await enqueueJobPhase(env, job.id, 'review', BATCH_POLL_DELAY_SECONDS);
-  return true;
-}
-
-/** Maps batch responses back to files by index and persists each file review. */
-async function persistBatchResponses(
-  env: Env,
-  job: PersistedReviewJob,
-  files: ReturnType<typeof parseUnifiedDiff>,
-  responses: Array<{ index: number; rawText: string | null; error: string | null }>,
-) {
-  const filesByPath = new Map(files.map((file) => [file.path, file]));
-  const batchModel = job.batchModel ?? 'unknown';
-
-  for (const response of responses) {
-    const filePath = job.batchFilePaths[response.index];
-    const file = filePath ? filesByPath.get(filePath) : undefined;
-    if (!file) {
-      logger.warn(`Batch response ${response.index} has no matching file in job ${job.id}; skipping`);
-      continue;
-    }
-
-    const failure = response.error ?? (response.rawText ? null : 'Batch returned no review content');
-    if (failure) {
-      await recordBatchFileFailure(env, job, file, batchModel, failure);
-      continue;
-    }
-
-    try {
-      const parsed = parseFileReviewResponse(response.rawText!, file);
-      await upsertFileReview(env, job.id, {
-        filePath: file.path,
-        fileStatus: 'done',
-        modelUsed: batchModel,
-        modelProvider: 'Cloudflare',
-        diffLineCount: file.lineCount,
-        diffInput: '',
-        rawAiOutput: response.rawText,
-        parsedComments: parsed.comments,
-        inputTokens: null,
-        outputTokens: null,
-        durationMs: null,
-        verdict: parsed.verdict,
-        fileSummary: parsed.fileSummary,
-        overallCorrectness: parsed.overallCorrectness,
-        bestPracticeChecks: parsed.bestPracticeChecks ?? [],
-        confidenceScore: parsed.confidenceScore,
-        errorMessage: null,
-      });
-    } catch (error) {
-      await recordBatchFileFailure(env, job, file, batchModel, error instanceof Error ? error.message : String(error));
-    }
-  }
-}
-
-/**
- * Mirrors the synchronous failure handling so a flaky batch response gets the
- * same bounded retry budget instead of looping forever.
- */
-async function recordBatchFileFailure(
-  env: Env,
-  job: PersistedReviewJob,
-  file: ReturnType<typeof parseUnifiedDiff>[number],
-  batchModel: string,
-  errorMessage: string,
-) {
-  const retryable = isRetryableFileReviewErrorMessage(errorMessage);
-
-  if (retryable) {
-    const failureCount = await recordRetryableFileReviewFailure(env, job.id, {
-      filePath: file.path,
-      modelUsed: batchModel,
-      modelProvider: 'Cloudflare',
-      diffLineCount: file.lineCount,
-      diffInput: '',
-      durationMs: null,
-      errorMessage,
-    });
-
-    if (failureCount < MAX_RETRYABLE_FILE_REVIEW_FAILURES) {
-      logger.warn(`Batch review deferred for ${file.path}; will retry`, { attempts: failureCount, error: errorMessage });
-      return;
-    }
-    errorMessage = `Review skipped after ${failureCount} repeated batch failures. Last error: ${errorMessage}`;
-  }
-
-  await upsertFileReview(env, job.id, {
-    filePath: file.path,
-    fileStatus: 'failed',
-    modelUsed: batchModel,
-    modelProvider: 'Cloudflare',
-    diffLineCount: file.lineCount,
-    diffInput: '',
-    rawAiOutput: null,
-    parsedComments: [],
-    inputTokens: null,
-    outputTokens: null,
-    durationMs: null,
-    verdict: null,
-    fileSummary: null,
-    errorMessage,
-  });
 }
 
 /**

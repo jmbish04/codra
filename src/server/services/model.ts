@@ -1,8 +1,4 @@
-import { reviewWithGoogle } from '../models/google';
-import { reviewWithCloudflare } from '../models/cloudflare';
-import type { BatchReviewItem, BatchPollResult } from '../models/cloudflare-batch';
-import { reviewWithOpenAI } from '../models/openai';
-import { reviewWithAnthropic } from '../models/anthropic';
+import { reviewViaGuardian, type GuardianTask } from '@server/services/guardian';
 import { buildFileReviewPrompts } from '../prompts/file-review';
 import { buildSummaryPrompt, SUMMARY_SYSTEM_PROMPT } from '../prompts/summary';
 import { parseFileReviewResponse } from '../core/model-output';
@@ -17,7 +13,6 @@ import { normalizeModelId } from '@shared/schema';
 import { getResolvedModelConfig, type ResolvedModelConfig } from '@server/db/model-configs';
 import { getMatchingBestPractices, convertPlateToMarkdown } from '@server/db/best-practices';
 
-const PROVIDER_UNAVAILABLE_TTL_SECONDS = 24 * 60 * 60;
 /**
  * Last-resort Workers AI coding models, appended to every chain so a repo with
  * no configured `fallbacks` still has somewhere to go when its main model has a
@@ -36,11 +31,25 @@ const MODEL_ALIASES: Record<string, string> = {
   'gemma-4-26b': 'gemma-4-26b-a4b-it',
 };
 
-// RetryableModelError / isRetryableModelError moved to `model-errors.ts` to
-// break an import cycle (model → provider modules → guardian-ai → model).
-// Re-exported here so existing importers keep working.
-export { RetryableModelError, isRetryableModelError } from './model-errors';
-import { RetryableModelError, isRetryableModelError } from './model-errors';
+export class RetryableModelError extends Error {
+  readonly retryable = true;
+
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = 'RetryableModelError';
+    if (cause !== undefined) {
+      Object.defineProperty(this, 'cause', {
+        value: cause,
+        writable: true,
+        configurable: true,
+      });
+    }
+  }
+}
+
+export function isRetryableModelError(error: unknown) {
+  return Boolean(error && typeof error === 'object' && 'retryable' in error && error.retryable === true);
+}
 
 function normalizeModel(model: string) {
   return normalizeModelId(MODEL_ALIASES[model] ?? model);
@@ -97,43 +106,6 @@ export class ModelService {
     return this.tracker;
   }
 
-  private providerUnavailableKey(providerId: string) {
-    return this.options.jobId ? `jobs:${this.options.jobId}:provider-unavailable:${providerId}` : null;
-  }
-
-  private async isProviderUnavailable(providerId: string) {
-    const key = this.providerUnavailableKey(providerId);
-    if (!key) return false;
-
-    try {
-      return (await this.env.APP_KV.get(key)) !== null;
-    } catch (error) {
-      logger.warn(`Failed to read unavailable provider marker for ${providerId}`, {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
-    }
-  }
-
-  private async markProviderUnavailable(providerId: string, reason: string) {
-    const key = this.providerUnavailableKey(providerId);
-    if (!key) return;
-
-    try {
-      await this.env.APP_KV.put(
-        key,
-        JSON.stringify({
-          reason,
-          markedAt: new Date().toISOString(),
-        }),
-        { expirationTtl: PROVIDER_UNAVAILABLE_TTL_SECONDS },
-      );
-    } catch (error) {
-      logger.warn(`Failed to write unavailable provider marker for ${providerId}`, {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
 
   private selectModel(params: {
     totalLineCount: number;
@@ -183,35 +155,18 @@ export class ModelService {
   }
 
   /**
-   * Dispatches one structured model call through core-guardian.
-   *
-   * Every provider format routes through the guardian AI router now (see
-   * `src/server/core/guardian-ai.ts`) — Codra no longer holds provider API keys
-   * or an `env.AI` binding on the review hot path, and it no longer resolves an
-   * AI-Gateway base URL itself. Guardian injects the key, meters the spend
-   * against the `codra` project budget, and is the ledger of record, so there is
-   * no per-call D1 `logApiUsage` write here any more (that spend is captured by
-   * the AI-Gateway usage sync + guardian's own accounting).
+   * Runs one inference through core-guardian. Guardian owns provider/model
+   * selection, fallback, metering, and budgets — so this is a SINGLE call; there
+   * is no client-side model-chain fan-out (that would fire identical guardian
+   * requests and burn the subrequest budget). `task` sets guardian's routing
+   * intent + usage bucket.
    */
-  private async callResolvedModel(
-    config: ResolvedModelConfig,
+  private async runGuardian(
     input: { systemPrompt: string; userPrompt: string },
-    schema: StructuredSchema = REVIEW_SCHEMA,
-    cacheSystem?: boolean,
+    schema: StructuredSchema,
+    task: GuardianTask,
   ): Promise<ModelResponse> {
-    if (config.apiFormat === 'cloudflare-workers-ai') {
-      return reviewWithCloudflare(this.env, config.modelName, input, this.tracker, config.providerName, schema);
-    }
-
-    if (config.apiFormat === 'gemini') {
-      return reviewWithGoogle(this.env, config.modelName, input, this.tracker, schema);
-    }
-
-    if (config.apiFormat === 'openai') {
-      return reviewWithOpenAI(this.env, config.modelName, input, this.tracker, schema);
-    }
-
-    return reviewWithAnthropic(this.env, config.modelName, input, this.tracker, schema, { system: cacheSystem });
+    return reviewViaGuardian(this.env, { input, schema, task });
   }
 
   async callModel(
@@ -219,41 +174,10 @@ export class ModelService {
     input: { systemPrompt: string; userPrompt: string },
     schema: StructuredSchema = REVIEW_SCHEMA,
   ): Promise<ModelResponse> {
-    return this.callResolvedModel(await this.resolveModel(model), input, schema);
-  }
-
-  /**
-   * Resolves the batch-capable Workers AI model for this config, or null when
-   * the chain's primary model cannot be batched (callers then use the
-   * synchronous chunked path).
-   */
-  async resolveBatchModel(_config: RepoConfig, _totalLineCount: number): Promise<string | null> {
-    // ponytail: the Workers AI async Batch API requires a local `env.AI`
-    // binding, which Codra dropped when it moved all inference to core-guardian
-    // (guardian exposes no batch proxy). Returning null makes every review take
-    // the proven synchronous fan-out path — the already-designed fallback.
-    // Upgrade path: add a batch proxy to core-guardian, then route it here.
-    return null;
-  }
-
-  /**
-   * Batch submit is disabled post-guardian-migration (see {@link resolveBatchModel}).
-   * Unreachable because `resolveBatchModel` always returns null; kept as a stub
-   * so the review pipeline's batch branch still type-checks. Returns null →
-   * caller falls back to synchronous review.
-   */
-  async submitReviewBatch(_model: string, _items: BatchReviewItem[]): Promise<string | null> {
-    return null;
-  }
-
-  /**
-   * Polls a legacy in-flight Workers AI batch. Only reachable for a job that
-   * submitted a batch BEFORE this deploy dropped `env.AI`; there is no longer a
-   * binding to poll, so it fails fast and non-retryably. The review pipeline's
-   * catch abandons the stranded batch and re-reviews the files synchronously.
-   */
-  async pollReviewBatch(_model: string, _requestId: string): Promise<BatchPollResult> {
-    throw new Error('Workers AI batch polling is disabled after the core-guardian migration; falling back to synchronous review.');
+    // `model` is advisory only now (guardian picks). Resolve it first so a
+    // misconfigured/disabled model id still surfaces a clear error.
+    await this.resolveModel(model);
+    return this.runGuardian(input, schema, 'CODE_REVIEW');
   }
 
   /**
@@ -343,91 +267,35 @@ Lesson #${idx + 1}:
   }) {
     const { systemPrompt, userPrompt, reviewFile } = await this.buildReviewPrompt(params);
 
-    const { primary, fallbacks } = this.selectModel({
-      totalLineCount: params.totalLineCount,
-      config: params.config,
-    });
-    const modelsToTry = [primary, ...fallbacks];
+    // Validate that a review model strategy is configured (throws if none).
+    // Guardian owns model selection + provider fallback, so we make ONE call.
+    this.selectModel({ totalLineCount: params.totalLineCount, config: params.config });
 
-    let lastError: unknown;
-    let lastTransientError: unknown;
-    let sawTransientFailure = false;
-    for (const currentModel of modelsToTry) {
-      let resolved: ResolvedModelConfig;
-      try {
-        resolved = await this.resolveModel(currentModel);
-      } catch (error) {
-        lastError = error;
-        logger.warn(`Model ${currentModel} could not be resolved`, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        continue;
+    try {
+      const response = await this.runGuardian({ systemPrompt, userPrompt }, REVIEW_SCHEMA, 'CODE_REVIEW');
+      if (this.tracker) {
+        this.tracker.record(response.modelUsed, response.inputTokens, response.outputTokens);
       }
-
-      if (resolved.apiFormat === 'cloudflare-workers-ai' && await this.isProviderUnavailable(resolved.providerId)) {
-        logger.warn(`Skipping ${resolved.providerName} model ${currentModel} because the provider is unavailable for job ${this.options.jobId ?? 'unknown'}`);
-        continue;
+      const parsed = parseFileReviewResponse(response.rawText, params.file);
+      return {
+        ...response,
+        parsed,
+        userPrompt,
+        reviewedLineCount: reviewFile.lineCount,
+        wasPromptTruncated: reviewFile.isTruncated === true,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.warn(`Guardian review failed for ${params.file.path}`, { error: errorMessage });
+      // Guardian outages/empty responses are transient — let the queue retry.
+      if (isTransientModelFailure(error)) {
+        throw new RetryableModelError(
+          `Guardian review failed for ${params.file.path}; retrying later. Last error: ${errorMessage}`,
+          error,
+        );
       }
-
-      let attempts = 0;
-      const maxAttempts = 1;
-
-      while (attempts < maxAttempts) {
-        try {
-          const response = await this.callResolvedModel(resolved, { systemPrompt, userPrompt }, REVIEW_SCHEMA, params.cacheSystem);
-
-          if (this.tracker) {
-            this.tracker.record(response.modelUsed, response.inputTokens, response.outputTokens);
-          }
-
-          const parsed = parseFileReviewResponse(response.rawText, params.file);
-          return {
-            ...response,
-            parsed,
-            userPrompt,
-            reviewedLineCount: reviewFile.lineCount,
-            wasPromptTruncated: reviewFile.isTruncated === true,
-          };
-        } catch (error) {
-          lastError = error;
-          if (isTransientModelFailure(error)) {
-            sawTransientFailure = true;
-            lastTransientError = error;
-          }
-          attempts++;
-          if (resolved.apiFormat === 'cloudflare-workers-ai' && isCloudflareAllocationError(error)) {
-            await this.markProviderUnavailable(resolved.providerId, error instanceof Error ? error.message : String(error));
-          }
-
-          const isRateLimit = isGoogleRateLimitError(error);
-          const isRetryable = false;
-          const errorMessage = error instanceof Error ? error.message : String(error);
-
-          logger.warn(`Model ${currentModel} failed for ${params.file.path} (attempt ${attempts}/${maxAttempts})`, {
-            error: errorMessage,
-            rateLimited: isRateLimit,
-            willRetrySameModel: isRetryable,
-            willTryFallback: !isRetryable && modelsToTry.indexOf(currentModel) < modelsToTry.length - 1
-          });
-
-          if (isRetryable) {
-            continue;
-          }
-          break; // Move to next model in fallbacks
-        }
-      }
+      throw error;
     }
-
-    if (sawTransientFailure) {
-      const retryCause = lastTransientError ?? lastError;
-      const lastMessage = retryCause instanceof Error ? retryCause.message : String(retryCause ?? 'Unknown model error');
-      throw new RetryableModelError(
-        `All configured review models failed for ${params.file.path}; retrying later. Last error: ${lastMessage}`,
-        retryCause,
-      );
-    }
-
-    throw lastError;
   }
 
   /**
@@ -440,39 +308,15 @@ Lesson #${idx + 1}:
     systemPrompt: string;
     userPrompt: string;
   }): Promise<ModelResponse> {
-    const { primary, fallbacks } = this.selectModel({ totalLineCount: 0, config: params.config });
-
-    let lastError: unknown;
-    for (const currentModel of [primary, ...fallbacks]) {
-      let resolved: ResolvedModelConfig;
-      try {
-        resolved = await this.resolveModel(currentModel);
-      } catch (error) {
-        lastError = error;
-        continue;
-      }
-
-      if (resolved.apiFormat === 'cloudflare-workers-ai' && (await this.isProviderUnavailable(resolved.providerId))) {
-        continue;
-      }
-
-      try {
-        const response = await this.callResolvedModel(
-          resolved,
-          { systemPrompt: params.systemPrompt, userPrompt: params.userPrompt },
-          CHANGELOG_SCHEMA,
-        );
-        this.tracker?.record(response.modelUsed, response.inputTokens, response.outputTokens);
-        return response;
-      } catch (error) {
-        lastError = error;
-        logger.warn(`Changelog model ${currentModel} failed`, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    throw lastError ?? new Error('No model could generate the changelog entry.');
+    // Validate config, then a single guardian call (task = CHANGELOG).
+    this.selectModel({ totalLineCount: 0, config: params.config });
+    const response = await this.runGuardian(
+      { systemPrompt: params.systemPrompt, userPrompt: params.userPrompt },
+      CHANGELOG_SCHEMA,
+      'CHANGELOG',
+    );
+    this.tracker?.record(response.modelUsed, response.inputTokens, response.outputTokens);
+    return response;
   }
 
   async generateSummary(params: {
@@ -481,63 +325,26 @@ Lesson #${idx + 1}:
     fileSummaries: Array<{ path: string; summary: string; verdict: string }>;
     config: RepoConfig;
   }) {
-    const { primary, fallbacks } = this.selectModel({ totalLineCount: 0, config: params.config });
-    const modelsToTry = [primary, ...fallbacks];
-
-    let lastError: unknown;
-    let lastTransientError: unknown;
-    let sawTransientFailure = false;
-    for (const currentModel of modelsToTry) {
-      let resolved: ResolvedModelConfig;
-      try {
-        resolved = await this.resolveModel(currentModel);
-      } catch (error) {
-        lastError = error;
-        logger.warn(`Summary model ${currentModel} could not be resolved`, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        continue;
-      }
-
-      if (resolved.apiFormat === 'cloudflare-workers-ai' && await this.isProviderUnavailable(resolved.providerId)) {
-        logger.warn(`Skipping ${resolved.providerName} summary model ${currentModel} because the provider is unavailable for job ${this.options.jobId ?? 'unknown'}`);
-        continue;
-      }
-
-      try {
-        const response = await this.callResolvedModel(resolved, {
-          systemPrompt: SUMMARY_SYSTEM_PROMPT,
-          userPrompt: buildSummaryPrompt(params),
-        });
-
-        if (this.tracker) {
-          this.tracker.record(response.modelUsed, response.inputTokens, response.outputTokens);
-        }
-
-        return response;
-      } catch (error) {
-        lastError = error;
-        if (isTransientModelFailure(error)) {
-          sawTransientFailure = true;
-          lastTransientError = error;
-        }
-        if (resolved.apiFormat === 'cloudflare-workers-ai' && isCloudflareAllocationError(error)) {
-          await this.markProviderUnavailable(resolved.providerId, error instanceof Error ? error.message : String(error));
-        }
-        logger.warn(`Summary model ${currentModel} failed`, { error: error instanceof Error ? error.message : String(error) });
-      }
-    }
-
-    if (sawTransientFailure) {
-      const retryCause = lastTransientError ?? lastError;
-      const lastMessage = retryCause instanceof Error ? retryCause.message : String(retryCause ?? 'Unknown model error');
-      throw new RetryableModelError(
-        `All configured summary models failed; retrying later. Last error: ${lastMessage}`,
-        retryCause,
+    // Validate config, then a single guardian call (task = SUMMARY).
+    this.selectModel({ totalLineCount: 0, config: params.config });
+    try {
+      const response = await this.runGuardian(
+        { systemPrompt: SUMMARY_SYSTEM_PROMPT, userPrompt: buildSummaryPrompt(params) },
+        REVIEW_SCHEMA,
+        'SUMMARY',
       );
+      if (this.tracker) {
+        this.tracker.record(response.modelUsed, response.inputTokens, response.outputTokens);
+      }
+      return response;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.warn('Guardian summary failed', { error: errorMessage });
+      if (isTransientModelFailure(error)) {
+        throw new RetryableModelError(`Guardian summary failed; retrying later. Last error: ${errorMessage}`, error);
+      }
+      throw error;
     }
-
-    throw lastError;
   }
 }
 

@@ -27,48 +27,12 @@ import { createPublicPlanningRouter } from '@server/routes/public-planning';
 import { createAgentRouter } from '@server/routes/api/agent';
 import { createSecretBindingsRouter } from '@server/routes/api/secret-bindings';
 import { createTestConfigRouter } from '@server/routes/api/test-config';
-import { createMcpOAuthRouter } from '@server/routes/api/mcp-oauth';
-import { GitHubLikeMCP } from '@server/agents/orchestrator';
-import { getSecretStoreBinding } from '@server/utils/secrets';
 
 /**
  * serveIndex
  */
 async function serveIndex(c: Context<AppEnv>) {
   return c.env.ASSETS.fetch(new URL('/index.html', c.req.url));
-}
-
-/**
- * verifyMcpAuth
- */
-async function verifyMcpAuth(c: Context<AppEnv>, next: any) {
-  const authHeader = c.req.header('Authorization');
-  
-  // 1. Check Bearer Token (from OAuth flow)
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
-    const tokenData = await c.env.APP_KV.get(`mcp_token:${token}`);
-    if (tokenData) {
-      return next();
-    }
-  }
-
-  // 2. Check WORKER_API_KEY (from headers or query params)
-  const apiKeyHeader = c.req.header('X-API-Key') || c.req.query('token');
-  const expectedKey = await getSecretStoreBinding(c.env, 'WORKER_API_KEY');
-  
-  if (expectedKey) {
-    const cleanAuthHeader = authHeader?.replace('Bearer ', '');
-    if (apiKeyHeader === expectedKey || cleanAuthHeader === expectedKey) {
-      return next();
-    }
-  }
-
-  // RFC 9728: Return WWW-Authenticate header so Claude can discover the OAuth flow
-  const origin = new URL(c.req.url).origin;
-  return c.text('Unauthorized', 401, {
-    'WWW-Authenticate': `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`,
-  });
 }
 
 /**
@@ -91,34 +55,8 @@ export function createApp() {
   // Machine-to-machine watcher-daemon endpoints (WORKER_API_KEY guarded, headless).
   app.route('/api/agent', createAgentRouter());
 
-  // RFC 9728: Protected Resource Metadata — Claude probes this first
-  app.get('/.well-known/oauth-protected-resource', (c) => {
-    const origin = new URL(c.req.url).origin;
-    return c.json({
-      resource: `${origin}/mcp`,
-      authorization_servers: [`${origin}`],
-      bearer_methods_supported: ['header'],
-      scopes_supported: [],
-    });
-  });
-
-  // OAuth 2.1 Authorization Server Metadata
-  app.get('/.well-known/oauth-authorization-server', (c) => {
-    const origin = new URL(c.req.url).origin;
-    return c.json({
-      issuer: origin,
-      authorization_endpoint: `${origin}/oauth/authorize`,
-      token_endpoint: `${origin}/oauth/token`,
-      registration_endpoint: `${origin}/oauth/register`,
-      token_endpoint_auth_methods_supported: ['none'],
-      response_types_supported: ['code'],
-      grant_types_supported: ['authorization_code'],
-      code_challenge_methods_supported: ['S256', 'plain'],
-    });
-  });
-
-  // Mount OAuth endpoints
-  app.route('/oauth', createMcpOAuthRouter());
+  // The MCP OAuth surface (/.well-known/oauth-*, /oauth) was removed with the
+  // GitHubLikeMCP server (/mcp) — the Cloudflare Agents SDK is gone.
 
   // Unauthenticated liveness probe for uptime monitors. Returns only
   // operational status (no job contents) and 503 when the pipeline is stuck.
@@ -152,20 +90,7 @@ export function createApp() {
   app.route('/api/test-config', createTestConfigRouter());
   app.route('/api/docs-review-rules', createDocsReviewRouter());
 
-  app.all('/mcp/*', verifyMcpAuth, async (c) => {
-    return GitHubLikeMCP.serve('/mcp', { binding: 'GitHubLikeMCP' }).fetch(
-      c.req.raw,
-      c.env,
-      c.executionCtx as any
-    );
-  });
-  app.all('/mcp', verifyMcpAuth, async (c) => {
-    return GitHubLikeMCP.serve('/mcp', { binding: 'GitHubLikeMCP' }).fetch(
-      c.req.raw,
-      c.env,
-      c.executionCtx as any
-    );
-  });
+  // The /mcp endpoint (GitHubLikeMCP DO) was removed with the Cloudflare Agents SDK.
 
   app.get('/login', serveIndex);
   app.get('/', serveIndex); // Unauthenticated landing page

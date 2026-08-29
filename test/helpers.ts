@@ -111,20 +111,6 @@ export function hasConfiguredTestDatabaseUrl() {
 
 export function createTestEnv(overrides: Partial<Record<keyof Env, unknown>> = {}): Env {
   return {
-    // Workers AI (`env.AI`) binding removed — inference routes through
-    // core-guardian over the GUARDIAN service binding. Tests mock guardian at
-    // the `runGuardianInference` seam (see model-service.spec.ts) or via this
-    // GUARDIAN.fetch stub (see merge-review.spec.ts). Default returns a benign,
-    // non-verdict AI-router response.
-    AI_GATEWAY_TOKEN: { get: async () => 'test-ai-gateway-token' },
-    GUARDIAN: {
-      fetch: async () => Response.json({
-        body: { choices: [{ message: { content: 'no verdict here' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
-        tokens_in: 1,
-        tokens_out: 1,
-        cost_usd: 0,
-      }),
-    },
     APP_KV: new MemoryKV() as unknown as KVNamespace,
     PROMPTS_KV: new MemoryKV() as unknown as KVNamespace,
     PLANNING_ARTIFACTS: new MemoryR2() as unknown as R2Bucket,
@@ -143,13 +129,23 @@ export function createTestEnv(overrides: Partial<Record<keyof Env, unknown>> = {
     LLM_CONFIG_ENCRYPTION_KEY: 'test-llm-config-encryption-key',
     BOT_USERNAME: 'codra-app',
     ENVIRONMENT: 'production',
-    CF_API_TOKEN: { get: async () => '' },
-    CF_ACCOUNT_ID: { get: async () => '' },
+    CF_API_TOKEN: { get: async () => 'test-cf-api-token' },
+    CF_ACCOUNT_ID: { get: async () => 'test-cf-account' },
+    AI_GATEWAY_TOKEN: { get: async () => 'test-guardian-token' },
+    // Default guardian stub: returns a minimal review JSON. Specs that assert on
+    // AI behaviour override GUARDIAN with their own fetch.
+    GUARDIAN: {
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            request_uuid: 'test', status: 200, provider: 'ollama', model: 'auto',
+            mode: 'gateway', gateway: null, tokens_in: 1, tokens_out: 1, cost_usd: 0,
+            body: { response: '{"findings":[],"file_verdict":"approve","file_summary":"ok"}' },
+          }),
+          { status: 200 },
+        ),
+    } as any,
     CF_DLQ_ID: '',
-    RepoAgent: {} as any,
-    Chat: {} as any,
-    ReviewAgent: {} as any,
-    GitHubLikeMCP: {} as any,
     LOADER: {} as any,
     BROWSER: {} as any,
     ...overrides,

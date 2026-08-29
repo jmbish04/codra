@@ -20,7 +20,7 @@ import { getGlobalConfig, updateGlobalConfig } from '@server/core/config';
 import { encryptLlmApiKey, decryptLlmApiKey, resolveLlmApiKey } from '@server/core/llm-crypto';
 import { getSecretStoreBinding } from '@server/utils/secrets';
 import { llmApiFormats } from '@shared/schema';
-import { reviewWithCloudflare } from '@server/models/cloudflare';
+import { reviewViaGuardian } from '@server/services/guardian';
 import { reviewWithGoogle } from '@server/models/google';
 import { reviewWithOpenAI } from '@server/models/openai';
 import { reviewWithAnthropic } from '@server/models/anthropic';
@@ -355,24 +355,37 @@ export function createModelsRouter() {
         systemPrompt: 'Return only JSON.',
         userPrompt: 'Return {"ok":true}.',
       };
-      // All formats route through core-guardian now — guardian holds the
-      // provider keys, so this connection test no longer decrypts a saved key.
       let response;
-      switch (config.apiFormat) {
-        case 'cloudflare-workers-ai':
-          response = await reviewWithCloudflare(c.env, config.modelName, input, undefined, config.providerName);
-          break;
-        case 'gemini':
-          response = await reviewWithGoogle(c.env, config.modelName, input);
-          break;
-        case 'openai':
-          response = await reviewWithOpenAI(c.env, config.modelName, input);
-          break;
-        case 'anthropic':
-          response = await reviewWithAnthropic(c.env, config.modelName, input);
-          break;
-        default:
-          return jsonError(`Unsupported API format: ${config.apiFormat}`, 400);
+      if (config.apiFormat === 'cloudflare-workers-ai') {
+        // Workers AI is no longer called directly — smoke-test through core-guardian.
+        response = await reviewViaGuardian(c.env, {
+          input,
+          schema: { name: 'ok', schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false } },
+          task: 'CODE_REVIEW',
+        });
+      } else {
+        if (!config.encryptedApiKey) {
+          return jsonError(`Provider ${config.providerName} does not have a saved API key.`, 400);
+        }
+        const apiKey = await decryptLlmApiKey(c.env, config.encryptedApiKey);
+        
+        switch (config.apiFormat) {
+          case 'gemini':
+            response = await reviewWithGoogle({ apiKey, baseUrl: config.baseUrl, providerName: config.providerName }, config.modelName, input);
+            break;
+          case 'openai':
+            response = await reviewWithOpenAI({
+              apiKey,
+              baseUrl: config.baseUrl || 'https://api.openai.com/v1',
+              providerName: config.providerName,
+            }, config.modelName, input);
+            break;
+          case 'anthropic':
+            response = await reviewWithAnthropic({ apiKey, baseUrl: config.baseUrl, providerName: config.providerName }, config.modelName, input);
+            break;
+          default:
+            return jsonError(`Unsupported API format: ${config.apiFormat}`, 400);
+        }
       }
 
       return c.json({
