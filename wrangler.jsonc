@@ -30,22 +30,10 @@
 	],
 	"durable_objects": {
 		"bindings": [
-			{
-				"name": "RepoAgent",
-				"class_name": "RepoAgent"
-			},
-			{
-				"name": "Chat",
-				"class_name": "Chat"
-			},
-			{
-				"name": "ReviewAgent",
-				"class_name": "ReviewAgent"
-			},
-			{
-				"name": "GitHubLikeMCP",
-				"class_name": "GitHubLikeMCP"
-			},
+			// RepoAgent / Chat / ReviewAgent / GitHubLikeMCP removed — the Cloudflare
+			// Agents SDK (Durable Objects) is gone; agentic AI moves to the OpenAI
+			// Agents SDK through core-guardian (no DO wall-time). PrReviewStream and
+			// JobsFeed are plain DurableObjects (SSE fan-out) and stay.
 			{
 				"name": "PrReviewStream",
 				"class_name": "PrReviewStream"
@@ -76,6 +64,15 @@
 			"tag": "v3",
 			"new_sqlite_classes": [
 				"JobsFeed"
+			],
+		},
+		{
+			"tag": "v4",
+			"deleted_classes": [
+				"RepoAgent",
+				"Chat",
+				"ReviewAgent",
+				"GitHubLikeMCP",
 			],
 		},
 	],

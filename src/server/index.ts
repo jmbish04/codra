@@ -97,8 +97,7 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-export { RepoAgent } from './agents/repo';
-export { ReviewAgent } from './agents/review';
-export { Chat, GitHubLikeMCP } from './agents/orchestrator';
+// RepoAgent / ReviewAgent / Chat / GitHubLikeMCP removed with the Cloudflare
+// Agents SDK — agentic AI moves to the OpenAI Agents SDK via core-guardian.
 export { PrReviewStream } from './agents/pr-stream';
 export { JobsFeed } from './agents/jobs-feed';
