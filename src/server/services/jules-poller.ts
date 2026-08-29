@@ -1,5 +1,5 @@
 import { generateText } from 'ai';
-import { createWorkersAI } from 'workers-ai-provider';
+import { createGuardianWorkersAI } from '@server/ai/guardian-workers-ai';
 import { eq } from 'drizzle-orm';
 import { getDb } from '@server/db/client';
 import { repositories } from '@server/db/schemas';
@@ -55,7 +55,7 @@ export async function startPlanningSession(
   }
 }
 
-type PollerEnv = Pick<Env, 'DB' | 'AI' | 'JULES_API_KEY' | 'PLANNING_ARTIFACTS'>;
+type PollerEnv = Pick<Env, 'DB' | 'AI_GATEWAY_TOKEN' | 'GUARDIAN' | 'JULES_API_KEY' | 'PLANNING_ARTIFACTS'>;
 
 /** Cron entry point. No-op when no active tasks — the tick returns immediately. */
 export async function advanceJulesOrchestration(env: PollerEnv): Promise<{ advanced: number }> {
@@ -87,8 +87,8 @@ export async function advanceTaskById(env: PollerEnv, taskId: string): Promise<{
   return { advanced: true };
 }
 
-async function reviewWithKimi(env: Pick<Env, 'AI'>, title: string, revisionJson: string): Promise<{ satisfied: boolean; feedback: string }> {
-  const workersai = createWorkersAI({ binding: env.AI });
+async function reviewWithKimi(env: Pick<Env, 'AI_GATEWAY_TOKEN' | 'GUARDIAN'>, title: string, revisionJson: string): Promise<{ satisfied: boolean; feedback: string }> {
+  const workersai = createGuardianWorkersAI(env);
   const { text } = await generateText({
     model: workersai(REVIEW_MODEL as any),
     system: 'You are the codra orchestrator. Judge plans strictly and reply only with the requested JSON block.',

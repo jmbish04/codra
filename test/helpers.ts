@@ -111,10 +111,19 @@ export function hasConfiguredTestDatabaseUrl() {
 
 export function createTestEnv(overrides: Partial<Record<keyof Env, unknown>> = {}): Env {
   return {
-    AI: {
-      async run() {
-        return { response: '{"findings":[],"file_verdict":"approve","file_summary":"ok"}', usage: { prompt_tokens: 1, completion_tokens: 1 } };
-      },
+    // Workers AI (`env.AI`) binding removed — inference routes through
+    // core-guardian over the GUARDIAN service binding. Tests mock guardian at
+    // the `runGuardianInference` seam (see model-service.spec.ts) or via this
+    // GUARDIAN.fetch stub (see merge-review.spec.ts). Default returns a benign,
+    // non-verdict AI-router response.
+    AI_GATEWAY_TOKEN: { get: async () => 'test-ai-gateway-token' },
+    GUARDIAN: {
+      fetch: async () => Response.json({
+        body: { choices: [{ message: { content: 'no verdict here' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+        tokens_in: 1,
+        tokens_out: 1,
+        cost_usd: 0,
+      }),
     },
     APP_KV: new MemoryKV() as unknown as KVNamespace,
     PROMPTS_KV: new MemoryKV() as unknown as KVNamespace,

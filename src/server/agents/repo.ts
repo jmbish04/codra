@@ -2,7 +2,7 @@ import { Agent } from "agents";
 import { ReviewAgent } from "./review";
 import { logger } from "../core/logger";
 import { generateText } from "ai";
-import { createWorkersAI } from "workers-ai-provider";
+import { createGuardianWorkersAI } from "@server/ai/guardian-workers-ai";
 import { GithubConnector } from "./codemode";
 import { createCodemodeRuntime, DynamicWorkerExecutor } from "@cloudflare/codemode";
 
@@ -56,7 +56,7 @@ export class RepoAgent extends Agent<any> {
       const results = await Promise.all(reviewPromises);
 
       // Aggregate the results and drop a root-level comment.
-      const workersai = createWorkersAI({ binding: this.env.AI });
+      const workersai = createGuardianWorkersAI(this.env);
       
       const github = new GithubConnector(this.ctx, this.env, null as any);
       const runtime = createCodemodeRuntime({

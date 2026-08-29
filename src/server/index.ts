@@ -79,6 +79,14 @@ export default {
         logger.error('Scheduled full sync failed', error instanceof Error ? error : new Error(String(error)));
       })
     );
+    // Keep the D1 footprint flat: prune api_usage rows past the retention window.
+    // Guardian is the ledger of record for AI spend, so Codra only keeps a rolling
+    // recent window locally for the stats dashboard.
+    ctx.waitUntil(
+      import('@server/db/api-usage').then(({ pruneApiUsage }) => pruneApiUsage(env)).catch((error) => {
+        logger.error('Scheduled api_usage prune failed', error instanceof Error ? error : new Error(String(error)));
+      })
+    );
     // Advance any active Jules planning sessions one bounded step. No-ops instantly
     // when none are active — this is the stateless, cost-flat replacement for the
     // (removed) always-awake orchestration Durable Object.
