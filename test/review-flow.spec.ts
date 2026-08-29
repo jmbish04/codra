@@ -435,6 +435,7 @@ dbDescribe('Review Flow Lifecycle', () => {
       requestId: 'batch-request-1',
       model: '@cf/meta/llama-3.1-8b-instruct-fast',
       filePaths: ['src/app.ts'],
+      accountId: 'test-cf-account',
     });
     const expectedChecks = [{ practice: 'D1 Bulk Insert Batching', status: 'violation', note: 'chunk writes were sequential' }];
     const pollSpy = vi.spyOn(ModelService.prototype as any, 'pollReviewBatch').mockResolvedValue({

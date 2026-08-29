@@ -1,60 +1,71 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { runCloudflareChat } from '@server/models/cloudflare';
+import { resolveWorkersAiAccounts, runWorkersAiWithFallback } from '@server/models/workers-ai';
 import { createTestEnv } from './helpers';
 
 const PAYLOAD = { messages: [{ role: 'user', content: 'hi' }] };
 
-function freebieCreds() {
-  return {
-    CF_FREEBIE_API_TOKEN: { get: async () => 'freebie-token' },
-    CF_FREEBIE_ACCOUNT_ID: { get: async () => 'freebie-acct' },
-  };
+function withFreebie(env: any) {
+  env.CF_FREEBIE_API_TOKEN = { get: async () => 'freebie-token' };
+  env.CF_FREEBIE_ACCOUNT_ID = { get: async () => 'freebie-acct' };
+  return env;
 }
 
-describe('runCloudflareChat freebie-first routing', () => {
+function ok(response: string) {
+  return new Response(JSON.stringify({ result: { response, usage: { prompt_tokens: 1, completion_tokens: 1 } } }), { status: 200 });
+}
+
+describe('Workers AI account resolution + REST fallback', () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.unstubAllGlobals();
   });
 
-  it('runs on the free account (REST) when creds are present, not the AI binding', async () => {
-    const bindingRun = vi.fn(async () => ({ response: 'from-binding' }));
-    const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({ result: { response: 'from-freebie' }, success: true }), { status: 200 }),
+  it('orders the free account before the primary account', async () => {
+    const accounts = await resolveWorkersAiAccounts(withFreebie(createTestEnv()));
+    expect(accounts.map((a) => a.label)).toEqual(['freebie', 'primary']);
+    expect(accounts[0].accountId).toBe('freebie-acct');
+  });
+
+  it('runs on the free account first when it is configured', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(ok('from-freebie'));
+    const { account } = await runWorkersAiWithFallback(withFreebie(createTestEnv()), '@cf/some/model', PAYLOAD);
+
+    expect(account.label).toBe('freebie');
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      'https://api.cloudflare.com/client/v4/accounts/freebie-acct/ai/run/@cf/some/model',
     );
-    vi.stubGlobal('fetch', fetchMock);
-    const env = createTestEnv({ AI: { run: bindingRun } as any, ...freebieCreds() });
-
-    const result = await runCloudflareChat(env, '@cf/some/model', PAYLOAD);
-
-    expect(result).toEqual({ response: 'from-freebie' }); // REST envelope unwrapped
-    expect(bindingRun).not.toHaveBeenCalled();
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('https://api.cloudflare.com/client/v4/accounts/freebie-acct/ai/run/@cf/some/model');
-    expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer freebie-token' });
   });
 
-  it('falls back to the AI binding when the free account is out of quota (429)', async () => {
-    const bindingRun = vi.fn(async () => ({ response: 'from-binding' }));
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('daily free allocation exceeded', { status: 429 })));
-    const env = createTestEnv({ AI: { run: bindingRun } as any, ...freebieCreds() });
+  it('falls back to the primary account when the free account is out of quota (429)', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) =>
+      String(url).includes('freebie-acct')
+        ? new Response('daily free allocation exceeded', { status: 429 })
+        : ok('from-primary'),
+    );
 
-    const result = await runCloudflareChat(env, '@cf/some/model', PAYLOAD);
+    const { account } = await runWorkersAiWithFallback(withFreebie(createTestEnv()), '@cf/some/model', PAYLOAD);
 
-    expect(result).toEqual({ response: 'from-binding' });
-    expect(bindingRun).toHaveBeenCalledOnce();
+    expect(account.label).toBe('primary');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('uses the AI binding directly when no freebie creds are configured', async () => {
-    const bindingRun = vi.fn(async () => ({ response: 'from-binding' }));
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-    const env = createTestEnv({ AI: { run: bindingRun } as any }); // no CF_FREEBIE_* bindings
+  it('uses the primary account directly when no free-account creds are configured', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(ok('from-primary'));
+    const { account } = await runWorkersAiWithFallback(createTestEnv(), '@cf/some/model', PAYLOAD);
 
-    const result = await runCloudflareChat(env, '@cf/some/model', PAYLOAD);
+    expect(account.label).toBe('primary');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 
-    expect(result).toEqual({ response: 'from-binding' });
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(bindingRun).toHaveBeenCalledOnce();
+  it('does not fall back on a non-quota error', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) =>
+      String(url).includes('freebie-acct')
+        ? new Response('internal error', { status: 500 })
+        : ok('from-primary'),
+    );
+
+    await expect(
+      runWorkersAiWithFallback(withFreebie(createTestEnv()), '@cf/some/model', PAYLOAD),
+    ).rejects.toThrow('Workers AI REST 500');
+    expect(fetchMock).toHaveBeenCalledOnce(); // freebie only; no primary fallback
   });
 });

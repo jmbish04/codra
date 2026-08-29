@@ -2,7 +2,7 @@ import { Agent } from "agents";
 import { ReviewAgent } from "./review";
 import { logger } from "../core/logger";
 import { generateText } from "ai";
-import { createWorkersAI } from "workers-ai-provider";
+import { generateWithWorkersAi } from "@server/models/workers-ai";
 import { GithubConnector } from "./codemode";
 import { createCodemodeRuntime, DynamicWorkerExecutor } from "@cloudflare/codemode";
 
@@ -56,8 +56,6 @@ export class RepoAgent extends Agent<any> {
       const results = await Promise.all(reviewPromises);
 
       // Aggregate the results and drop a root-level comment.
-      const workersai = createWorkersAI({ binding: this.env.AI });
-      
       const github = new GithubConnector(this.ctx, this.env, null as any);
       const runtime = createCodemodeRuntime({
         ctx: this.ctx,
@@ -76,14 +74,16 @@ export class RepoAgent extends Agent<any> {
         Assume you have access to the tool via codemode.
       `;
 
-      await generateText({
-        model: workersai("@cf/moonshotai/kimi-k2.7-code"),
-        system: "You are the orchestrator of the Codra code review engine. You have a `codemode` tool. Use `github.create_issue_comment(owner, repo, issue_number, body)` to post your summary.",
-        prompt: summaryPrompt,
-        tools: {
-          codemode: runtime.tool(),
-        },
-      });
+      await generateWithWorkersAi(this.env, "@cf/moonshotai/kimi-k2.7-code", (workersai) =>
+        generateText({
+          model: workersai("@cf/moonshotai/kimi-k2.7-code"),
+          system: "You are the orchestrator of the Codra code review engine. You have a `codemode` tool. Use `github.create_issue_comment(owner, repo, issue_number, body)` to post your summary.",
+          prompt: summaryPrompt,
+          tools: {
+            codemode: runtime.tool(),
+          },
+        }),
+      );
 
       logger.info(`Completed review aggregation for ${owner}/${repo}#${prNumber}`);
     } catch (e) {

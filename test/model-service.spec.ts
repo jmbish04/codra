@@ -12,14 +12,14 @@ describe('ModelService', () => {
 
   it('routes legacy Kimi K2.5 ids to Kimi K2.6 for new Cloudflare requests', async () => {
     let requestedModel = '';
-    const env = createTestEnv({
-      AI: {
-        async run(model: string) {
-          requestedModel = model;
-          return { response: '{"findings":[]}', usage: { prompt_tokens: 1, completion_tokens: 1 } };
-        },
-      } as any,
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      requestedModel = String(url).split('/ai/run/')[1]?.split('?')[0] ?? '';
+      return new Response(
+        JSON.stringify({ result: { response: '{"findings":[]}', usage: { prompt_tokens: 1, completion_tokens: 1 } } }),
+        { status: 200 },
+      );
     });
+    const env = createTestEnv();
 
     await seedReviewModels(env);
     const service = new ModelService(env);
@@ -101,11 +101,11 @@ describe('ModelService', () => {
 
   it('asks Cloudflare chat models for strict review JSON', async () => {
     let inputs: any;
-    const env = createTestEnv({
-      AI: {
-        async run(_model: string, request: any) {
-          inputs = request;
-          return {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      inputs = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          result: {
             choices: [
               {
                 message: {
@@ -114,10 +114,12 @@ describe('ModelService', () => {
               },
             ],
             usage: { prompt_tokens: 1, completion_tokens: 1 },
-          };
-        },
-      } as any,
+          },
+        }),
+        { status: 200 },
+      );
     });
+    const env = createTestEnv();
 
     await reviewWithCloudflare(env, '@cf/zai-org/glm-4.7-flash', {
       systemPrompt: 'system',
@@ -167,14 +169,11 @@ describe('ModelService', () => {
 
   it('does not spend an extra queue slice retrying the same Cloudflare model inline', async () => {
     let attempts = 0;
-    const env = createTestEnv({
-      AI: {
-        async run() {
-          attempts++;
-          throw new Error('temporary provider error');
-        },
-      } as any,
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      attempts++;
+      return new Response('temporary provider error', { status: 500 });
     });
+    const env = createTestEnv();
 
     await expect(
       reviewWithCloudflare(env, '@cf/zai-org/glm-4.7-flash', {
@@ -186,7 +185,6 @@ describe('ModelService', () => {
   });
 
   it('tries the smaller Google fallback after the primary Google model fails', async () => {
-    let cloudflareCalls = 0;
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
         new Response(
@@ -221,22 +219,7 @@ describe('ModelService', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         ),
       );
-    const env = createTestEnv({
-      AI: {
-        async run() {
-          cloudflareCalls++;
-          return {
-            response: JSON.stringify({
-              findings: [],
-              overall_correctness: 'patch is correct',
-              overall_explanation: 'ok',
-              overall_confidence_score: 0.9,
-            }),
-            usage: { prompt_tokens: 1, completion_tokens: 1 },
-          };
-        },
-      } as any,
-    });
+    const env = createTestEnv();
     await saveTestProviderApiKey(env);
     await seedReviewModels(env);
     const service = new ModelService(env);
@@ -268,18 +251,12 @@ describe('ModelService', () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain('/models/gemma-4-31b-it:generateContent');
     expect(String(fetchMock.mock.calls[1][0])).toContain('/models/gemma-4-31b-it:generateContent');
     expect(String(fetchMock.mock.calls[2][0])).toContain('/models/gemma-4-26b-a4b-it:generateContent');
-    expect(cloudflareCalls).toBe(0);
     expect(response.modelUsed).toBe('gemma-4-26b-a4b-it');
   });
 
   it('marks exhausted transient provider failures as retryable for the queue', async () => {
-    const env = createTestEnv({
-      AI: {
-        async run() {
-          throw new Error('[REDACTED]');
-        },
-      } as any,
-    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('[REDACTED]', { status: 500 }));
+    const env = createTestEnv();
 
     await seedReviewModels(env);
     const service = new ModelService(env);
@@ -335,23 +312,20 @@ describe('ModelService', () => {
 
   it('skips Cloudflare for the rest of a job after allocation is exhausted', async () => {
     let cloudflareCalls = 0;
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
-      new Response(
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).includes('api.cloudflare.com')) {
+        cloudflareCalls++;
+        return new Response('Cloudflare daily free allocation exhausted (4006)', { status: 400 });
+      }
+      return new Response(
         JSON.stringify({
           candidates: [{ content: { parts: [{ text: '{"findings":[]}' }] } }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
-      ),
-    );
-    const env = createTestEnv({
-      AI: {
-        async run() {
-          cloudflareCalls++;
-          throw new Error('Cloudflare daily free allocation exhausted (4006)');
-        },
-      } as any,
+      );
     });
+    const env = createTestEnv();
     await saveTestProviderApiKey(env);
     await seedReviewModels(env);
     const service = new ModelService(env, undefined, { jobId: 'job-provider-skip' });
@@ -389,7 +363,8 @@ describe('ModelService', () => {
     });
 
     expect(cloudflareCalls).toBe(1);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // 1 Cloudflare attempt (file 1, then provider marked unavailable) + 2 Google fallbacks.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('uses the configured Gemma prompt cap and output token budget on the first attempt', async () => {

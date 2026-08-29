@@ -1,12 +1,11 @@
 import { logger } from '@server/core/logger';
 import { TimeoutError } from '@server/core/timeout';
-import { getSecretStoreBinding } from '@server/utils/secrets';
+import { logWorkersAiUsage, runWorkersAiWithFallback, type WorkersAiAccountEnv } from './workers-ai';
 import { ProviderRequestError, type ModelResponse, type StructuredSchema } from './types';
 import { REVIEW_SCHEMA } from './schemas';
 
 /** Max wall-clock time allowed for a single Workers-AI call. */
 const CLOUDFLARE_TIMEOUT_MS = 180_000;
-const CLOUDFLARE_MAX_RETRIES = 0;
 const CLOUDFLARE_MAX_OUTPUT_TOKENS = 8192;
 
 type UnknownRecord = Record<string, unknown>;
@@ -36,12 +35,6 @@ function getNumber(value: unknown, key: string) {
   if (!isRecord(value)) return null;
   const child = value[key];
   return typeof child === 'number' ? child : null;
-}
-
-function isLocalWorkersAiBindingError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  const normalized = message.toLowerCase();
-  return normalized.includes('binding ai') && normalized.includes('run remotely');
 }
 
 function synthesizeInconclusiveReview(model: string, reason: string): string {
@@ -147,170 +140,56 @@ export function buildCloudflareReviewRequest(
   };
 }
 
-/**
- * Routes Workers AI calls through AI Gateway so usage shows up alongside the
- * other providers. Without this the AI binding bypasses the gateway entirely.
- */
-export function cloudflareAiOptions(env: Pick<Env, 'AI_GATEWAY_ID'>) {
-  return env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID } } : {};
-}
-
-/** Quota-exhaustion signal shared by the REST (freebie) and binding paths. */
-function isWorkersAiQuotaExhausted(status: number, body: string) {
-  if (status === 429) return true;
-  const b = body.toLowerCase();
-  return b.includes('4006') || b.includes('daily free allocation') || b.includes('capacity temporarily exceeded');
-}
-
-async function tryGetSecretStore<K extends keyof Env>(env: Pick<Env, K>, name: K): Promise<string | null> {
-  try {
-    const value = await getSecretStoreBinding(env, name);
-    return value && value.trim() ? value.trim() : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Runs a Workers-AI chat payload on the free Cloudflare account first (REST API +
- * CF_FREEBIE_* secret-store creds), so its free daily neuron allocation is spent
- * before this account's paid usage. Returns the unwrapped model result, or null
- * to tell the caller to fall back to this account's AI binding — on missing
- * creds, quota exhaustion, or any freebie-side failure (freebie is opportunistic;
- * its problems must never break a review).
- */
-async function runFreebieWorkersAi(
-  env: Pick<Env, 'CF_FREEBIE_API_TOKEN' | 'CF_FREEBIE_ACCOUNT_ID'>,
-  model: string,
-  payload: unknown,
-): Promise<unknown | null> {
-  const [token, accountId] = await Promise.all([
-    tryGetSecretStore(env, 'CF_FREEBIE_API_TOKEN'),
-    tryGetSecretStore(env, 'CF_FREEBIE_ACCOUNT_ID'),
-  ]);
-  if (!token || !accountId) return null;
-
-  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  }).catch((error) => {
-    logger.warn('Freebie Workers AI request threw; falling back to account AI binding', {
-      model,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return null;
-  });
-  if (!res) return null;
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    if (isWorkersAiQuotaExhausted(res.status, body)) {
-      logger.info('Freebie Workers AI quota exhausted; falling back to account AI binding', { model });
-    } else {
-      logger.warn('Freebie Workers AI call failed; falling back to account AI binding', {
-        model,
-        status: res.status,
-        body: body.slice(0, 200),
-      });
-    }
-    return null;
-  }
-
-  const json = await res.json().catch(() => null);
-  logger.info(`Ran ${model} on the free Cloudflare account`);
-  // REST wraps the model output as { result, success, errors }. Unwrap so the
-  // shared extractors see the same top-level shape env.AI.run returns.
-  return isRecord(json) && 'result' in json ? (json as UnknownRecord).result : json;
-}
-
-/**
- * Runs a Workers-AI chat payload, preferring the free Cloudflare account and
- * falling back to this account's AI binding (routed through AI Gateway).
- */
-export async function runCloudflareChat(
-  env: Pick<Env, 'AI' | 'AI_GATEWAY_ID' | 'CF_FREEBIE_API_TOKEN' | 'CF_FREEBIE_ACCOUNT_ID'>,
-  model: string,
-  payload: unknown,
-): Promise<unknown> {
-  const freebie = await runFreebieWorkersAi(env, model, payload);
-  if (freebie !== null) return freebie;
-  return env.AI.run(model as any, payload as any, cloudflareAiOptions(env));
-}
 
 export async function reviewWithCloudflare(
-  env: Pick<Env, 'AI' | 'AI_GATEWAY_ID' | 'CF_FREEBIE_API_TOKEN' | 'CF_FREEBIE_ACCOUNT_ID'>,
+  env: WorkersAiAccountEnv & Pick<Env, 'DB'>,
   model: string,
   input: { systemPrompt: string; userPrompt: string },
   tracker?: { incrementSubrequests(count?: number): void },
   providerName = 'Cloudflare',
   schema: StructuredSchema = REVIEW_SCHEMA,
 ): Promise<ModelResponse> {
-  const maxRetries = CLOUDFLARE_MAX_RETRIES;
-  let lastError: unknown;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new TimeoutError(`Cloudflare (${model})`, CLOUDFLARE_TIMEOUT_MS)), CLOUDFLARE_TIMEOUT_MS);
+  });
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    if (tracker) tracker.incrementSubrequests(1);
+    logger.info(`Calling Cloudflare model: ${model}`);
+    const startTime = Date.now();
+    // Free account first, then this account on quota exhaustion.
+    const { result, account } = await Promise.race([
+      runWorkersAiWithFallback(env, model, buildCloudflareReviewRequest(input, schema)),
+      timeoutPromise,
+    ]);
+    const durationMs = Date.now() - startTime;
+    logger.info(`AI model ${model} responded in ${durationMs}ms on the ${account.label} Cloudflare account`);
 
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new TimeoutError(`Cloudflare (${model})`, CLOUDFLARE_TIMEOUT_MS)), CLOUDFLARE_TIMEOUT_MS);
+    // Throw (→ fall back to the next model, e.g. Gemini) rather than accept a
+    // reasoning-only / empty Cloudflare response as an inconclusive review.
+    const rawText = extractCloudflareText(result, model, { throwOnNoContent: true });
+    const usage = extractCloudflareUsage(result);
+
+    await logWorkersAiUsage(env, {
+      model,
+      account,
+      promptTokens: usage.inputTokens,
+      completionTokens: usage.outputTokens,
     });
 
-    try {
-      if (tracker) tracker.incrementSubrequests(1);
-      if (attempt > 0) {
-        const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
-        logger.info(`Retrying Cloudflare request (attempt ${attempt}/${maxRetries}) in ${Math.round(delay)}ms`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-
-      logger.info(`Calling Cloudflare model: ${model}`);
-      const startTime = Date.now();
-      const result = await Promise.race([
-        runCloudflareChat(env, model, buildCloudflareReviewRequest(input, schema)),
-        timeoutPromise,
-      ]);
-      const durationMs = Date.now() - startTime;
-      logger.info(`AI model ${model} responded in ${durationMs}ms`);
-
-      // Throw (→ fall back to the next model, e.g. Gemini) rather than accept a
-      // reasoning-only / empty Cloudflare response as an inconclusive review.
-      const rawText = extractCloudflareText(result, model, { throwOnNoContent: true });
-      const usage = extractCloudflareUsage(result);
-
-      return {
-        rawText,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        modelUsed: model,
-        provider: providerName,
-      };
-    } catch (error) {
-      lastError = error;
-      const errorMsg = error instanceof Error ? error.message : String(error);
-
-      if (isLocalWorkersAiBindingError(error)) {
-        const message = 'Cloudflare Workers AI is not available in local Wrangler. Run with remote bindings or deploy the Worker to test Cloudflare models.';
-        logger.warn(message, { model });
-        throw new ProviderRequestError(providerName, 400, message);
-      }
-
-      logger.error(`Cloudflare request failed (attempt ${attempt}/${maxRetries})`, { error: errorMsg });
-
-      // If we've used up our neuron quota, don't retry - it's a persistent error for this account/day
-      if (errorMsg.includes('4006') || errorMsg.includes('daily free allocation')) {
-        throw error;
-      }
-
-      const isTimeout = error instanceof TimeoutError;
-      if ((isTimeout || attempt < maxRetries) && attempt < maxRetries) {
-        continue;
-      }
-      throw error;
-    } finally {
-      clearTimeout(timer);
-    }
+    return {
+      rawText,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      modelUsed: model,
+      provider: providerName,
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error('Cloudflare request failed', { model, error: errorMsg });
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
-
-  throw lastError;
 }

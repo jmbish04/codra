@@ -232,6 +232,13 @@
       "when": 1786363810894,
       "tag": "0032_dusty_tag",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1787972908239,
+      "tag": "0033_tricky_gwen_stacy",
+      "breakpoints": true
     }
   ]
 }

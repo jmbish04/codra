@@ -107,6 +107,7 @@ export function mapJob(row: any) {
     statusCommentId: (row.status_comment_id as number | null) ?? null,
     batchRequestId: (row.batch_request_id as string | null) ?? null,
     batchModel: (row.batch_model as string | null) ?? null,
+    batchAccountId: (row.batch_account_id as string | null) ?? null,
     batchFilePaths: parseJsonColumn(row.batch_file_paths, []) as string[],
   };
 }
@@ -536,12 +537,13 @@ export async function releaseJobLease(env: Pick<Env, 'DB'>, jobId: string, lease
 export async function recordJobBatch(
   env: Pick<Env, 'DB'>,
   jobId: string,
-  input: { requestId: string; model: string; filePaths: string[] },
+  input: { requestId: string; model: string; filePaths: string[]; accountId: string },
 ) {
   const db = getDb(env);
   await db.update(jobs).set({
     batch_request_id: input.requestId,
     batch_model: input.model,
+    batch_account_id: input.accountId,
     batch_file_paths: input.filePaths,
     batch_submitted_at: new Date().toISOString(),
   }).where(eq(jobs.id, jobId));
@@ -552,6 +554,7 @@ export async function clearJobBatch(env: Pick<Env, 'DB'>, jobId: string) {
   await db.update(jobs).set({
     batch_request_id: null,
     batch_model: null,
+    batch_account_id: null,
     batch_file_paths: null,
     batch_submitted_at: null,
   }).where(eq(jobs.id, jobId));

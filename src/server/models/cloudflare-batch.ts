@@ -1,5 +1,9 @@
 import { logger } from '@server/core/logger';
-import { buildCloudflareReviewRequest, cloudflareAiOptions, extractCloudflareText, extractCloudflareUsage } from './cloudflare';
+import { buildCloudflareReviewRequest, extractCloudflareText, extractCloudflareUsage } from './cloudflare';
+import { type CfAiAccount, runWorkersAiRest } from './workers-ai';
+
+/** Batch runs over the same async REST endpoint as single calls, gated by this query flag. */
+const BATCH_QUERY = 'queueRequest=true';
 
 /**
  * Workers AI models that support the asynchronous Batch API. Verified against
@@ -48,18 +52,17 @@ export function batchFitsPayloadLimit(items: BatchReviewItem[]) {
  * poll for results later. Responses come back keyed by their index in `items`.
  */
 export async function submitCloudflareReviewBatch(
-  env: Pick<Env, 'AI' | 'AI_GATEWAY_ID'>,
+  account: CfAiAccount,
   model: string,
   items: BatchReviewItem[],
 ): Promise<string> {
-  // ponytail: batch stays on this account's AI binding (not the free account).
-  // Batch is submit-now / poll-later, so a request_id is only pollable from the
-  // account that queued it — routing to the freebie account would mean persisting
-  // per-batch account ownership. Add that only if batch neuron spend matters.
-  const response = await env.AI.run(
-    model as any,
-    { requests: items.map((item) => buildCloudflareReviewRequest(item)) } as any,
-    { ...cloudflareAiOptions(env), queueRequest: true } as any,
+  // A batch request_id is only pollable from the account that queued it, so the
+  // caller persists `account` alongside the request_id and polls with the same one.
+  const response = await runWorkersAiRest(
+    account,
+    model,
+    { requests: items.map((item) => buildCloudflareReviewRequest(item)) },
+    BATCH_QUERY,
   );
 
   const requestId = (response as { request_id?: string })?.request_id;
@@ -67,7 +70,7 @@ export async function submitCloudflareReviewBatch(
     throw new Error(`Cloudflare batch submit for ${model} returned no request_id`);
   }
 
-  logger.info(`Submitted Workers AI batch for ${model}`, { requestId, requests: items.length });
+  logger.info(`Submitted Workers AI batch for ${model} on the ${account.label} account`, { requestId, requests: items.length });
   return requestId;
 }
 
@@ -77,11 +80,11 @@ export async function submitCloudflareReviewBatch(
  * `id` that maps to the index of the prompt in the original request.
  */
 export async function pollCloudflareReviewBatch(
-  env: Pick<Env, 'AI' | 'AI_GATEWAY_ID'>,
+  account: CfAiAccount,
   model: string,
   requestId: string,
 ): Promise<BatchPollResult> {
-  const result = await env.AI.run(model as any, { request_id: requestId } as any, cloudflareAiOptions(env));
+  const result = await runWorkersAiRest(account, model, { request_id: requestId }, BATCH_QUERY);
 
   const status = (result as { status?: string })?.status;
   if (status === 'queued' || status === 'running') {

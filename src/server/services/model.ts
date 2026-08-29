@@ -7,6 +7,7 @@ import {
   submitCloudflareReviewBatch,
   type BatchReviewItem,
 } from '../models/cloudflare-batch';
+import { isWorkersAiQuotaError, resolveWorkersAiAccounts, type CfAiAccount } from '../models/workers-ai';
 import { reviewWithOpenAI } from '../models/openai';
 import { reviewWithAnthropic } from '../models/anthropic';
 import { buildFileReviewPrompts } from '../prompts/file-review';
@@ -319,7 +320,16 @@ export class ModelService {
    * Queues every file review as one Workers AI batch. Returns null when the
    * payload exceeds the 10 MB cap so the caller can fall back to sync review.
    */
-  async submitReviewBatch(model: string, items: BatchReviewItem[]): Promise<string | null> {
+  /**
+   * Queues a Workers AI batch on the free account first (this account on quota
+   * exhaustion). Returns the request_id plus the account it ran on — the caller
+   * must persist `accountId` and poll with the same account. Null when the
+   * payload exceeds the 10 MB cap.
+   */
+  async submitReviewBatch(
+    model: string,
+    items: BatchReviewItem[],
+  ): Promise<{ requestId: string; accountId: string; accountLabel: string } | null> {
     const { fits, bytes } = batchFitsPayloadLimit(items);
     if (!fits) {
       logger.warn(`Batch payload of ${bytes} bytes exceeds the Workers AI limit; falling back to synchronous review`, {
@@ -329,11 +339,40 @@ export class ModelService {
       return null;
     }
 
-    return submitCloudflareReviewBatch(this.env, model, items);
+    const accounts = await resolveWorkersAiAccounts(this.env);
+    let lastError: unknown;
+    for (let i = 0; i < accounts.length; i++) {
+      const account = accounts[i];
+      try {
+        const requestId = await submitCloudflareReviewBatch(account, model, items);
+        return { requestId, accountId: account.accountId, accountLabel: account.label };
+      } catch (error) {
+        lastError = error;
+        const status = (error as { status?: number })?.status;
+        const message = error instanceof Error ? error.message : String(error);
+        if (i < accounts.length - 1 && isWorkersAiQuotaError({ status, message })) {
+          logger.info(`Workers AI account '${account.label}' out of quota; retrying batch on the next account`, { model });
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw lastError;
   }
 
-  async pollReviewBatch(model: string, requestId: string) {
-    const result = await pollCloudflareReviewBatch(this.env, model, requestId);
+  /** Rebuilds the account that queued the batch from its persisted accountId. */
+  private async resolveBatchAccount(accountId: string): Promise<CfAiAccount> {
+    const accounts = await resolveWorkersAiAccounts(this.env);
+    const account = accounts.find((a) => a.accountId === accountId);
+    if (!account) {
+      throw new Error(`Batch account ${accountId} is no longer configured; cannot poll this batch.`);
+    }
+    return account;
+  }
+
+  async pollReviewBatch(model: string, requestId: string, accountId: string) {
+    const account = await this.resolveBatchAccount(accountId);
+    const result = await pollCloudflareReviewBatch(account, model, requestId);
 
     if (result.status === 'complete') {
       this.tracker?.record(model, result.usage.inputTokens, result.usage.outputTokens);
@@ -343,7 +382,8 @@ export class ModelService {
         promptTokens: result.usage.inputTokens,
         completionTokens: result.usage.outputTokens,
         source: 'local',
-        gatewayId: this.env.AI_GATEWAY_ID || '',
+        accountId: account.accountId,
+        accountLabel: account.label,
       });
     }
 

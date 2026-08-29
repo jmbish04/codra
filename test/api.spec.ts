@@ -541,29 +541,6 @@ describe('Dashboard API Suite', () => {
     expect(data.error).not.toContain('"details"');
   });
 
-  it('reports local Cloudflare Workers AI binding limitations clearly', async () => {
-    const env = createTestEnv({
-      AI: {
-        async run() {
-          throw new Error('Binding AI needs to be run remotely');
-        },
-      } as any,
-    });
-    const token = await getAuthCookie(env);
-
-    const response = await app.request(`/api/models/${encodeURIComponent('@cf/zai-org/glm-4.7-flash')}/test`, {
-      method: 'POST',
-      headers: {
-        Cookie: `codra_session=${token}`,
-        'x-requested-with': 'XMLHttpRequest',
-      },
-    }, env);
-
-    expect(response.status).toBe(400);
-    const data = await response.json() as { error: string };
-    expect(data.error).toContain('Cloudflare Workers AI is not available in local Wrangler');
-  });
-
   it('maps upstream provider server errors to bad gateway after retry', async () => {
     const env = createTestEnv();
     const token = await getAuthCookie(env);

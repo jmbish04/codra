@@ -1,21 +1,32 @@
+import { afterEach, vi } from 'vitest';
 import {
   batchFitsPayloadLimit,
   isBatchCapableCloudflareModel,
   pollCloudflareReviewBatch,
   submitCloudflareReviewBatch,
 } from '@server/models/cloudflare-batch';
+import type { CfAiAccount } from '@server/models/workers-ai';
 
 const MODEL = '@cf/moonshotai/kimi-k2.7-code';
+const ACCOUNT: CfAiAccount = { accountId: 'acct-1', apiKey: 'tok', label: 'primary' };
 
-// gatewayId is explicit: a default param would swallow an intentional
-// `undefined` and silently test the configured-gateway path instead.
-function fakeEnv(run: (...args: any[]) => any, gatewayId?: string) {
-  return { AI: { run }, AI_GATEWAY_ID: gatewayId } as any;
+/** Stubs the Workers AI REST endpoint. `result` is wrapped in the `{ result }`
+ *  envelope the API returns; the last request's parsed body is captured. */
+function stubRest(result: (body: any) => unknown) {
+  const calls: Array<{ url: string; body: any }> = [];
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+    const body = JSON.parse(String((init as RequestInit)?.body));
+    calls.push({ url: String(url), body });
+    return new Response(JSON.stringify({ result: result(body), success: true }), { status: 200 });
+  });
+  return calls;
 }
 
 const item = (text: string) => ({ systemPrompt: 'review this', userPrompt: text });
 
 describe('cloudflare batch', () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it('knows which models support batch', () => {
     expect(isBatchCapableCloudflareModel(MODEL)).toBe(true);
     expect(isBatchCapableCloudflareModel('@cf/zai-org/glm-5.2')).toBe(true);
@@ -23,59 +34,48 @@ describe('cloudflare batch', () => {
     expect(isBatchCapableCloudflareModel('@cf/qwen/qwen2.5-coder-32b-instruct')).toBe(false);
   });
 
-  it('submits with queueRequest and routes through the AI gateway', async () => {
-    const calls: any[] = [];
-    const env = fakeEnv((...args: any[]) => {
-      calls.push(args);
-      return { request_id: 'req-123' };
-    }, 'codra');
+  it('submits to the async batch REST endpoint with queueRequest', async () => {
+    const calls = stubRest(() => ({ request_id: 'req-123' }));
 
-    const requestId = await submitCloudflareReviewBatch(env, MODEL, [item('a'), item('b')]);
+    const requestId = await submitCloudflareReviewBatch(ACCOUNT, MODEL, [item('a'), item('b')]);
 
     expect(requestId).toBe('req-123');
-    const [model, inputs, options] = calls[0];
-    expect(model).toBe(MODEL);
-    expect(inputs.requests).toHaveLength(2);
-    expect(inputs.requests[0].messages[1].content).toContain('a');
-    expect(options.queueRequest).toBe(true);
-    expect(options.gateway).toEqual({ id: 'codra' });
+    expect(calls[0].url).toBe(`https://api.cloudflare.com/client/v4/accounts/acct-1/ai/run/${MODEL}?queueRequest=true`);
+    expect(calls[0].body.requests).toHaveLength(2);
+    expect(calls[0].body.requests[0].messages[1].content).toContain('a');
   });
 
-  it('omits the gateway when no gateway id is configured', async () => {
-    const calls: any[] = [];
-    const env = fakeEnv((...args: any[]) => {
-      calls.push(args);
-      return { request_id: 'req-1' };
-    });
-
-    await submitCloudflareReviewBatch(env, MODEL, [item('a')]);
-    expect(calls[0][2].gateway).toBeUndefined();
-    expect(calls[0][2].queueRequest).toBe(true);
+  it('polls the async batch endpoint by request_id', async () => {
+    const calls = stubRest(() => ({ status: 'queued' }));
+    await pollCloudflareReviewBatch(ACCOUNT, MODEL, 'req-1');
+    expect(calls[0].url).toContain('?queueRequest=true');
+    expect(calls[0].body).toEqual({ request_id: 'req-1' });
   });
 
   it('throws when submit returns no request_id', async () => {
-    const env = fakeEnv(() => ({}), 'codra');
-    await expect(submitCloudflareReviewBatch(env, MODEL, [item('a')])).rejects.toThrow(/no request_id/);
+    stubRest(() => ({}));
+    await expect(submitCloudflareReviewBatch(ACCOUNT, MODEL, [item('a')])).rejects.toThrow(/no request_id/);
   });
 
   it('reports queued and running batches as pending', async () => {
     for (const status of ['queued', 'running']) {
-      const env = fakeEnv(() => ({ status }), 'codra');
-      expect(await pollCloudflareReviewBatch(env, MODEL, 'req-1')).toEqual({ status: 'pending' });
+      stubRest(() => ({ status }));
+      expect(await pollCloudflareReviewBatch(ACCOUNT, MODEL, 'req-1')).toEqual({ status: 'pending' });
+      vi.restoreAllMocks();
     }
   });
 
   it('maps completed responses back by their id index', async () => {
-    const env = fakeEnv(() => ({
+    stubRest(() => ({
       responses: [
         // Deliberately out of order: id, not array position, is authoritative.
         { id: 1, success: true, result: { choices: [{ message: { content: '{"second":true}' } }] } },
         { id: 0, success: true, result: { choices: [{ message: { content: '{"first":true}' } }] } },
       ],
       usage: { prompt_tokens: 10, completion_tokens: 4 },
-    }), 'codra');
+    }));
 
-    const result = await pollCloudflareReviewBatch(env, MODEL, 'req-1');
+    const result = await pollCloudflareReviewBatch(ACCOUNT, MODEL, 'req-1');
     if (result.status !== 'complete') throw new Error('expected complete');
 
     expect(result.responses).toEqual([
@@ -86,19 +86,19 @@ describe('cloudflare batch', () => {
   });
 
   it('surfaces per-response failures instead of dropping them', async () => {
-    const env = fakeEnv(() => ({
+    stubRest(() => ({
       responses: [{ id: 0, success: false, error: 'model unavailable' }],
       usage: { prompt_tokens: 0, completion_tokens: 0 },
-    }), 'codra');
+    }));
 
-    const result = await pollCloudflareReviewBatch(env, MODEL, 'req-1');
+    const result = await pollCloudflareReviewBatch(ACCOUNT, MODEL, 'req-1');
     if (result.status !== 'complete') throw new Error('expected complete');
     expect(result.responses[0]).toEqual({ index: 0, rawText: null, error: 'model unavailable' });
   });
 
   it('throws when a finished batch has no responses array', async () => {
-    const env = fakeEnv(() => ({ status: 'error' }), 'codra');
-    await expect(pollCloudflareReviewBatch(env, MODEL, 'req-1')).rejects.toThrow(/no responses array/);
+    stubRest(() => ({ status: 'error' }));
+    await expect(pollCloudflareReviewBatch(ACCOUNT, MODEL, 'req-1')).rejects.toThrow(/no responses array/);
   });
 
   it('rejects payloads over the 10 MB batch cap', () => {

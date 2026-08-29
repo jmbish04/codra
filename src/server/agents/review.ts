@@ -1,5 +1,5 @@
 import { AIChatAgent } from "@cloudflare/ai-chat";
-import { createWorkersAI } from "workers-ai-provider";
+import { logStreamedWorkersAiUsage, resolveWorkersAiProvider } from "@server/models/workers-ai";
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { GithubConnector } from "./codemode";
 import {
@@ -49,8 +49,8 @@ export class ReviewAgent extends AIChatAgent<any> {
   }
 
   async onChatMessage() {
-    const workersai = createWorkersAI({ binding: this.env.AI });
-    
+    const { workersai, account } = await resolveWorkersAiProvider(this.env);
+
     const result = streamText({
       model: workersai("@cf/moonshotai/kimi-k2.7-code", {
         sessionAffinity: this.sessionAffinity,
@@ -89,6 +89,7 @@ export class ReviewAgent extends AIChatAgent<any> {
       stopWhen: stepCountIs(10),
     });
 
+    logStreamedWorkersAiUsage(this.env, "@cf/moonshotai/kimi-k2.7-code", account, result.usage);
     return result.toUIMessageStreamResponse();
   }
 }

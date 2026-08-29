@@ -12,6 +12,9 @@ export interface ApiUsageLog {
   source: 'local' | 'gateway';
   gatewayId?: string;
   datetimeHour?: string;
+  /** Cloudflare account the call ran on (Workers AI). Empty for other providers. */
+  accountId?: string;
+  accountLabel?: string;
 }
 
 export async function logApiUsage(
@@ -23,6 +26,8 @@ export async function logApiUsage(
   const source = params.source;
   const gatewayId = params.gatewayId || '';
   const datetimeHour = params.datetimeHour || '';
+  const accountId = params.accountId || '';
+  const accountLabel = params.accountLabel || '';
 
   try {
     if (source === 'gateway') {
@@ -35,6 +40,8 @@ export async function logApiUsage(
           total_tokens: totalTokens,
           source,
           gateway_id: gatewayId,
+          account_id: accountId,
+          account_label: accountLabel,
           datetime_hour: datetimeHour,
         })
         .onConflictDoUpdate({
@@ -54,6 +61,8 @@ export async function logApiUsage(
         total_tokens: totalTokens,
         source,
         gateway_id: gatewayId,
+        account_id: accountId,
+        account_label: accountLabel,
         datetime_hour: datetimeHour,
       });
     }

@@ -18,9 +18,8 @@
 			"enabled": true,
 		},
 	},
-	"ai": {
-		"binding": "AI",
-	},
+	// Workers AI runs over the REST API (both the free and primary accounts) via
+	// CF_FREEBIE_* / CF_ACCOUNT_ID + CF_API_TOKEN, so no `ai` binding is needed.
 	"browser": {
 		"binding": "BROWSER",
 	},

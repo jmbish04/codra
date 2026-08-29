@@ -111,11 +111,6 @@ export function hasConfiguredTestDatabaseUrl() {
 
 export function createTestEnv(overrides: Partial<Record<keyof Env, unknown>> = {}): Env {
   return {
-    AI: {
-      async run() {
-        return { response: '{"findings":[],"file_verdict":"approve","file_summary":"ok"}', usage: { prompt_tokens: 1, completion_tokens: 1 } };
-      },
-    },
     APP_KV: new MemoryKV() as unknown as KVNamespace,
     PROMPTS_KV: new MemoryKV() as unknown as KVNamespace,
     PLANNING_ARTIFACTS: new MemoryR2() as unknown as R2Bucket,
@@ -134,8 +129,10 @@ export function createTestEnv(overrides: Partial<Record<keyof Env, unknown>> = {
     LLM_CONFIG_ENCRYPTION_KEY: 'test-llm-config-encryption-key',
     BOT_USERNAME: 'codra-app',
     ENVIRONMENT: 'production',
-    CF_API_TOKEN: { get: async () => '' },
-    CF_ACCOUNT_ID: { get: async () => '' },
+    CF_API_TOKEN: { get: async () => 'test-cf-api-token' },
+    CF_ACCOUNT_ID: { get: async () => 'test-cf-account' },
+    CF_FREEBIE_API_TOKEN: { get: async () => '' },
+    CF_FREEBIE_ACCOUNT_ID: { get: async () => '' },
     CF_DLQ_ID: '',
     RepoAgent: {} as any,
     Chat: {} as any,

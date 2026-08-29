@@ -1003,10 +1003,10 @@ async function runBatchReviewPhase(
 ) {
   const { pr, config, files, pendingFiles, totalLineCount, projectContext, allowNewBatch } = ctx;
 
-  if (job.batchRequestId && job.batchModel) {
+  if (job.batchRequestId && job.batchModel && job.batchAccountId) {
     let result: Awaited<ReturnType<ModelService['pollReviewBatch']>>;
     try {
-      result = await model.pollReviewBatch(job.batchModel, job.batchRequestId);
+      result = await model.pollReviewBatch(job.batchModel, job.batchRequestId, job.batchAccountId);
     } catch (error) {
       if (isRetryableModelError(error)) throw error;
       // An unrecognised batch response must not strand the job: drop the batch
@@ -1064,9 +1064,9 @@ async function runBatchReviewPhase(
     ),
   );
 
-  let requestId: string | null;
+  let batch: Awaited<ReturnType<ModelService['submitReviewBatch']>>;
   try {
-    requestId = await model.submitReviewBatch(
+    batch = await model.submitReviewBatch(
       batchModel,
       prompts.map((prompt) => ({ systemPrompt: prompt.systemPrompt, userPrompt: prompt.userPrompt })),
     );
@@ -1078,12 +1078,13 @@ async function runBatchReviewPhase(
     logger.error('Batch submit failed; falling back to synchronous review', error);
     return false;
   }
-  if (!requestId) return false;
+  if (!batch) return false;
 
   await recordJobBatch(env, job.id, {
-    requestId,
+    requestId: batch.requestId,
     model: batchModel,
     filePaths: pendingFiles.map((file) => file.path),
+    accountId: batch.accountId,
   });
   await updateJobStep(env, job.id, BATCH_STEP_NAME, { status: 'running' });
   await enqueueJobPhase(env, job.id, 'review', BATCH_POLL_DELAY_SECONDS);

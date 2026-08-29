@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import type { AppEnv } from '@server/env';
 import { createAgentRouter } from '@server/routes/api/agent';
@@ -9,12 +9,21 @@ import { createTestEnv } from './helpers';
 const KEY = 'test-webhook-secret';
 const authed = { 'X-API-Key': KEY, 'content-type': 'application/json' } as const;
 
-// The test env AI stub returns a non-verdict body, so parseReviewVerdict defaults
-// to not-satisfied — i.e. codra does NOT approve unless a real Kimi says so. That
-// makes the reject + circuit-breaker paths deterministic to test.
+// The stubbed Workers AI REST call returns a non-verdict body, so parseReviewVerdict
+// defaults to not-satisfied — i.e. codra does NOT approve unless a real Kimi says so.
+// That makes the reject + circuit-breaker paths deterministic to test.
 describe('merge-review gate', () => {
   let env: Env;
-  beforeEach(() => { env = createTestEnv(); });
+  beforeEach(() => {
+    env = createTestEnv();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(
+        JSON.stringify({ result: { response: 'no verdict here', usage: { prompt_tokens: 1, completion_tokens: 1 } }, success: true }),
+        { status: 200 },
+      ),
+    );
+  });
+  afterEach(() => vi.restoreAllMocks());
 
   it('records each attempt and trips the circuit breaker after the cap', async () => {
     const base = { repositoryId: 1, repository: 'acme/widgets', reconciliationKey: 'reconcile/batch-1', summary: 'staged reconciliation diff' };

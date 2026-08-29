@@ -304,6 +304,7 @@ dbDescribe('Engine delegation in runReviewPhase', () => {
       requestId: 'batch-inflight-1',
       model: 'test-batch-model',
       filePaths: ['src/app.ts'],
+      accountId: 'test-cf-account',
     });
 
     expect(queue.sent.length).toBeGreaterThan(0);
@@ -314,7 +315,7 @@ dbDescribe('Engine delegation in runReviewPhase', () => {
     // taking it over would orphan the already-submitted batch.
     expect(reviewPullRequest).not.toHaveBeenCalled();
     // Instead the existing native batch path drained it.
-    expect(pollSpy).toHaveBeenCalledWith('test-batch-model', 'batch-inflight-1');
+    expect(pollSpy).toHaveBeenCalledWith('test-batch-model', 'batch-inflight-1', 'test-cf-account');
 
     const reviews = await getFileReviewsForJobs(env, [preparedJob!.id]);
     expect(reviews).toHaveLength(1);
