@@ -355,32 +355,24 @@ export function createModelsRouter() {
         systemPrompt: 'Return only JSON.',
         userPrompt: 'Return {"ok":true}.',
       };
+      // All formats route through core-guardian now — guardian holds the
+      // provider keys, so this connection test no longer decrypts a saved key.
       let response;
-      if (config.apiFormat === 'cloudflare-workers-ai') {
-        response = await reviewWithCloudflare(c.env, config.modelName, input, undefined, config.providerName);
-      } else {
-        if (!config.encryptedApiKey) {
-          return jsonError(`Provider ${config.providerName} does not have a saved API key.`, 400);
-        }
-        const apiKey = await decryptLlmApiKey(c.env, config.encryptedApiKey);
-        
-        switch (config.apiFormat) {
-          case 'gemini':
-            response = await reviewWithGoogle({ apiKey, baseUrl: config.baseUrl, providerName: config.providerName }, config.modelName, input);
-            break;
-          case 'openai':
-            response = await reviewWithOpenAI({
-              apiKey,
-              baseUrl: config.baseUrl || 'https://api.openai.com/v1',
-              providerName: config.providerName,
-            }, config.modelName, input);
-            break;
-          case 'anthropic':
-            response = await reviewWithAnthropic({ apiKey, baseUrl: config.baseUrl, providerName: config.providerName }, config.modelName, input);
-            break;
-          default:
-            return jsonError(`Unsupported API format: ${config.apiFormat}`, 400);
-        }
+      switch (config.apiFormat) {
+        case 'cloudflare-workers-ai':
+          response = await reviewWithCloudflare(c.env, config.modelName, input, undefined, config.providerName);
+          break;
+        case 'gemini':
+          response = await reviewWithGoogle(c.env, config.modelName, input);
+          break;
+        case 'openai':
+          response = await reviewWithOpenAI(c.env, config.modelName, input);
+          break;
+        case 'anthropic':
+          response = await reviewWithAnthropic(c.env, config.modelName, input);
+          break;
+        default:
+          return jsonError(`Unsupported API format: ${config.apiFormat}`, 400);
       }
 
       return c.json({

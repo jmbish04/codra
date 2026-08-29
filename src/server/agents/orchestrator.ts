@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { AIChatAgent } from "@cloudflare/ai-chat";
-import { createWorkersAI } from "workers-ai-provider";
+import { createGuardianWorkersAI } from "@server/ai/guardian-workers-ai";
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { routeAgentRequest, callable } from "agents";
 import {
@@ -404,7 +404,7 @@ export class Chat extends AIChatAgent<any> {
   }
 
   async onChatMessage() {
-    const workersai = createWorkersAI({ binding: this.env.AI });
+    const workersai = createGuardianWorkersAI(this.env);
 
     const result = streamText({
       model: workersai("@cf/moonshotai/kimi-k2.7-code", {

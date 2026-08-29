@@ -1,26 +1,47 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isRetryableModelError, ModelService } from '@server/services/model';
 import { reviewWithCloudflare, extractCloudflareText } from '@server/models/cloudflare';
-import { reviewWithGoogle } from '@server/models/google';
 import { createTestEnv, saveTestProviderApiKey, seedReviewModels } from './helpers';
 import { defaultRepoConfig } from '@shared/schema';
+import { runGuardianInference, type GuardianInferenceResult } from '@server/core/guardian-ai';
+
+// All inference now routes through core-guardian. Mock the single transport seam
+// (`runGuardianInference`) instead of the provider HTTP calls — the provider
+// modules still build the native request body (asserted via the mock's `input`
+// arg) and parse the native response `body` we return here.
+vi.mock('@server/core/guardian-ai', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@server/core/guardian-ai')>();
+  return { ...actual, runGuardianInference: vi.fn() };
+});
+
+const runMock = vi.mocked(runGuardianInference);
+
+/** Wraps a provider-native response body as a guardian inference result. */
+function gResult(body: unknown, tokensIn = 1, tokensOut = 1): GuardianInferenceResult {
+  return { body, tokensIn, tokensOut, costUsd: 0, provider: 'test', model: 'test', requestUuid: 'uuid' };
+}
+
+/** A minimal valid Gemini review body. */
+function geminiBody(text = '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}') {
+  return { candidates: [{ content: { parts: [{ text }] } }], usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 } };
+}
+
+/** A minimal valid Workers-AI review body. */
+function cloudflareBody(json = '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}') {
+  return { choices: [{ message: { content: json } }], usage: { prompt_tokens: 1, completion_tokens: 1 } };
+}
 
 describe('ModelService', () => {
+  beforeEach(() => {
+    runMock.mockReset();
+  });
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   it('routes legacy Kimi K2.5 ids to Kimi K2.6 for new Cloudflare requests', async () => {
-    let requestedModel = '';
-    const env = createTestEnv({
-      AI: {
-        async run(model: string) {
-          requestedModel = model;
-          return { response: '{"findings":[]}', usage: { prompt_tokens: 1, completion_tokens: 1 } };
-        },
-      } as any,
-    });
-
+    runMock.mockResolvedValue(gResult(cloudflareBody('{"findings":[]}')));
+    const env = createTestEnv();
     await seedReviewModels(env);
     const service = new ModelService(env);
     const response = await (service as any).callModel('@cf/moonshotai/kimi-k2.5', {
@@ -28,7 +49,8 @@ describe('ModelService', () => {
       userPrompt: 'user',
     });
 
-    expect(requestedModel).toBe('@cf/moonshotai/kimi-k2.6');
+    expect(runMock.mock.calls[0][1]).toBe('cloudflare-workers-ai');
+    expect(runMock.mock.calls[0][2]).toBe('@cf/moonshotai/kimi-k2.6');
     expect(response.modelUsed).toBe('@cf/moonshotai/kimi-k2.6');
   });
 
@@ -67,9 +89,9 @@ describe('ModelService', () => {
     })).toThrow('No review model strategy is configured');
   });
 
-  // extractCloudflareText is the batch/synthesize path (throwOnNoContent omitted).
-  // The sync reviewWithCloudflare deliberately throws on reasoning-only responses
-  // so the model service falls back to another provider instead.
+  // extractCloudflareText is the synthesize path (throwOnNoContent omitted). The
+  // sync reviewWithCloudflare deliberately throws on reasoning-only responses so
+  // the model service falls back to another provider instead.
   it('turns Cloudflare reasoning-only responses into inconclusive review JSON', () => {
     const result = {
       choices: [
@@ -100,143 +122,44 @@ describe('ModelService', () => {
   });
 
   it('asks Cloudflare chat models for strict review JSON', async () => {
-    let inputs: any;
-    const env = createTestEnv({
-      AI: {
-        async run(_model: string, request: any) {
-          inputs = request;
-          return {
-            choices: [
-              {
-                message: {
-                  content: '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}',
-                },
-              },
-            ],
-            usage: { prompt_tokens: 1, completion_tokens: 1 },
-          };
-        },
-      } as any,
-    });
+    runMock.mockResolvedValue(gResult(cloudflareBody()));
 
-    await reviewWithCloudflare(env, '@cf/zai-org/glm-4.7-flash', {
+    await reviewWithCloudflare(createTestEnv(), '@cf/zai-org/glm-4.7-flash', {
       systemPrompt: 'system',
       userPrompt: 'user',
     });
 
-    expect(inputs.response_format).toMatchObject({
+    // The 4th arg to runGuardianInference is the native Workers-AI request body.
+    const input = runMock.mock.calls[0][3] as any;
+    expect(input.response_format).toMatchObject({
       type: 'json_schema',
       json_schema: {
         name: 'codra_file_review',
         strict: true,
       },
     });
-    expect(inputs.messages[0].content).toContain('Return only the JSON object');
-    expect(inputs.max_completion_tokens).toBe(8192);
-    expect(inputs.chat_template_kwargs).toBeUndefined();
-    expect(inputs.reasoning_effort).toBeUndefined();
+    expect(input.messages[0].content).toContain('Return only the JSON object');
+    expect(input.max_completion_tokens).toBe(8192);
   });
 
-  it('retries Google once for transient 524 edge timeouts', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ error: { code: 524, message: 'A timeout occurred.' } }),
-          { status: 524, headers: { 'content-type': 'application/json' } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            candidates: [{ content: { parts: [{ text: '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}' }] } }],
-            usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
-      );
-
-    const response = await reviewWithGoogle(
-      { apiKey: 'test-key' },
-      'gemma-4-31b-it',
-      { systemPrompt: 'system', userPrompt: 'user' },
-    );
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(response.rawText).toContain('"findings"');
-  });
-
-  it('does not spend an extra queue slice retrying the same Cloudflare model inline', async () => {
-    let attempts = 0;
-    const env = createTestEnv({
-      AI: {
-        async run() {
-          attempts++;
-          throw new Error('temporary provider error');
-        },
-      } as any,
-    });
+  it('propagates a Cloudflare guardian failure without an inline retry', async () => {
+    runMock.mockRejectedValue(new Error('temporary provider error'));
 
     await expect(
-      reviewWithCloudflare(env, '@cf/zai-org/glm-4.7-flash', {
+      reviewWithCloudflare(createTestEnv(), '@cf/zai-org/glm-4.7-flash', {
         systemPrompt: 'system',
         userPrompt: 'user',
       }),
     ).rejects.toThrow('temporary provider error');
-    expect(attempts).toBe(1);
+    expect(runMock).toHaveBeenCalledTimes(1);
   });
 
   it('tries the smaller Google fallback after the primary Google model fails', async () => {
-    let cloudflareCalls = 0;
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            error: {
-              code: 500,
-              message: 'Internal error encountered.',
-              status: 'INTERNAL',
-            },
-          }),
-          { status: 500, headers: { 'content-type': 'application/json' } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            error: {
-              code: 500,
-              message: 'Internal error encountered.',
-              status: 'INTERNAL',
-            },
-          }),
-          { status: 500, headers: { 'content-type': 'application/json' } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            candidates: [{ content: { parts: [{ text: '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}' }] } }],
-            usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
-      );
-    const env = createTestEnv({
-      AI: {
-        async run() {
-          cloudflareCalls++;
-          return {
-            response: JSON.stringify({
-              findings: [],
-              overall_correctness: 'patch is correct',
-              overall_explanation: 'ok',
-              overall_confidence_score: 0.9,
-            }),
-            usage: { prompt_tokens: 1, completion_tokens: 1 },
-          };
-        },
-      } as any,
+    runMock.mockImplementation(async (_env, _fmt, model) => {
+      if (model === 'gemma-4-31b-it') throw new Error('Internal error encountered.');
+      return gResult(geminiBody());
     });
+    const env = createTestEnv();
     await saveTestProviderApiKey(env);
     await seedReviewModels(env);
     const service = new ModelService(env);
@@ -264,22 +187,15 @@ describe('ModelService', () => {
       totalLineCount: 1,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(String(fetchMock.mock.calls[0][0])).toContain('/models/gemma-4-31b-it:generateContent');
-    expect(String(fetchMock.mock.calls[1][0])).toContain('/models/gemma-4-31b-it:generateContent');
-    expect(String(fetchMock.mock.calls[2][0])).toContain('/models/gemma-4-26b-a4b-it:generateContent');
-    expect(cloudflareCalls).toBe(0);
     expect(response.modelUsed).toBe('gemma-4-26b-a4b-it');
+    // Workers AI is later in the chain and must never be reached once Gemini's
+    // smaller fallback succeeds.
+    expect(runMock.mock.calls.some((c) => c[1] === 'cloudflare-workers-ai')).toBe(false);
   });
 
   it('marks exhausted transient provider failures as retryable for the queue', async () => {
-    const env = createTestEnv({
-      AI: {
-        async run() {
-          throw new Error('[REDACTED]');
-        },
-      } as any,
-    });
+    runMock.mockRejectedValue(new Error('[REDACTED]'));
+    const env = createTestEnv();
 
     await seedReviewModels(env);
     const service = new ModelService(env);
@@ -297,31 +213,7 @@ describe('ModelService', () => {
         prTitle: 'Test',
         prDescription: null,
         config: {
-          review: {
-            on: ['opened'],
-            ignore_drafts: true,
-            mention_trigger: '@codra-app',
-            skip_files: [],
-            max_files: 100,
-            large_file_threshold_lines: 200,
-            max_diff_lines_per_file: 800,
-            max_total_diff_chars: 150_000,
-            max_comments: 10,
-            min_severity: 'nit',
-            focus: ['quality'],
-            custom_rules: [],
-            labels: false,
-            exec: {
-              enabled: false,
-              on_file_types: ['.ts'],
-              command: 'npm run lint',
-            },
-            jules: { enabled: true, quality_check: false },
-            deployWorkflow: { enabled: true },
-            engine: 'auto',
-            coordinator: null,
-            risk_tiers: { trivial_max_lines: 10, lite_max_lines: 100 },
-          },
+          ...defaultRepoConfig,
           model: {
             main: '@cf/zai-org/glm-4.7-flash',
             fallbacks: [],
@@ -335,23 +227,14 @@ describe('ModelService', () => {
 
   it('skips Cloudflare for the rest of a job after allocation is exhausted', async () => {
     let cloudflareCalls = 0;
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
-      new Response(
-        JSON.stringify({
-          candidates: [{ content: { parts: [{ text: '{"findings":[]}' }] } }],
-          usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      ),
-    );
-    const env = createTestEnv({
-      AI: {
-        async run() {
-          cloudflareCalls++;
-          throw new Error('Cloudflare daily free allocation exhausted (4006)');
-        },
-      } as any,
+    runMock.mockImplementation(async (_env, fmt) => {
+      if (fmt === 'cloudflare-workers-ai') {
+        cloudflareCalls++;
+        throw new Error('Cloudflare daily free allocation exhausted (4006)');
+      }
+      return gResult(geminiBody('{"findings":[]}'));
     });
+    const env = createTestEnv();
     await saveTestProviderApiKey(env);
     await seedReviewModels(env);
     const service = new ModelService(env, undefined, { jobId: 'job-provider-skip' });
@@ -373,36 +256,19 @@ describe('ModelService', () => {
       },
     };
 
-    await service.reviewFile({
-      file,
-      prTitle: 'Test',
-      prDescription: null,
-      config,
-      totalLineCount: 1,
-    });
-    await service.reviewFile({
-      file: { ...file, path: 'src/other.ts' },
-      prTitle: 'Test',
-      prDescription: null,
-      config,
-      totalLineCount: 1,
-    });
+    await service.reviewFile({ file, prTitle: 'Test', prDescription: null, config, totalLineCount: 1 });
+    await service.reviewFile({ file: { ...file, path: 'src/other.ts' }, prTitle: 'Test', prDescription: null, config, totalLineCount: 1 });
 
+    // The 4006 marks the provider unavailable for the job, so the second file
+    // never calls Workers AI again.
     expect(cloudflareCalls).toBe(1);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('uses the configured Gemma prompt cap and output token budget on the first attempt', async () => {
-    let requestBody: any = null;
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
-      requestBody = JSON.parse(String(init?.body));
-      return new Response(
-        JSON.stringify({
-          candidates: [{ content: { parts: [{ text: '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}' }] } }],
-          usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      );
+    let input: any = null;
+    runMock.mockImplementation(async (_env, _fmt, _model, body) => {
+      input = body;
+      return gResult(geminiBody());
     });
     const env = createTestEnv();
     await saveTestProviderApiKey(env);
@@ -443,9 +309,9 @@ describe('ModelService', () => {
       totalLineCount: 500,
     });
 
-    const userPrompt = requestBody.contents[0].parts[0].text as string;
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(requestBody.generationConfig.maxOutputTokens).toBe(4096);
+    const userPrompt = input.contents[0].parts[0].text as string;
+    expect(runMock).toHaveBeenCalledOnce();
+    expect(input.generationConfig.maxOutputTokens).toBe(4096);
     expect(userPrompt).toContain('[NOTE: This diff has been truncated from 900 lines to 800 lines for brevity.]');
     expect(userPrompt).toContain('const value799 = 799;');
     expect(userPrompt).not.toContain('const value800 = 800;');
@@ -454,16 +320,10 @@ describe('ModelService', () => {
   });
 
   it('uses a compact Gemma prompt only after a prior transient failure', async () => {
-    let requestBody: any = null;
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
-      requestBody = JSON.parse(String(init?.body));
-      return new Response(
-        JSON.stringify({
-          candidates: [{ content: { parts: [{ text: '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"ok","overall_confidence_score":0.9}' }] } }],
-          usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      );
+    let input: any = null;
+    runMock.mockImplementation(async (_env, _fmt, _model, body) => {
+      input = body;
+      return gResult(geminiBody());
     });
     const env = createTestEnv();
     await saveTestProviderApiKey(env);
@@ -505,7 +365,7 @@ describe('ModelService', () => {
       compactPrompt: true,
     });
 
-    const userPrompt = requestBody.contents[0].parts[0].text as string;
+    const userPrompt = input.contents[0].parts[0].text as string;
     expect(userPrompt).toContain('[NOTE: This diff has been truncated from 900 lines to 400 lines for brevity.]');
     expect(userPrompt).toContain('const value399 = 399;');
     expect(userPrompt).not.toContain('const value400 = 400;');

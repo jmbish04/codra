@@ -228,6 +228,23 @@ export async function handleGitHubWebhook(c: Context<AppEnv>) {
           const { markPrReadyByUrl } = await import('@server/db/jules-orchestration');
           c.executionCtx.waitUntil(markPrReadyByUrl(c.env, prUrl).catch(() => false));
         }
+
+        // Always-on core-guardian compliance check. Runs on every opened/updated
+        // PR REGARDLESS of the repo's review settings — an opted-out repo must
+        // still be protected from a PR that hammers an AI provider with no budget
+        // cap. Fire-and-forget so it never delays or blocks the webhook.
+        if (['opened', 'synchronize', 'reopened', 'ready_for_review'].includes(prPayload.action)) {
+          const { runGuardianComplianceCheck } = await import('@server/core/guardian-compliance');
+          const complianceGh = new GitHubClient(c.env, installationId);
+          c.executionCtx.waitUntil(
+            runGuardianComplianceCheck(c.env, complianceGh, {
+              owner: payload.repository.owner.login,
+              repo: payload.repository.name,
+              prNumber: prPayload.pull_request.number,
+            }).catch((err) => console.error('Guardian-compliance check failed:', err)),
+          );
+        }
+
         if (prPayload.action === 'closed') {
           const prNumber = prPayload.pull_request.number;
           const merged = prPayload.pull_request.merged === true;

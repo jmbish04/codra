@@ -1,15 +1,12 @@
 import { logger } from '@server/core/logger';
-import { TimeoutError } from '@server/core/timeout';
+import { runGuardianInference } from '@server/core/guardian-ai';
 import { ProviderRequestError, type ModelResponse, type StructuredSchema } from './types';
 import { REVIEW_SCHEMA } from './schemas';
 
-/** Max wall-clock time allowed for a single Workers-AI call. */
-const CLOUDFLARE_TIMEOUT_MS = 180_000;
-const CLOUDFLARE_MAX_RETRIES = 0;
+/** Max output tokens for a single Workers-AI review. */
 const CLOUDFLARE_MAX_OUTPUT_TOKENS = 8192;
 
 type UnknownRecord = Record<string, unknown>;
-
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null;
@@ -35,12 +32,6 @@ function getNumber(value: unknown, key: string) {
   if (!isRecord(value)) return null;
   const child = value[key];
   return typeof child === 'number' ? child : null;
-}
-
-function isLocalWorkersAiBindingError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  const normalized = message.toLowerCase();
-  return normalized.includes('binding ai') && normalized.includes('run remotely');
 }
 
 function synthesizeInconclusiveReview(model: string, reason: string): string {
@@ -102,8 +93,7 @@ export function extractCloudflareText(
 
   // On the sync review path we'd rather fall back to another provider (e.g.
   // Gemini) than accept an inconclusive review. Throw a retryable error so the
-  // model service moves to the next model in the chain. The batch path keeps
-  // synthesizing (it can't fall back per-file mid-batch).
+  // model service moves to the next model in the chain.
   if (opts.throwOnNoContent) {
     throw new ProviderRequestError(model, 502, `returned no parseable review content (${reason})`, true);
   }
@@ -119,7 +109,7 @@ export function extractCloudflareUsage(result: unknown) {
   };
 }
 
-/** Chat payload for a single file review. Shared by the sync and batch paths. */
+/** Chat payload for a single Workers-AI file review. */
 export function buildCloudflareReviewRequest(
   input: { systemPrompt: string; userPrompt: string },
   schema: StructuredSchema = REVIEW_SCHEMA,
@@ -147,86 +137,42 @@ export function buildCloudflareReviewRequest(
 }
 
 /**
- * Routes Workers AI calls through AI Gateway so usage shows up alongside the
- * other providers. Without this the AI binding bypasses the gateway entirely.
+ * Runs a Workers-AI (`@cf/...`) review through core-guardian.
+ *
+ * Codra no longer holds a Workers AI (`env.AI`) binding — that neuron spend is
+ * the aggressive-billing exposure we removed. Guardian owns the AI binding and
+ * proxies the call via its `workers-ai` gateway provider so the neuron spend is
+ * attributed to the `codra` project and gated by the shared circuit breaker.
+ * Request/response shapes are unchanged; only the transport moved.
  */
-export function cloudflareAiOptions(env: Pick<Env, 'AI_GATEWAY_ID'>) {
-  return env.AI_GATEWAY_ID ? { gateway: { id: env.AI_GATEWAY_ID } } : {};
-}
-
 export async function reviewWithCloudflare(
-  env: Pick<Env, 'AI' | 'AI_GATEWAY_ID'>,
+  env: Env,
   model: string,
   input: { systemPrompt: string; userPrompt: string },
   tracker?: { incrementSubrequests(count?: number): void },
-  providerName = 'Cloudflare',
+  providerName = 'workers-ai',
   schema: StructuredSchema = REVIEW_SCHEMA,
 ): Promise<ModelResponse> {
-  const maxRetries = CLOUDFLARE_MAX_RETRIES;
-  let lastError: unknown;
+  logger.info(`Calling Cloudflare Workers-AI model via core-guardian: ${model}`);
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
+  const result = await runGuardianInference(
+    env,
+    'cloudflare-workers-ai',
+    model,
+    buildCloudflareReviewRequest(input, schema),
+    { tracker },
+  );
 
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new TimeoutError(`Cloudflare (${model})`, CLOUDFLARE_TIMEOUT_MS)), CLOUDFLARE_TIMEOUT_MS);
-    });
+  // Throw (→ fall back to the next model, e.g. Gemini) rather than accept a
+  // reasoning-only / empty Workers-AI response as an inconclusive review.
+  const rawText = extractCloudflareText(result.body, model, { throwOnNoContent: true });
+  const usage = extractCloudflareUsage(result.body);
 
-    try {
-      if (tracker) tracker.incrementSubrequests(1);
-      if (attempt > 0) {
-        const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
-        logger.info(`Retrying Cloudflare request (attempt ${attempt}/${maxRetries}) in ${Math.round(delay)}ms`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-
-      logger.info(`Calling Cloudflare model: ${model}`);
-      const startTime = Date.now();
-      const result = await Promise.race([
-        env.AI.run(model as any, buildCloudflareReviewRequest(input, schema), cloudflareAiOptions(env)),
-        timeoutPromise,
-      ]);
-      const durationMs = Date.now() - startTime;
-      logger.info(`AI model ${model} responded in ${durationMs}ms`);
-
-      // Throw (→ fall back to the next model, e.g. Gemini) rather than accept a
-      // reasoning-only / empty Cloudflare response as an inconclusive review.
-      const rawText = extractCloudflareText(result, model, { throwOnNoContent: true });
-      const usage = extractCloudflareUsage(result);
-
-      return {
-        rawText,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        modelUsed: model,
-        provider: providerName,
-      };
-    } catch (error) {
-      lastError = error;
-      const errorMsg = error instanceof Error ? error.message : String(error);
-
-      if (isLocalWorkersAiBindingError(error)) {
-        const message = 'Cloudflare Workers AI is not available in local Wrangler. Run with remote bindings or deploy the Worker to test Cloudflare models.';
-        logger.warn(message, { model });
-        throw new ProviderRequestError(providerName, 400, message);
-      }
-
-      logger.error(`Cloudflare request failed (attempt ${attempt}/${maxRetries})`, { error: errorMsg });
-
-      // If we've used up our neuron quota, don't retry - it's a persistent error for this account/day
-      if (errorMsg.includes('4006') || errorMsg.includes('daily free allocation')) {
-        throw error;
-      }
-
-      const isTimeout = error instanceof TimeoutError;
-      if ((isTimeout || attempt < maxRetries) && attempt < maxRetries) {
-        continue;
-      }
-      throw error;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  throw lastError;
+  return {
+    rawText,
+    inputTokens: result.tokensIn || usage.inputTokens,
+    outputTokens: result.tokensOut || usage.outputTokens,
+    modelUsed: model,
+    provider: providerName,
+  };
 }

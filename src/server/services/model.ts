@@ -1,12 +1,6 @@
 import { reviewWithGoogle } from '../models/google';
 import { reviewWithCloudflare } from '../models/cloudflare';
-import {
-  batchFitsPayloadLimit,
-  isBatchCapableCloudflareModel,
-  pollCloudflareReviewBatch,
-  submitCloudflareReviewBatch,
-  type BatchReviewItem,
-} from '../models/cloudflare-batch';
+import type { BatchReviewItem, BatchPollResult } from '../models/cloudflare-batch';
 import { reviewWithOpenAI } from '../models/openai';
 import { reviewWithAnthropic } from '../models/anthropic';
 import { buildFileReviewPrompts } from '../prompts/file-review';
@@ -21,10 +15,7 @@ import { CHANGELOG_SCHEMA, REVIEW_SCHEMA } from '../models/schemas';
 import { logger } from '../core/logger';
 import { normalizeModelId } from '@shared/schema';
 import { getResolvedModelConfig, type ResolvedModelConfig } from '@server/db/model-configs';
-import { decryptLlmApiKey, resolveLlmApiKey } from '@server/core/llm-crypto';
 import { getMatchingBestPractices, convertPlateToMarkdown } from '@server/db/best-practices';
-import { getSecretStoreBinding } from '@server/utils/secrets';
-import { logApiUsage } from '@server/db/api-usage';
 
 const PROVIDER_UNAVAILABLE_TTL_SECONDS = 24 * 60 * 60;
 /**
@@ -45,25 +36,11 @@ const MODEL_ALIASES: Record<string, string> = {
   'gemma-4-26b': 'gemma-4-26b-a4b-it',
 };
 
-export class RetryableModelError extends Error {
-  readonly retryable = true;
-
-  constructor(message: string, cause?: unknown) {
-    super(message);
-    this.name = 'RetryableModelError';
-    if (cause !== undefined) {
-      Object.defineProperty(this, 'cause', {
-        value: cause,
-        writable: true,
-        configurable: true,
-      });
-    }
-  }
-}
-
-export function isRetryableModelError(error: unknown) {
-  return Boolean(error && typeof error === 'object' && 'retryable' in error && error.retryable === true);
-}
+// RetryableModelError / isRetryableModelError moved to `model-errors.ts` to
+// break an import cycle (model → provider modules → guardian-ai → model).
+// Re-exported here so existing importers keep working.
+export { RetryableModelError, isRetryableModelError } from './model-errors';
+import { RetryableModelError, isRetryableModelError } from './model-errors';
 
 function normalizeModel(model: string) {
   return normalizeModelId(MODEL_ALIASES[model] ?? model);
@@ -205,14 +182,17 @@ export class ModelService {
     return resolved;
   }
 
-  private async resolveApiKey(config: ResolvedModelConfig) {
-    const key = await resolveLlmApiKey(this.env, config.apiFormat, config.encryptedApiKey);
-    if (!key) {
-      throw new Error(`Provider ${config.providerName} does not have an API key configured.`);
-    }
-    return key;
-  }
-
+  /**
+   * Dispatches one structured model call through core-guardian.
+   *
+   * Every provider format routes through the guardian AI router now (see
+   * `src/server/core/guardian-ai.ts`) — Codra no longer holds provider API keys
+   * or an `env.AI` binding on the review hot path, and it no longer resolves an
+   * AI-Gateway base URL itself. Guardian injects the key, meters the spend
+   * against the `codra` project budget, and is the ledger of record, so there is
+   * no per-call D1 `logApiUsage` write here any more (that spend is captured by
+   * the AI-Gateway usage sync + guardian's own accounting).
+   */
   private async callResolvedModel(
     config: ResolvedModelConfig,
     input: { systemPrompt: string; userPrompt: string },
@@ -223,69 +203,15 @@ export class ModelService {
       return reviewWithCloudflare(this.env, config.modelName, input, this.tracker, config.providerName, schema);
     }
 
-    let resolvedBaseUrl = config.baseUrl;
-    if (this.env.AI_GATEWAY_ID) {
-      try {
-        const accountId = await getSecretStoreBinding(this.env, 'CF_ACCOUNT_ID');
-        resolvedBaseUrl = `https://gateway.ai.cloudflare.com/v1/${accountId}/${this.env.AI_GATEWAY_ID}`;
-        if (accountId) {
-          if (config.apiFormat === 'openai') {
-            resolvedBaseUrl = `${resolvedBaseUrl}/openai`;
-          } else if (config.apiFormat === 'gemini') {
-            resolvedBaseUrl = `${resolvedBaseUrl}/google-ai-studio`;
-          } else if (config.apiFormat === 'anthropic') {
-            resolvedBaseUrl = `${resolvedBaseUrl}/anthropic`;
-          }
-        }
-      } catch (err) {
-        logger.warn('Failed to resolve CF_ACCOUNT_ID for AI Gateway routing', err);
-      }
-    }
-
-    let result: ModelResponse;
-
     if (config.apiFormat === 'gemini') {
-      result = await reviewWithGoogle(
-        { apiKey: await this.resolveApiKey(config), baseUrl: resolvedBaseUrl, providerName: config.providerName },
-        config.modelName,
-        input,
-        this.tracker,
-        schema,
-      );
-    } else if (config.apiFormat === 'openai') {
-      result = await reviewWithOpenAI(
-        {
-          apiKey: await this.resolveApiKey(config),
-          baseUrl: resolvedBaseUrl || 'https://api.openai.com/v1',
-          providerName: config.providerName,
-        },
-        config.modelName,
-        input,
-        this.tracker,
-        schema,
-      );
-    } else {
-      result = await reviewWithAnthropic(
-        { apiKey: await this.resolveApiKey(config), baseUrl: resolvedBaseUrl, providerName: config.providerName },
-        config.modelName,
-        input,
-        this.tracker,
-        schema,
-        { system: cacheSystem },
-      );
+      return reviewWithGoogle(this.env, config.modelName, input, this.tracker, schema);
     }
 
-    // Log the API usage locally in the database
-    await logApiUsage(this.env, {
-      provider: config.providerName,
-      model: config.modelName,
-      promptTokens: result.inputTokens || 0,
-      completionTokens: result.outputTokens || 0,
-      source: 'local',
-      gatewayId: this.env.AI_GATEWAY_ID || '',
-    });
+    if (config.apiFormat === 'openai') {
+      return reviewWithOpenAI(this.env, config.modelName, input, this.tracker, schema);
+    }
 
-    return result;
+    return reviewWithAnthropic(this.env, config.modelName, input, this.tracker, schema, { system: cacheSystem });
   }
 
   async callModel(
@@ -301,53 +227,33 @@ export class ModelService {
    * the chain's primary model cannot be batched (callers then use the
    * synchronous chunked path).
    */
-  async resolveBatchModel(config: RepoConfig, totalLineCount: number): Promise<string | null> {
-    const { primary } = this.selectModel({ totalLineCount, config });
-    if (!isBatchCapableCloudflareModel(primary)) return null;
-
-    try {
-      const resolved = await this.resolveModel(primary);
-      if (resolved.apiFormat !== 'cloudflare-workers-ai') return null;
-      if (await this.isProviderUnavailable(resolved.providerId)) return null;
-      return primary;
-    } catch {
-      return null;
-    }
+  async resolveBatchModel(_config: RepoConfig, _totalLineCount: number): Promise<string | null> {
+    // ponytail: the Workers AI async Batch API requires a local `env.AI`
+    // binding, which Codra dropped when it moved all inference to core-guardian
+    // (guardian exposes no batch proxy). Returning null makes every review take
+    // the proven synchronous fan-out path — the already-designed fallback.
+    // Upgrade path: add a batch proxy to core-guardian, then route it here.
+    return null;
   }
 
   /**
-   * Queues every file review as one Workers AI batch. Returns null when the
-   * payload exceeds the 10 MB cap so the caller can fall back to sync review.
+   * Batch submit is disabled post-guardian-migration (see {@link resolveBatchModel}).
+   * Unreachable because `resolveBatchModel` always returns null; kept as a stub
+   * so the review pipeline's batch branch still type-checks. Returns null →
+   * caller falls back to synchronous review.
    */
-  async submitReviewBatch(model: string, items: BatchReviewItem[]): Promise<string | null> {
-    const { fits, bytes } = batchFitsPayloadLimit(items);
-    if (!fits) {
-      logger.warn(`Batch payload of ${bytes} bytes exceeds the Workers AI limit; falling back to synchronous review`, {
-        model,
-        requests: items.length,
-      });
-      return null;
-    }
-
-    return submitCloudflareReviewBatch(this.env, model, items);
+  async submitReviewBatch(_model: string, _items: BatchReviewItem[]): Promise<string | null> {
+    return null;
   }
 
-  async pollReviewBatch(model: string, requestId: string) {
-    const result = await pollCloudflareReviewBatch(this.env, model, requestId);
-
-    if (result.status === 'complete') {
-      this.tracker?.record(model, result.usage.inputTokens, result.usage.outputTokens);
-      await logApiUsage(this.env, {
-        provider: 'Cloudflare',
-        model,
-        promptTokens: result.usage.inputTokens,
-        completionTokens: result.usage.outputTokens,
-        source: 'local',
-        gatewayId: this.env.AI_GATEWAY_ID || '',
-      });
-    }
-
-    return result;
+  /**
+   * Polls a legacy in-flight Workers AI batch. Only reachable for a job that
+   * submitted a batch BEFORE this deploy dropped `env.AI`; there is no longer a
+   * binding to poll, so it fails fast and non-retryably. The review pipeline's
+   * catch abandons the stranded batch and re-reviews the files synchronously.
+   */
+  async pollReviewBatch(_model: string, _requestId: string): Promise<BatchPollResult> {
+    throw new Error('Workers AI batch polling is disabled after the core-guardian migration; falling back to synchronous review.');
   }
 
   /**

@@ -177,3 +177,26 @@ export async function getApiUsageStats(env: { DB: D1Database }) {
   const db = getDb(env);
   return db.select().from(apiUsage).orderBy(sql`${apiUsage.created_at} DESC`);
 }
+
+/** Default api_usage retention. Older rows are pruned on the maintenance cron. */
+export const API_USAGE_RETENTION_DAYS = 90;
+
+/**
+ * Deletes `api_usage` rows older than `retentionDays`. Called from the scheduled
+ * cron to keep this table's D1 footprint flat: guardian is the ledger of record
+ * for AI spend now, so Codra only needs a rolling recent window locally for the
+ * stats dashboard. Best-effort — a prune failure never breaks the cron.
+ */
+export async function pruneApiUsage(
+  env: { DB: D1Database },
+  retentionDays = API_USAGE_RETENTION_DAYS,
+): Promise<void> {
+  const db = getDb(env);
+  try {
+    await db
+      .delete(apiUsage)
+      .where(sql`${apiUsage.created_at} < datetime('now', ${'-' + retentionDays + ' days'})`);
+  } catch (err) {
+    logger.error('Failed to prune old api_usage rows', err);
+  }
+}

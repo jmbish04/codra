@@ -9,9 +9,11 @@ import { createTestEnv } from './helpers';
 const KEY = 'test-webhook-secret';
 const authed = { 'X-API-Key': KEY, 'content-type': 'application/json' } as const;
 
-// The test env AI stub returns a non-verdict body, so parseReviewVerdict defaults
-// to not-satisfied — i.e. codra does NOT approve unless a real Kimi says so. That
-// makes the reject + circuit-breaker paths deterministic to test.
+// Merge review runs its Kimi judge through core-guardian (createGuardianWorkersAI
+// → the GUARDIAN service binding). The test env's GUARDIAN.fetch stub returns a
+// non-verdict body, so parseReviewVerdict defaults to not-satisfied — codra does
+// NOT approve unless a real Kimi says so. That keeps the reject + circuit-breaker
+// paths deterministic.
 describe('merge-review gate', () => {
   let env: Env;
   beforeEach(() => { env = createTestEnv(); });
