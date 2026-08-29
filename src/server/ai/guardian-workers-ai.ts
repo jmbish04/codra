@@ -54,8 +54,10 @@ export function createGuardianWorkersAI(env: Pick<Env, 'AI_GATEWAY_TOKEN' | 'GUA
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
     const model = modelFromRunUrl(url);
 
-    // The provider serializes the native Workers-AI inputs as the request body.
-    const workersAiInput = init?.body ? JSON.parse(String(init.body)) : {};
+    // The provider serializes the native Workers-AI inputs as a JSON string body.
+    // Guard the parse: a future AI-SDK that streams the request body would make
+    // String(body) === "[object ReadableStream]" and throw opaquely here.
+    const workersAiInput = typeof init?.body === 'string' ? JSON.parse(init.body) : {};
     const stream = workersAiInput?.stream === true;
 
     const aiToken = await getSecretStoreBinding(env, 'AI_GATEWAY_TOKEN');

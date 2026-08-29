@@ -104,6 +104,10 @@ async function getGuardianClient(env: Env): Promise<GuardianClient> {
     });
   })();
 
+  // Never cache a REJECTED build: a transient Secret Store `.get()` failure must
+  // not poison this isolate into failing every subsequent inference. Evict on
+  // rejection so the next call rebuilds.
+  build.catch(() => clientCache.delete(env as unknown as object));
   clientCache.set(env as unknown as object, build);
   return build;
 }
@@ -146,11 +150,13 @@ export async function runGuardianInference(
   opts: { importance?: Importance; tracker?: { incrementSubrequests(count?: number): void } } = {},
 ): Promise<GuardianInferenceResult> {
   const provider = guardianProviderSlug(apiFormat);
-  const client = await getGuardianClient(env);
   opts.tracker?.incrementSubrequests(1);
 
   let result: RunResult;
   try {
+    // Client build (secret resolution) is inside the try so a build failure also
+    // routes through translateGuardianError instead of propagating raw.
+    const client = await getGuardianClient(env);
     result = await client.ai.run({
       provider,
       model,
@@ -164,10 +170,15 @@ export async function runGuardianInference(
     translateGuardianError(err, provider, model);
   }
 
-  // A non-2xx upstream status is surfaced by guardian in `status`; treat it as a
-  // provider failure so the chain can fall back.
-  if (result.status && (result.status >= 500 || result.status === 408 || result.status === 429)) {
-    throw new RetryableModelError(`core-guardian upstream ${result.status} for ${provider}/${model}`);
+  // A non-2xx upstream status is surfaced by guardian in `status`. 5xx/408/429
+  // are transient → retry down the chain; other 4xx (bad request / auth) are
+  // permanent → fail non-retryably rather than burning fallback attempts on a
+  // request every model will reject identically.
+  if (result.status && result.status >= 400) {
+    if (result.status >= 500 || result.status === 408 || result.status === 429) {
+      throw new RetryableModelError(`core-guardian upstream ${result.status} for ${provider}/${model}`);
+    }
+    throw new Error(`core-guardian upstream ${result.status} for ${provider}/${model}`);
   }
 
   return {

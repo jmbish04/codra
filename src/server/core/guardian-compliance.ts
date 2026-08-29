@@ -51,9 +51,15 @@ const AI_INFERENCE_SIGNATURES: RegExp[] = [
   /huggingface|hf\.co\/models/i, /bedrock-runtime/i, /aiplatform\.googleapis\.com/i,
 ];
 
-/** Signatures that indicate the inference is already routed through core-guardian. */
+/**
+ * STRUCTURAL signatures that a line actually WIRES inference through guardian —
+ * these clear a file's provider findings. A bare `core-guardian` mention in a
+ * comment or string is deliberately NOT here: this is a financial guardrail, so
+ * a `// core-guardian` comment next to a direct `new OpenAI()` must not defeat
+ * it. (A weak mention neither flags nor clears.)
+ */
 const GUARDIAN_SIGNATURES: RegExp[] = [
-  /core-guardian/i, /guardian\.hacolby/i, /ai-router\/run/i, /GuardianClient/, /runGuardianInference/, /createGuardianWorkersAI/, /guardian\.ai\.run/i,
+  /GuardianClient/, /runGuardianInference/, /createGuardianWorkersAI/, /ai-router\/run/i, /guardian\.ai\.run/i, /guardian-ai['"]/i,
 ];
 
 /** Signatures that indicate the target is a LOCAL model service, not a paid API. */
@@ -87,9 +93,11 @@ export interface ComplianceScan {
  */
 export function scanDiffForCompliance(rawDiff: string): ComplianceScan {
   const files = parseUnifiedDiff(rawDiff);
-  const findings: ComplianceFinding[] = [];
   let guardianPresent = false;
-  const seenFiles = new Set<string>();
+  // Per-file: the first non-guardian inference hit, and whether the file also
+  // wires guardian. Guardian routing clears findings ONLY within the same file,
+  // so a guardian helper in file A can't launder a raw provider call in file B.
+  const perFile = new Map<string, { finding: ComplianceFinding; routed: boolean }>();
 
   for (const file of files) {
     if (SKIP_PATH.test(file.path) || GUARDIAN_SELF_PATH.test(file.path)) continue;
@@ -98,34 +106,37 @@ export function scanDiffForCompliance(rawDiff: string): ComplianceScan {
       for (const line of hunk.lines) {
         if (line.kind !== 'add') continue;
         const content = line.content;
+        const entry = perFile.get(file.path);
 
         if (matchesAny(content, GUARDIAN_SIGNATURES)) {
           guardianPresent = true;
-          continue; // A guardian-routed line is compliant, not a finding.
+          if (entry) entry.routed = true;
+          else perFile.set(file.path, { finding: null as unknown as ComplianceFinding, routed: true });
+          continue;
         }
 
         // A local model service (Ollama, LM Studio, …) is AI inference too — its
         // own signature qualifies even without a hosted-provider signature.
         const isLocal = matchesAny(content, LOCAL_SERVICE_SIGNATURES);
-        if ((matchesAny(content, AI_INFERENCE_SIGNATURES) || isLocal) && !seenFiles.has(file.path)) {
-          seenFiles.add(file.path);
-          findings.push({
-            file: file.path,
-            snippet: content.trim().slice(0, 160),
-            local: isLocal,
-          });
+        if ((matchesAny(content, AI_INFERENCE_SIGNATURES) || isLocal) && (!entry || !entry.finding)) {
+          const finding: ComplianceFinding = { file: file.path, snippet: content.trim().slice(0, 160), local: isLocal };
+          if (entry) entry.finding = finding;
+          else perFile.set(file.path, { finding, routed: false });
         }
       }
     }
   }
 
-  // A guardian-routed line anywhere in the PR clears the whole PR: the author is
-  // clearly wiring guardian in, and per-line precision would nag on refactors.
-  const effectiveFindings = guardianPresent ? [] : findings;
+  // Flag a file only when it has a provider/local hit AND does not route through
+  // guardian in that same file.
+  const findings = [...perFile.values()]
+    .filter((e) => e.finding && !e.routed)
+    .map((e) => e.finding);
+
   return {
-    findings: effectiveFindings,
+    findings,
     guardianPresent,
-    anyLocal: effectiveFindings.some((f) => f.local),
+    anyLocal: findings.some((f) => f.local),
   };
 }
 
@@ -222,9 +233,15 @@ export async function runGuardianComplianceCheck(
       return { flagged: false, skipped: scan.guardianPresent ? 'guardian_present' : 'no_ai_inference' };
     }
 
-    await gh.createIssueComment(owner, repo, prNumber, buildComplianceComment(scan));
-    // Set the marker only AFTER a successful post so a failed post retries next push.
+    // Claim the dedup key BEFORE posting so a near-simultaneous opened+synchronize
+    // pair can't both post. Roll it back if the post fails so the next push retries.
     await env.APP_KV.put(dedupKey, new Date().toISOString(), { expirationTtl: DEDUP_TTL_SECONDS });
+    try {
+      await gh.createIssueComment(owner, repo, prNumber, buildComplianceComment(scan));
+    } catch (postErr) {
+      await env.APP_KV.delete(dedupKey).catch(() => {});
+      throw postErr;
+    }
     logger.info(`Guardian-compliance: flagged ${owner}/${repo}#${prNumber}`, {
       files: scan.findings.map((f) => f.file),
       anyLocal: scan.anyLocal,

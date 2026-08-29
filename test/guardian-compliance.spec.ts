@@ -24,14 +24,29 @@ describe('scanDiffForCompliance', () => {
     expect(scan.findings[0].local).toBe(false);
   });
 
-  it('clears the PR when a guardian-routed line is present', () => {
+  it('clears a file that actually wires guardian (structural signature)', () => {
     const scan = scanDiffForCompliance(diff('src/ai.ts', [
-      `import OpenAI from 'openai';`,
+      `import { GuardianClient } from './lib/guardian/guardian-client';`,
+      `const g = GuardianClient.fromEnv(env);`,
       `const r = await g.ai.run({ provider: 'openai', model: 'gpt-4o-mini', input });`,
-      `// routed via core-guardian`,
     ]));
     expect(scan.guardianPresent).toBe(true);
     expect(scan.findings).toHaveLength(0);
+  });
+
+  it('is NOT defeated by a bare core-guardian mention next to a real provider call', () => {
+    const scan = scanDiffForCompliance(diff('src/ai.ts', [
+      `// TODO: route through core-guardian eventually`,
+      `const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });`,
+    ]));
+    expect(scan.findings).toHaveLength(1);
+  });
+
+  it('does not let a guardian helper in one file launder a raw provider call in another', () => {
+    const raw = diff('src/guardian-setup.ts', [`const g = GuardianClient.fromEnv(env);`])
+      + diff('src/bypass.ts', [`const client = new OpenAI(); await client.chat.completions.create({});`]);
+    const scan = scanDiffForCompliance(raw);
+    expect(scan.findings.map((f) => f.file)).toEqual(['src/bypass.ts']);
   });
 
   it('marks a local Ollama call and surfaces the local note', () => {
