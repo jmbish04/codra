@@ -1,4 +1,5 @@
 import { AIChatAgent } from "@cloudflare/ai-chat";
+import { runGuardianAgent, lastUserText } from "@server/services/guardian-agent";
 import { GithubConnector } from "./codemode";
 import {
   createCodemodeRuntime,
@@ -47,11 +48,17 @@ export class ReviewAgent extends AIChatAgent<any> {
   }
 
   async onChatMessage(): Promise<Response> {
-    // TODO(guardian-agents): this reviewer streams tool-calls (post PR review
-    // comments) through the Vercel AI SDK. All AI now routes through
-    // core-guardian, which does not yet expose a streaming/tool-calling surface
-    // the AI SDK can drive. Deferred — the live automated review runs in model.ts.
-    void codeReviewSkill; void cloudflareJediSkill; void workersBestPracticesSkill;
-    throw new Error('ReviewAgent chat is pending migration to core-guardian streaming/tool-calling; unavailable.');
+    // Runs the reviewer loop through core-guardian via the OpenAI Agents SDK — no
+    // Cloudflare Agents SDK / Durable Object LLM loop. TODO(guardian-agents):
+    // (1) port the codemode + MCP tools (post PR review comments) to guardian-agent
+    // `Tool`s, and (2) stream the reply. Guardian's OpenAI-compat endpoint is not
+    // live yet, so this 404s until the tracked issue ships.
+    const text = await runGuardianAgent(this.env, {
+      task: "CODE_REVIEW",
+      name: "codra-reviewer",
+      instructions: `You are an expert code reviewer in the Codra review engine. Identify bugs, security issues, and anti-patterns, and give actionable line-level feedback.\n\n=== CODE REVIEW SKILL ===\n${codeReviewSkill}\n=== CLOUDFLARE JEDI SKILL ===\n${cloudflareJediSkill}\n=== WORKERS BEST PRACTICES SKILL ===\n${workersBestPracticesSkill}`,
+      input: lastUserText(this.messages),
+    });
+    return new Response(text, { headers: { "content-type": "text/plain; charset=utf-8" } });
   }
 }

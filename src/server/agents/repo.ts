@@ -1,6 +1,7 @@
 import { Agent } from "agents";
 import { ReviewAgent } from "./review";
 import { logger } from "../core/logger";
+import { runGuardianAgent } from "@server/services/guardian-agent";
 
 export class RepoAgent extends Agent<any> {
   async fetch(request: Request) {
@@ -51,14 +52,19 @@ export class RepoAgent extends Agent<any> {
 
       const results = await Promise.all(reviewPromises);
 
-      // TODO(guardian-agents): the codemode tool-calling aggregation (post a
-      // root-level summary comment) is deferred. All AI now routes through
-      // core-guardian, which does not yet expose a tool-calling/streaming surface
-      // the Vercel AI SDK can drive. This agentic path is not in the live review
-      // flow (model.ts owns automated reviews); re-enable once guardian supports it.
-      logger.warn(
-        `RepoAgent AI aggregation for ${owner}/${repo}#${prNumber} is deferred pending core-guardian tool-calling support; ${results.length} file reviews collected but no summary posted`,
-      );
+      // Aggregate via the OpenAI Agents SDK routed through core-guardian (no
+      // Cloudflare Agents SDK / Durable Object LLM loop). TODO(guardian-agents):
+      // add a `post_pr_comment` guardian-agent tool so the model posts the summary
+      // itself; for now we generate the text and log it (guardian's OpenAI-compat
+      // endpoint is not live yet — this path 404s until the tracked issue ships).
+      const summary = await runGuardianAgent(this.env, {
+        task: "SUMMARY",
+        name: "codra-review-aggregator",
+        instructions:
+          "You are the orchestrator of the Codra code review engine. Summarize the per-file reviews into a concise, professional root-level PR comment, then give a short fix plan for a coding agent or human.",
+        input: `Code reviews for PR #${prNumber} in ${owner}/${repo}:\n\n${results.map((r) => `File: ${r.file}\nSummary: ${r.reviewOutput}`).join("\n\n")}`,
+      });
+      logger.info(`RepoAgent aggregation summary for ${owner}/${repo}#${prNumber}`, { summary });
     } catch (e) {
       logger.error(`Error processing PR: ${e}`);
     }

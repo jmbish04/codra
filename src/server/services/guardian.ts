@@ -20,18 +20,42 @@ import { ProviderRequestError, type ModelResponse, type StructuredSchema } from 
 
 /** Codra's project id in guardian — usage/budgets are tracked against it. */
 const GUARDIAN_PROJECT = 'codra';
-/**
- * Preferred provider hint; guardian's resolver + task routing pick the actual
- * model (`model: 'auto'`). Ollama Cloud is the strongest/cheapest for coding, so
- * it leads; guardian falls back across providers on its own.
- */
-const DEFAULT_PROVIDER = 'ollama';
-const DEFAULT_MODEL = 'auto';
 /** Service bindings ignore the host; this is a placeholder origin. */
 const GUARDIAN_ORIGIN = 'https://core-guardian';
 
-export type GuardianImportance = 'low' | 'medium' | 'high';
+export type GuardianLevel = 'low' | 'medium' | 'high';
+export type GuardianImportance = GuardianLevel;
+export type GuardianUseCase = 'coding' | 'reasoning' | 'summarization' | 'classification';
 export type GuardianTask = 'CODE_REVIEW' | 'CHANGELOG' | 'SUMMARY' | 'PLAN_REVIEW' | 'MERGE_REVIEW';
+
+/**
+ * Routing intent Codra sends instead of a provider/model. Guardian reads these to
+ * route to the best-available service at the lowest cost — Codra never names a
+ * provider. Per-task defaults live in {@link TASK_ROUTING}.
+ */
+export type GuardianRouting = {
+  useCase: GuardianUseCase;
+  reasoning: GuardianLevel;
+  complexity: GuardianLevel;
+  importance: GuardianImportance;
+};
+
+const TASK_ROUTING: Record<GuardianTask, GuardianRouting> = {
+  CODE_REVIEW: { useCase: 'coding', reasoning: 'medium', complexity: 'medium', importance: 'medium' },
+  PLAN_REVIEW: { useCase: 'reasoning', reasoning: 'high', complexity: 'medium', importance: 'medium' },
+  MERGE_REVIEW: { useCase: 'reasoning', reasoning: 'high', complexity: 'high', importance: 'high' },
+  CHANGELOG: { useCase: 'summarization', reasoning: 'low', complexity: 'low', importance: 'low' },
+  SUMMARY: { useCase: 'summarization', reasoning: 'low', complexity: 'low', importance: 'low' },
+};
+
+/** Resolves the routing intent for a task, applying any per-call overrides. */
+export function routingForTask(task: GuardianTask, overrides?: Partial<GuardianRouting>): GuardianRouting {
+  return { ...TASK_ROUTING[task], ...overrides };
+}
+
+/** Placeholder origin for the GUARDIAN service binding (host is ignored on RPC). */
+export const GUARDIAN_ORIGIN_URL = GUARDIAN_ORIGIN;
+export const GUARDIAN_PROJECT_ID = GUARDIAN_PROJECT;
 
 export type GuardianEnv = Pick<Env, 'GUARDIAN' | 'AI_GATEWAY_TOKEN' | 'DB'>;
 
@@ -92,23 +116,25 @@ async function guardianRun(
   env: GuardianEnv,
   opts: {
     task: GuardianTask;
-    importance: GuardianImportance;
     input: unknown;
-    provider?: string;
-    model?: string;
+    routing?: Partial<GuardianRouting>;
     stream?: boolean;
   },
 ): Promise<RunResult> {
   const token = await getSecretStoreBinding(env, 'AI_GATEWAY_TOKEN');
+  const routing = { ...TASK_ROUTING[opts.task], ...opts.routing };
   const res = await env.GUARDIAN.fetch(`${GUARDIAN_ORIGIN}/api/ai-router/run`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify({
       project: GUARDIAN_PROJECT,
       task: opts.task,
-      importance: opts.importance,
-      provider: opts.provider ?? DEFAULT_PROVIDER,
-      model: opts.model ?? DEFAULT_MODEL,
+      // Routing intent only — Codra names no provider/model. Guardian routes to
+      // the best-available service at the lowest cost from these signals.
+      use_case: routing.useCase,
+      reasoning: routing.reasoning,
+      complexity: routing.complexity,
+      importance: routing.importance,
       input: opts.input,
       stream: opts.stream ?? false,
     }),
@@ -159,7 +185,7 @@ export async function reviewViaGuardian(
     input: { systemPrompt: string; userPrompt: string };
     schema: StructuredSchema;
     task?: GuardianTask;
-    importance?: GuardianImportance;
+    routing?: Partial<GuardianRouting>;
   },
 ): Promise<ModelResponse> {
   const task = params.task ?? 'CODE_REVIEW';
@@ -173,7 +199,7 @@ export async function reviewViaGuardian(
 
   const run = await guardianRun(env, {
     task,
-    importance: params.importance ?? 'medium',
+    routing: params.routing,
     input: buildChatInput(messages, params.schema),
   });
 
@@ -199,7 +225,7 @@ export async function reviewViaGuardian(
  */
 export async function generateViaGuardian(
   env: GuardianEnv,
-  params: { system?: string; prompt: string; task: GuardianTask; importance?: GuardianImportance },
+  params: { system?: string; prompt: string; task: GuardianTask; routing?: Partial<GuardianRouting> },
 ): Promise<string> {
   const messages: ChatMessage[] = [
     ...(params.system ? [{ role: 'system' as const, content: params.system }] : []),
@@ -207,7 +233,7 @@ export async function generateViaGuardian(
   ];
   const run = await guardianRun(env, {
     task: params.task,
-    importance: params.importance ?? 'medium',
+    routing: params.routing,
     input: buildChatInput(messages),
   });
   await logGuardianUsage(env, run);

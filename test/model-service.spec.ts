@@ -101,10 +101,14 @@ describe('ModelService', () => {
       userPrompt: 'user',
     });
 
-    // Guardian owns model selection (task = CODE_REVIEW, model = auto).
+    // Codra sends routing intent only — no provider/model. Guardian routes.
     expect(body.project).toBe('codra');
     expect(body.task).toBe('CODE_REVIEW');
-    expect(body.model).toBe('auto');
+    expect(body.provider).toBeUndefined();
+    expect(body.model).toBeUndefined();
+    expect(body.use_case).toBe('coding');
+    expect(body.reasoning).toBe('medium');
+    expect(body.complexity).toBe('medium');
     expect(body.input.response_format).toMatchObject({ type: 'json_schema', json_schema: { name: 'codra_file_review', strict: true } });
     expect(response.provider).toBe('ollama');
     expect(response.rawText).toContain('findings');
