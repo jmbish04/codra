@@ -47,7 +47,7 @@ export async function resolveTestBaseUrl(
     const name = (JSON.parse(stripped) as { name?: string }).name;
     if (!name) return null;
 
-    const [apiToken, accountId] = await Promise.all([env.CF_API_TOKEN.get(), env.CF_ACCOUNT_ID.get()]);
+    const [apiToken, accountId] = await Promise.all([env.cf_paid_api_token.get(), env.cf_paid_account_id.get()]);
     if (!apiToken || !accountId) return null;
 
     // Confirm the Worker is actually deployed.

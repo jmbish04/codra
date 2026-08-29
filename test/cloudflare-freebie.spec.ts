@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resolveWorkersAiAccounts, runWorkersAiWithFallback } from '@server/models/workers-ai';
+import { generateText } from 'ai';
+import { resolveWorkersAiAccounts, runWorkersAiWithFallback, withWorkersAi } from '@server/models/workers-ai';
+import { getApiUsageStats } from '@server/db/api-usage';
 import { createTestEnv } from './helpers';
 
 const PAYLOAD = { messages: [{ role: 'user', content: 'hi' }] };
 
 function withFreebie(env: any) {
-  env.CF_FREEBIE_API_TOKEN = { get: async () => 'freebie-token' };
-  env.CF_FREEBIE_ACCOUNT_ID = { get: async () => 'freebie-acct' };
+  env.cf_free_api_token = { get: async () => 'freebie-token' };
+  env.cf_free_account_id = { get: async () => 'freebie-acct' };
   return env;
 }
 
@@ -21,7 +23,7 @@ describe('Workers AI account resolution + REST fallback', () => {
 
   it('orders the free account before the primary account', async () => {
     const accounts = await resolveWorkersAiAccounts(withFreebie(createTestEnv()));
-    expect(accounts.map((a) => a.label)).toEqual(['freebie', 'primary']);
+    expect(accounts.map((a) => a.label)).toEqual(['free', 'paid']);
     expect(accounts[0].accountId).toBe('freebie-acct');
   });
 
@@ -29,7 +31,7 @@ describe('Workers AI account resolution + REST fallback', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(ok('from-freebie'));
     const { account } = await runWorkersAiWithFallback(withFreebie(createTestEnv()), '@cf/some/model', PAYLOAD);
 
-    expect(account.label).toBe('freebie');
+    expect(account.label).toBe('free');
     expect(String(fetchMock.mock.calls[0][0])).toBe(
       'https://api.cloudflare.com/client/v4/accounts/freebie-acct/ai/run/@cf/some/model',
     );
@@ -44,7 +46,7 @@ describe('Workers AI account resolution + REST fallback', () => {
 
     const { account } = await runWorkersAiWithFallback(withFreebie(createTestEnv()), '@cf/some/model', PAYLOAD);
 
-    expect(account.label).toBe('primary');
+    expect(account.label).toBe('paid');
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -52,7 +54,7 @@ describe('Workers AI account resolution + REST fallback', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(ok('from-primary'));
     const { account } = await runWorkersAiWithFallback(createTestEnv(), '@cf/some/model', PAYLOAD);
 
-    expect(account.label).toBe('primary');
+    expect(account.label).toBe('paid');
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -67,5 +69,24 @@ describe('Workers AI account resolution + REST fallback', () => {
       runWorkersAiWithFallback(withFreebie(createTestEnv()), '@cf/some/model', PAYLOAD),
     ).rejects.toThrow('Workers AI REST 500');
     expect(fetchMock).toHaveBeenCalledOnce(); // freebie only; no primary fallback
+  });
+
+  it('withWorkersAi transparently falls the AI-SDK call over free→paid and logs the serving account', async () => {
+    const env = withFreebie(createTestEnv());
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) =>
+      String(url).includes('freebie-acct')
+        ? new Response('daily free allocation exceeded', { status: 429 })
+        : new Response(JSON.stringify({ result: { response: 'from-paid', usage: { prompt_tokens: 3, completion_tokens: 2 } } }), { status: 200 }),
+    );
+
+    const { text } = await withWorkersAi(env, '@cf/some/model', (model) =>
+      generateText({ model, prompt: 'hi' }),
+    );
+
+    expect(text).toBe('from-paid'); // free 429 → auto fallback to paid, invoker never chose
+    await new Promise((r) => setTimeout(r, 0)); // let the fire-and-forget usage log flush
+    const usage = await getApiUsageStats(env);
+    const row = usage.find((u) => u.model === '@cf/some/model');
+    expect(row?.account_label).toBe('paid'); // usage attributed to the account that served
   });
 });

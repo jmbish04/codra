@@ -1,5 +1,5 @@
 import { AIChatAgent } from "@cloudflare/ai-chat";
-import { logStreamedWorkersAiUsage, resolveWorkersAiProvider } from "@server/models/workers-ai";
+import { withWorkersAi } from "@server/models/workers-ai";
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { GithubConnector } from "./codemode";
 import {
@@ -18,7 +18,7 @@ export class ReviewAgent extends AIChatAgent<any> {
     await this.addMcpServer("cloudflare-docs", "https://docs.mcp.cloudflare.com/mcp");
 
     try {
-      const token = await getSecretStoreBinding(this.env, "CF_API_TOKEN");
+      const token = await getSecretStoreBinding(this.env, "cf_paid_api_token");
       if (token && token.trim().length > 0) {
         await this.addMcpServer("cloudflare-api", "https://mcp.cloudflare.com/mcp", {
           transport: {
@@ -49,12 +49,8 @@ export class ReviewAgent extends AIChatAgent<any> {
   }
 
   async onChatMessage() {
-    const { workersai, account } = await resolveWorkersAiProvider(this.env);
-
-    const result = streamText({
-      model: workersai("@cf/moonshotai/kimi-k2.7-code", {
-        sessionAffinity: this.sessionAffinity,
-      }),
+    const result = await withWorkersAi(this.env, "@cf/moonshotai/kimi-k2.7-code", async (model) => streamText({
+      model,
       system: `
         You are an expert code reviewer acting as a subagent in the Codra code review engine.
         Your task is to review a specific file provided in the PR or commit diff, identify issues, and provide actionable feedback.
@@ -87,9 +83,8 @@ export class ReviewAgent extends AIChatAgent<any> {
         ...this.mcp.getAITools(),
       },
       stopWhen: stepCountIs(10),
-    });
+    }), { sessionAffinity: this.sessionAffinity });
 
-    logStreamedWorkersAiUsage(this.env, "@cf/moonshotai/kimi-k2.7-code", account, result.usage);
     return result.toUIMessageStreamResponse();
   }
 }

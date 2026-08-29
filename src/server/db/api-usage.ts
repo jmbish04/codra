@@ -79,11 +79,11 @@ export async function syncGatewayUsage(env: any) {
   }
 
   try {
-    const accountId = await getSecretStoreBinding(env, 'CF_ACCOUNT_ID');
-    const apiToken = await getSecretStoreBinding(env, 'CF_API_TOKEN');
+    const accountId = await getSecretStoreBinding(env, 'cf_paid_account_id');
+    const apiToken = await getSecretStoreBinding(env, 'cf_paid_api_token');
 
     if (!accountId || !apiToken) {
-      logger.warn('CF_ACCOUNT_ID or CF_API_TOKEN missing. Skipping AI Gateway sync.');
+      logger.warn('cf_paid_account_id or cf_paid_api_token missing. Skipping AI Gateway sync.');
       return;
     }
 

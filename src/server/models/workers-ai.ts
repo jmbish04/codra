@@ -1,18 +1,18 @@
-import { createWorkersAI, type WorkersAI } from 'workers-ai-provider';
+import { createClientFallbackModel, createWorkersAI } from 'workers-ai-provider';
 import { logger } from '@server/core/logger';
 import { getSecretStoreBinding } from '@server/utils/secrets';
 import { logApiUsage } from '@server/db/api-usage';
 
 /**
  * A Cloudflare account we can run Workers AI on via the REST API. `label`
- * distinguishes the free daily-allocation account ('freebie') from this
- * account ('primary') so per-account usage can be tracked in D1.
+ * distinguishes the free daily-allocation account ('free') from the paid
+ * account ('paid') so per-account usage can be tracked in D1.
  */
-export type CfAiAccount = { accountId: string; apiKey: string; label: 'freebie' | 'primary' };
+export type CfAiAccount = { accountId: string; apiKey: string; label: 'free' | 'paid' };
 
 export type WorkersAiAccountEnv = Pick<
   Env,
-  'CF_FREEBIE_ACCOUNT_ID' | 'CF_FREEBIE_API_TOKEN' | 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'
+  'cf_free_account_id' | 'cf_free_api_token' | 'cf_paid_account_id' | 'cf_paid_api_token'
 >;
 
 type UsageLike = {
@@ -43,23 +43,23 @@ async function tryGetSecretStore<K extends keyof Env>(env: Pick<Env, K>, name: K
  */
 export async function resolveWorkersAiAccounts(env: WorkersAiAccountEnv): Promise<CfAiAccount[]> {
   const [freebieAccountId, freebieToken, accountId, apiToken] = await Promise.all([
-    tryGetSecretStore(env, 'CF_FREEBIE_ACCOUNT_ID'),
-    tryGetSecretStore(env, 'CF_FREEBIE_API_TOKEN'),
-    tryGetSecretStore(env, 'CF_ACCOUNT_ID'),
-    tryGetSecretStore(env, 'CF_API_TOKEN'),
+    tryGetSecretStore(env, 'cf_free_account_id'),
+    tryGetSecretStore(env, 'cf_free_api_token'),
+    tryGetSecretStore(env, 'cf_paid_account_id'),
+    tryGetSecretStore(env, 'cf_paid_api_token'),
   ]);
 
   const accounts: CfAiAccount[] = [];
   if (freebieAccountId && freebieToken) {
-    accounts.push({ accountId: freebieAccountId, apiKey: freebieToken, label: 'freebie' });
+    accounts.push({ accountId: freebieAccountId, apiKey: freebieToken, label: 'free' });
   }
   if (accountId && apiToken) {
-    accounts.push({ accountId, apiKey: apiToken, label: 'primary' });
+    accounts.push({ accountId, apiKey: apiToken, label: 'paid' });
   }
 
   if (accounts.length === 0) {
     throw new Error(
-      'No Cloudflare Workers AI account configured (need CF_ACCOUNT_ID + CF_API_TOKEN, or CF_FREEBIE_ACCOUNT_ID + CF_FREEBIE_API_TOKEN).',
+      'No Cloudflare Workers AI account configured (need cf_paid_account_id + cf_paid_api_token, or cf_free_account_id + cf_free_api_token).',
     );
   }
   return accounts;
@@ -166,62 +166,62 @@ export async function runWorkersAiWithFallback(
 }
 
 /**
- * Resolves a REST-backed provider for the highest-priority account (free first).
- * For streaming calls that can't retry mid-stream — pair with
- * {@link logStreamedWorkersAiUsage} to record usage once the stream settles.
+ * Wraps a language model so the account it actually served on is recorded — the
+ * `doGenerate`/`doStream` that resolves marks its account (free unless a fallback
+ * to paid occurred). Everything else passes through untouched.
  */
-export async function resolveWorkersAiProvider(
-  env: WorkersAiAccountEnv,
-): Promise<{ workersai: WorkersAI; account: CfAiAccount }> {
-  const [account] = await resolveWorkersAiAccounts(env);
-  return { workersai: createWorkersAI({ accountId: account.accountId, apiKey: account.apiKey }), account };
-}
-
-/** Fire-and-forget usage logging for a streamed generation's `.usage` promise. */
-export function logStreamedWorkersAiUsage(
-  env: { DB: D1Database },
-  model: string,
-  account: CfAiAccount,
-  usage: PromiseLike<UsageLike>,
-) {
-  Promise.resolve(usage)
-    .then((u) => logWorkersAiUsage(env, { model, account, ...usageTokens(u) }))
-    .catch(() => {});
+function markServed(model: unknown, onServed: () => void): unknown {
+  return new Proxy(model as object, {
+    get(target, prop, receiver) {
+      if (prop === 'doGenerate' || prop === 'doStream') {
+        const fn = (target as Record<string, any>)[prop].bind(target);
+        return async (options: unknown) => {
+          const result = await fn(options);
+          onServed();
+          return result;
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
 }
 
 /**
- * Runs an AI-SDK generate call (`generateText` / `generateObject`) on the free
- * account first, falling back to this account on quota exhaustion, and logs the
- * resulting token usage to D1 tagged with the account. The callback receives a
- * REST-backed `workers-ai-provider` instance.
+ * Builds a Workers-AI language model that the caller uses like any other AI-SDK
+ * model — no account, fallback, or logging concerns. Every call runs on the free
+ * account first and automatically falls back to the paid account if the free one
+ * fails (e.g. daily allocation exhausted). Token usage is logged to D1 tagged
+ * with the account that served, for both `generateText` and `streamText`.
+ *
+ * `run` receives the model and returns the AI-SDK result (awaited or streaming);
+ * `opts` are per-model provider settings (e.g. `sessionAffinity`).
  */
-export async function generateWithWorkersAi<T extends { usage?: UsageLike }>(
+export async function withWorkersAi<T extends { usage?: PromiseLike<UsageLike> | UsageLike }>(
   env: WorkersAiAccountEnv & { DB: D1Database },
   model: string,
-  run: (workersai: WorkersAI) => Promise<T>,
+  run: (languageModel: any) => T | Promise<T>,
+  opts?: Record<string, unknown>,
 ): Promise<T> {
   const accounts = await resolveWorkersAiAccounts(env);
-  let lastError: unknown;
+  let served: CfAiAccount = accounts[0];
 
-  for (let i = 0; i < accounts.length; i++) {
-    const account = accounts[i];
-    const workersai = createWorkersAI({ accountId: account.accountId, apiKey: account.apiKey });
-    try {
-      const result = await run(workersai);
-      const { promptTokens, completionTokens } = usageTokens(result.usage);
-      await logWorkersAiUsage(env, { model, account, promptTokens, completionTokens });
-      return result;
-    } catch (error) {
-      lastError = error;
-      const status = (error as { status?: number; statusCode?: number })?.statusCode
-        ?? (error as { status?: number })?.status;
-      const message = error instanceof Error ? error.message : String(error);
-      if (i < accounts.length - 1 && isWorkersAiQuotaError({ status, message })) {
-        logger.info(`Workers AI account '${account.label}' out of quota; falling back to the next account`, { model });
-        continue;
-      }
-      throw error;
-    }
-  }
-  throw lastError;
+  const legs = accounts.map((account) => {
+    const base = createWorkersAI({ accountId: account.accountId, apiKey: account.apiKey })(model as any, opts as any);
+    return {
+      slug: `${account.label}:${model}`,
+      transport: 'run' as const,
+      model: markServed(base, () => { served = account; }),
+    };
+  });
+
+  const languageModel = createClientFallbackModel(legs as any);
+  const result = await run(languageModel);
+
+  // Usage comes from the AI-SDK's normalized outer result; attribute it to the
+  // account that served (streamText's usage settles after the stream completes).
+  Promise.resolve(result.usage as PromiseLike<UsageLike> | UsageLike | undefined)
+    .then((u) => (u ? logWorkersAiUsage(env, { model, account: served, ...usageTokens(u) }) : undefined))
+    .catch(() => {});
+
+  return result;
 }

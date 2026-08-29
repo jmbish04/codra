@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { AIChatAgent } from "@cloudflare/ai-chat";
-import { logStreamedWorkersAiUsage, resolveWorkersAiProvider } from "@server/models/workers-ai";
+import { withWorkersAi } from "@server/models/workers-ai";
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { routeAgentRequest, callable } from "agents";
 import {
@@ -356,7 +356,7 @@ export class Chat extends AIChatAgent<any> {
     await this.addMcpServer("cloudflare-docs", "https://docs.mcp.cloudflare.com/mcp");
 
     try {
-      const token = await getSecretStoreBinding(this.env, "CF_API_TOKEN");
+      const token = await getSecretStoreBinding(this.env, "cf_paid_api_token");
       if (token && token.trim().length > 0) {
         await this.addMcpServer("cloudflare-api", "https://mcp.cloudflare.com/mcp", {
           transport: {
@@ -404,12 +404,8 @@ export class Chat extends AIChatAgent<any> {
   }
 
   async onChatMessage() {
-    const { workersai, account } = await resolveWorkersAiProvider(this.env);
-
-    const result = streamText({
-      model: workersai("@cf/moonshotai/kimi-k2.7-code", {
-        sessionAffinity: this.sessionAffinity,
-      }),
+    const result = await withWorkersAi(this.env, "@cf/moonshotai/kimi-k2.7-code", async (model) => streamText({
+      model,
       system: `
         You are a helpful assistant with a \`codemode\` tool that runs TypeScript.
         Inside the sandbox:
@@ -432,9 +428,8 @@ export class Chat extends AIChatAgent<any> {
         ...this.mcp.getAITools(),
       },
       stopWhen: stepCountIs(10),
-    });
+    }), { sessionAffinity: this.sessionAffinity });
 
-    logStreamedWorkersAiUsage(this.env, "@cf/moonshotai/kimi-k2.7-code", account, result.usage);
     return result.toUIMessageStreamResponse();
   }
 

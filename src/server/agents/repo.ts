@@ -2,7 +2,7 @@ import { Agent } from "agents";
 import { ReviewAgent } from "./review";
 import { logger } from "../core/logger";
 import { generateText } from "ai";
-import { generateWithWorkersAi } from "@server/models/workers-ai";
+import { withWorkersAi } from "@server/models/workers-ai";
 import { GithubConnector } from "./codemode";
 import { createCodemodeRuntime, DynamicWorkerExecutor } from "@cloudflare/codemode";
 
@@ -74,9 +74,9 @@ export class RepoAgent extends Agent<any> {
         Assume you have access to the tool via codemode.
       `;
 
-      await generateWithWorkersAi(this.env, "@cf/moonshotai/kimi-k2.7-code", (workersai) =>
+      await withWorkersAi(this.env, "@cf/moonshotai/kimi-k2.7-code", (model) =>
         generateText({
-          model: workersai("@cf/moonshotai/kimi-k2.7-code"),
+          model,
           system: "You are the orchestrator of the Codra code review engine. You have a `codemode` tool. Use `github.create_issue_comment(owner, repo, issue_number, body)` to post your summary.",
           prompt: summaryPrompt,
           tools: {

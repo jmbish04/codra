@@ -17,8 +17,8 @@ import { logger } from '@server/core/logger';
  *                              the main REVIEW_QUEUE for a fresh attempt.
  *   POST /api/dlq/purge    – Ack all current DLQ messages (discard).
  *
- * Note: Cloudflare's pull-queue API requires a CF_API_TOKEN with
- *       Queues:Edit permissions. Add CF_API_TOKEN and CF_ACCOUNT_ID as
+ * Note: Cloudflare's pull-queue API requires a cf_paid_api_token with
+ *       Queues:Edit permissions. Add cf_paid_api_token and cf_paid_account_id as
  *       Worker secrets, and CF_DLQ_ID as a required var (see .dev.vars.example).
  */
 
@@ -73,13 +73,13 @@ export function createDlqRouter() {
     const batchSize = Math.min(Number(limit) || 20, 100);
 
     const [apiToken, accountId] = await Promise.all([
-      c.env.CF_API_TOKEN.get(),
-      c.env.CF_ACCOUNT_ID.get(),
+      c.env.cf_paid_api_token.get(),
+      c.env.cf_paid_account_id.get(),
     ]);
     const dlqId = c.env.CF_DLQ_ID;
 
     if (!apiToken || !accountId || !dlqId) {
-      return jsonError('CF_API_TOKEN, CF_ACCOUNT_ID, and CF_DLQ_ID are required DLQ installation configuration for inspection.', 503);
+      return jsonError('cf_paid_api_token, cf_paid_account_id, and CF_DLQ_ID are required DLQ installation configuration for inspection.', 503);
     }
 
     try {
@@ -121,13 +121,13 @@ export function createDlqRouter() {
     }
 
     const [apiToken, accountId] = await Promise.all([
-      c.env.CF_API_TOKEN.get(),
-      c.env.CF_ACCOUNT_ID.get(),
+      c.env.cf_paid_api_token.get(),
+      c.env.cf_paid_account_id.get(),
     ]);
     const dlqId = c.env.CF_DLQ_ID;
 
     if (!apiToken || !accountId || !dlqId) {
-      return jsonError('CF_API_TOKEN, CF_ACCOUNT_ID, and CF_DLQ_ID are required DLQ installation configuration for replay.', 503);
+      return jsonError('cf_paid_api_token, cf_paid_account_id, and CF_DLQ_ID are required DLQ installation configuration for replay.', 503);
     }
 
     // Step 1 – pull the specific messages so we have their bodies.
@@ -208,13 +208,13 @@ export function createDlqRouter() {
     }
 
     const [apiToken, accountId] = await Promise.all([
-      c.env.CF_API_TOKEN.get(),
-      c.env.CF_ACCOUNT_ID.get(),
+      c.env.cf_paid_api_token.get(),
+      c.env.cf_paid_account_id.get(),
     ]);
     const dlqId = c.env.CF_DLQ_ID;
 
     if (!apiToken || !accountId || !dlqId) {
-      return jsonError('CF_API_TOKEN, CF_ACCOUNT_ID, and CF_DLQ_ID are required DLQ installation configuration for purge.', 503);
+      return jsonError('cf_paid_api_token, cf_paid_account_id, and CF_DLQ_ID are required DLQ installation configuration for purge.', 503);
     }
 
     try {

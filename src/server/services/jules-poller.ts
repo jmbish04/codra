@@ -1,5 +1,5 @@
 import { generateText } from 'ai';
-import { generateWithWorkersAi } from '@server/models/workers-ai';
+import { withWorkersAi } from '@server/models/workers-ai';
 import { eq } from 'drizzle-orm';
 import { getDb } from '@server/db/client';
 import { repositories } from '@server/db/schemas';
@@ -58,7 +58,7 @@ export async function startPlanningSession(
 type PollerEnv = Pick<
   Env,
   'DB' | 'JULES_API_KEY' | 'PLANNING_ARTIFACTS'
-  | 'CF_FREEBIE_ACCOUNT_ID' | 'CF_FREEBIE_API_TOKEN' | 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'
+  | 'cf_free_account_id' | 'cf_free_api_token' | 'cf_paid_account_id' | 'cf_paid_api_token'
 >;
 
 /** Cron entry point. No-op when no active tasks — the tick returns immediately. */
@@ -92,13 +92,13 @@ export async function advanceTaskById(env: PollerEnv, taskId: string): Promise<{
 }
 
 async function reviewWithKimi(
-  env: Pick<Env, 'DB' | 'CF_FREEBIE_ACCOUNT_ID' | 'CF_FREEBIE_API_TOKEN' | 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'>,
+  env: Pick<Env, 'DB' | 'cf_free_account_id' | 'cf_free_api_token' | 'cf_paid_account_id' | 'cf_paid_api_token'>,
   title: string,
   revisionJson: string,
 ): Promise<{ satisfied: boolean; feedback: string }> {
-  const { text } = await generateWithWorkersAi(env, REVIEW_MODEL, (workersai) =>
+  const { text } = await withWorkersAi(env, REVIEW_MODEL, (model) =>
     generateText({
-      model: workersai(REVIEW_MODEL as any),
+      model,
       system: 'You are the codra orchestrator. Judge plans strictly and reply only with the requested JSON block.',
       prompt: buildReviewPrompt({ title, revisionJson }),
     }),

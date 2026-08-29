@@ -8,7 +8,7 @@ import {
 import type { CfAiAccount } from '@server/models/workers-ai';
 
 const MODEL = '@cf/moonshotai/kimi-k2.7-code';
-const ACCOUNT: CfAiAccount = { accountId: 'acct-1', apiKey: 'tok', label: 'primary' };
+const ACCOUNT: CfAiAccount = { accountId: 'acct-1', apiKey: 'tok', label: 'paid' };
 
 /** Stubs the Workers AI REST endpoint. `result` is wrapped in the `{ result }`
  *  envelope the API returns; the last request's parsed body is captured. */

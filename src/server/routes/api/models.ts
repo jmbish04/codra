@@ -167,8 +167,8 @@ async function syncProviderModelCatalog(env: AppEnv['Bindings']) {
         apiFormat: provider.apiFormat,
         baseUrl: provider.baseUrl,
         apiKey,
-        cloudflareAccountId: await optionalSecret(env.CF_ACCOUNT_ID),
-        cloudflareApiToken: await optionalSecret(env.CF_API_TOKEN),
+        cloudflareAccountId: await optionalSecret(env.cf_paid_account_id),
+        cloudflareApiToken: await optionalSecret(env.cf_paid_api_token),
       });
       await upsertDiscoveredModelConfigs(env, {
         providerId: provider.id,

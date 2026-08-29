@@ -116,7 +116,7 @@ type EnsureDeployWorkflowJob = {
 
 /** Best-effort: gate → open a separate deploy-workflow PR → set Cloudflare Actions secrets → record the action. Never throws. */
 export async function ensureDeployWorkflow(
-  env: Pick<Env, 'DB' | 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'>,
+  env: Pick<Env, 'DB' | 'cf_paid_account_id' | 'cf_paid_api_token'>,
   job: EnsureDeployWorkflowJob,
   github: GitHubService,
   config: RepoConfig,
@@ -153,10 +153,10 @@ export async function ensureDeployWorkflow(
       branch: branchName,
     });
 
-    const accountId = await getSecretStoreBinding(env, 'CF_ACCOUNT_ID').catch(() => '');
-    const apiToken = await getSecretStoreBinding(env, 'CF_API_TOKEN').catch(() => '');
+    const accountId = await getSecretStoreBinding(env, 'cf_paid_account_id').catch(() => '');
+    const apiToken = await getSecretStoreBinding(env, 'cf_paid_api_token').catch(() => '');
 
-    let secretResult: { ok: boolean; set: string[]; reason?: string } = { ok: false, set: [], reason: 'CF_ACCOUNT_ID or CF_API_TOKEN secret store binding is empty' };
+    let secretResult: { ok: boolean; set: string[]; reason?: string } = { ok: false, set: [], reason: 'cf_paid_account_id or cf_paid_api_token secret store binding is empty' };
     if (accountId && apiToken) {
       secretResult = await setRepoActionsSecrets(github, owner, repo, [
         { name: 'CLOUDFLARE_ACCOUNT_ID', value: accountId },

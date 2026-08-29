@@ -227,7 +227,7 @@ export class ModelService {
     let resolvedBaseUrl = config.baseUrl;
     if (this.env.AI_GATEWAY_ID) {
       try {
-        const accountId = await getSecretStoreBinding(this.env, 'CF_ACCOUNT_ID');
+        const accountId = await getSecretStoreBinding(this.env, 'cf_paid_account_id');
         resolvedBaseUrl = `https://gateway.ai.cloudflare.com/v1/${accountId}/${this.env.AI_GATEWAY_ID}`;
         if (accountId) {
           if (config.apiFormat === 'openai') {
@@ -239,7 +239,7 @@ export class ModelService {
           }
         }
       } catch (err) {
-        logger.warn('Failed to resolve CF_ACCOUNT_ID for AI Gateway routing', err);
+        logger.warn('Failed to resolve cf_paid_account_id for AI Gateway routing', err);
       }
     }
 

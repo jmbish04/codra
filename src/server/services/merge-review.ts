@@ -1,5 +1,5 @@
 import { generateText } from 'ai';
-import { generateWithWorkersAi } from '@server/models/workers-ai';
+import { withWorkersAi } from '@server/models/workers-ai';
 import { buildMergeReviewPrompt, parseReviewVerdict } from '@server/services/plan-orchestrator';
 import { countReviewAttempts, recordReview } from '@server/db/reconciliation-reviews';
 
@@ -14,7 +14,7 @@ export type MergeReviewResult = { approved: boolean; feedback: string; attempt: 
  * rejected reconciliation can never loop into an unbounded re-merge.
  */
 export async function reviewReconciliation(
-  env: Pick<Env, 'DB' | 'CF_FREEBIE_ACCOUNT_ID' | 'CF_FREEBIE_API_TOKEN' | 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'>,
+  env: Pick<Env, 'DB' | 'cf_free_account_id' | 'cf_free_api_token' | 'cf_paid_account_id' | 'cf_paid_api_token'>,
   input: { repositoryId: number; repository: string; reconciliationKey: string; summary: string; prNumber?: number | null },
 ): Promise<MergeReviewResult> {
   const prior = await countReviewAttempts(env, input.reconciliationKey);
@@ -25,9 +25,9 @@ export async function reviewReconciliation(
     return { approved: false, feedback: 'circuit breaker tripped', attempt, reason: 'max_attempts' };
   }
 
-  const { text } = await generateWithWorkersAi(env, REVIEW_MODEL, (workersai) =>
+  const { text } = await withWorkersAi(env, REVIEW_MODEL, (model) =>
     generateText({
-      model: workersai(REVIEW_MODEL as any),
+      model,
       system: 'You are the codra orchestrator. Judge merge reconciliations strictly and reply only with the requested JSON block.',
       prompt: buildMergeReviewPrompt({ repository: input.repository, summary: input.summary }),
     }),
