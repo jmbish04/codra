@@ -17,7 +17,7 @@ concurrency:
 jobs:
   verify:
     name: Verify Stability
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.full_name && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || fromJSON('["self-hosted","Linux","X64","proxmox-actions"]') }}
     services:
       postgres:
         image: postgres:16
