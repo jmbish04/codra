@@ -10,7 +10,7 @@ on:
 
 jobs:
   cla:
-    runs-on: ${{ vars.CI_RUNNER && fromJSON(vars.CI_RUNNER) || 'ubuntu-latest' }}
+    runs-on: ${{ startsWith(vars.CI_RUNNER, '[') && endsWith(vars.CI_RUNNER, ']') && fromJSON(vars.CI_RUNNER) || 'ubuntu-latest' }}
     permissions:
       contents: read
       pull-requests: read
